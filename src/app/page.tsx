@@ -429,12 +429,14 @@ export default function Home() {
   const step4Valid = step3Valid;
   const validity: Record<StepNumber, boolean> = { 1: step1Valid, 2: step2Valid, 3: step3Valid, 4: step4Valid };
 
-  const advanceTo = useCallback((step: StepNumber) => {
+  // Single navigation entry point used for forward (Next), backward (Back),
+  // and direct stepper-bar clicks. Each step has a sensible default overlay
+  // mode that we apply on entry — without this, leaving Step 3 (which uses
+  // 'threshold') for Step 2 (which uses 'suggestions') would show the wrong
+  // overlay until the user toggled it manually.
+  const goToStep = useCallback((step: StepNumber) => {
     setCurrentStep(step);
     setMaxReachedStep(prev => (step > prev ? step : prev));
-    // Each step has a sensible default overlay mode. Switching steps
-    // without nudging the mode would leave Step 3 showing 'suggestions'
-    // (only valid on Step 2), or other cross-step mismatches.
     if (step === 2) setOverlayMode('suggestions');
     else if (step === 3) setOverlayMode('threshold');
   }, []);
@@ -442,16 +444,10 @@ export default function Home() {
   // Step 1's "Next" doubles as Run Analysis. If a fresh result already exists
   // we just advance. Otherwise we run analysis and advance on success.
   const handleStep1Next = useCallback(async () => {
-    if (result) { advanceTo(2); return; }
+    if (result) { goToStep(2); return; }
     const r = await handleAnalyze();
-    if (r) advanceTo(2);
-  }, [result, handleAnalyze, advanceTo]);
-
-  const onStepperClick = useCallback((step: StepNumber) => {
-    setCurrentStep(step);
-    if (step === 2) setOverlayMode('suggestions');
-    else if (step === 3) setOverlayMode('threshold');
-  }, []);
+    if (r) goToStep(2);
+  }, [result, handleAnalyze, goToStep]);
 
   const onSettingsChange = useCallback((s: DFMSettings) => setSettings(s), []);
 
@@ -521,7 +517,7 @@ export default function Home() {
         currentStep={currentStep}
         maxReachedStep={maxReachedStep}
         validity={validity}
-        onStepClick={onStepperClick}
+        onStepClick={goToStep}
       />
 
       <main className="flex-1 overflow-hidden p-6 min-h-0">
@@ -569,8 +565,8 @@ export default function Home() {
             onUpdateWoodConfig={updateWoodConfig}
             onMoveWood={moveWood}
             canAdvance={step2Valid}
-            onBack={() => setCurrentStep(1)}
-            onNext={() => advanceTo(3)}
+            onBack={() => goToStep(1)}
+            onNext={() => goToStep(3)}
           />
         )}
 
@@ -593,8 +589,8 @@ export default function Home() {
             onUpdateWoodConfig={updateWoodConfig}
             onMoveWood={moveWood}
             canAdvance={step3Valid}
-            onBack={() => setCurrentStep(2)}
-            onNext={() => advanceTo(4)}
+            onBack={() => goToStep(2)}
+            onNext={() => goToStep(4)}
           />
         )}
 
@@ -603,7 +599,7 @@ export default function Home() {
             result={result}
             settings={settings}
             onSettingsChange={onSettingsChange}
-            onBack={() => setCurrentStep(3)}
+            onBack={() => goToStep(3)}
           />
         )}
       </main>
