@@ -8,7 +8,7 @@ import { formatMinutes } from '@/lib/machiningTime';
 import DesignCanvas from './DesignCanvas';
 import ResultsPanel from './ResultsPanel';
 
-interface WoodSectionProps {
+interface WoodPanelProps {
   colorHex: string;
   label: string;
   onLabelChange: (label: string) => void;
@@ -33,14 +33,14 @@ interface WoodSectionProps {
   onResetLayer: () => void;
 }
 
-export default function WoodSection({
+export default function WoodPanel({
   colorHex, label, onLabelChange,
   species, onSpeciesChange,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
   analysis, vector, overlayMode, common, settings,
   otherWoodLabels,
   isModified, busyModification, onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
-}: WoodSectionProps) {
+}: WoodPanelProps) {
   const overlay = (side: 'pocket' | 'plug') => {
     if (!analysis) return null;
     if (overlayMode === 'threshold') return analysis[side].overlayDataUrl;
