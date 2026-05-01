@@ -172,7 +172,16 @@ export default function Home() {
 
     generateComposite(vector, woodConfigs, backgroundSpecies)
       .then(url => { if (!token.cancelled) { setCompositeDataUrl(url); setCompositeGenerating(false); } })
-      .catch(() => { if (!token.cancelled) setCompositeGenerating(false); });
+      .catch(err => {
+        if (token.cancelled) return;
+        // Surface the failure: log for debugging and clear the data URL so
+        // the CompositeView's "no preview" placeholder shows up instead of
+        // a frozen "generating…" spinner.
+        // eslint-disable-next-line no-console
+        console.error('Composite render failed:', err);
+        setCompositeDataUrl(null);
+        setCompositeGenerating(false);
+      });
 
     return () => { token.cancelled = true; };
   }, [vector, woodConfigs, backgroundSpecies]);
