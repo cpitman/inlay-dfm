@@ -28,8 +28,26 @@ export interface DFMSettings {
   grainDirection: GrainDirection;
   /** Pixel width of the analysis canvas — controls feature-detection resolution. */
   analysisResolution: AnalysisResolution;
-  /** Diameter of the clearance/end-mill bit (1/8", 1/4", or 1/2"). Used for machining-time estimates. */
+  /**
+   * Diameter of the "primary" clearance bit (1/8", 1/4", or 1/2") used by
+   * per-wood machine-time displays on Step 2 / Step 3. Step 4's matrix
+   * uses `clearanceStrategy` instead — multi-bit modeling lives there.
+   * Kept in sync: matrix selection updates this to the largest bit in the
+   * chosen strategy (or 0.25 default when strategy is empty).
+   */
   clearanceBitDiameterInches: 0.125 | 0.25 | 0.5;
+  /**
+   * Ordered descending list of clearance bit diameters used together for
+   * Step 4's machining-time estimates. Empty array = v-bit only, no
+   * clearance pass. Default is `[0.25]` (single 1/4").
+   */
+  clearanceStrategy: number[];
+  /**
+   * Wall-clock time spent loading or swapping a CNC bit. Each strategy on
+   * Step 4 incurs this cost once per bit it uses (counting the initial
+   * load). Defaults to 5 (manual swap); ATC machines use ~0.5.
+   */
+  toolChangeMinutes: number;
   /**
    * Margin around each plug's convex hull when modeling the plug stock for
    * machining-time estimates. Plug carved area = (convex hull of plug,
@@ -198,9 +216,24 @@ export interface WoodAnalysis {
   layerMachineTimeMinutes: number;
 }
 
-/** Comparison matrix of total machining times across bit combinations. */
+/**
+ * One clearance-bit strategy. Bits are listed largest-to-smallest in the
+ * order they would be run on the CNC. Empty array = no clearance pass,
+ * the v-bit clears the entire pocket. Use one of these per matrix row.
+ */
+export interface ClearanceStrategy {
+  /** Bit diameters in inches, sorted descending. Empty = v-bit only. */
+  diameters: number[];
+  /** Display label like "1/2" → 1/4"" or "V-bit only". */
+  label: string;
+  /** Number of distinct bits used = clearance count + 1 v-bit. Drives the tool-change overhead at display time. */
+  bitCount: number;
+}
+
+/** Comparison matrix of machining times across (clearance strategy × v-bit angle). */
 export interface MachiningTimeMatrix {
-  clearanceBits: { diameterInches: number; mrr: number }[];
+  /** All 2^N subsets of the available clearance bits, plus the empty strategy (v-bit only). Ordered by bit count then descending diameter list. */
+  strategies: ClearanceStrategy[];
   vbits: {
     angleDegrees: number;
     mrr: number;
@@ -212,8 +245,15 @@ export interface MachiningTimeMatrix {
     /** True when at least one (layer × side) pair has an isolated component that can't reach full depth. */
     hasIsolatedComponent: boolean;
   }[];
-  /** times[clearanceIdx][vbitIdx] = total minutes (pocket + plug summed). NaN when V-bit is infeasible. */
-  times: number[][];
+  /**
+   * Active cutting time in minutes per (strategy × vbit), excluding
+   * tool-change overhead. Total wall time = `cuttingTimes[si][vi] +
+   * strategies[si].bitCount * toolChangeMinutes`. Computing total at
+   * render time means the ATC/Manual toggle is reactive without
+   * re-running analysis. NaN when the v-bit angle is infeasible or
+   * when v-bit rates are unavailable.
+   */
+  cuttingTimes: number[][];
 }
 
 export interface AnalysisResult {

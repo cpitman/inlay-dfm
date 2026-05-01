@@ -23,6 +23,8 @@ const DEFAULT_SETTINGS: DFMSettings = {
   grainDirection: 'horizontal',
   analysisResolution: 'default',
   clearanceBitDiameterInches: 0.25,
+  clearanceStrategy: [0.25],
+  toolChangeMinutes: 5,
   plugStockMarginInches: 0.25,
   boardWidthInches: 12,
   boardHeightInches: 9,

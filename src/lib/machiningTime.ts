@@ -15,7 +15,10 @@ export interface MachiningTimeResult {
 }
 
 /**
- * Estimate machining time for one carved area (e.g. one layer's pocket).
+ * Estimate machining time for one carved area (e.g. one layer's pocket)
+ * using a single clearance bit + v-bit. Used by per-wood machine-time
+ * displays on Step 2 / Step 3 — Step 4's matrix uses the strategy-aware
+ * `machiningTimeForStrategy` instead.
  *
  * Model:
  *   - A clearance bit of diameter `clearanceDiameterInches` clears the bulk;
@@ -23,15 +26,6 @@ export interface MachiningTimeResult {
  *     mask. That set is the morphological opening of the mask.
  *   - The V-bit handles the remaining strip (mask − opening) and traces the
  *     full perimeter once for clean edges.
- *
- *   clearanceTime = clearanceArea × depth / clearanceMRR
- *   vbitAreaTime  = (mask − clearanceArea) × depth / vbitMRR
- *   perimeterTime = perimeter / vbitFeed
- *
- * `dist1` is the EDT of the mask (distance from each mask pixel to the
- * nearest non-mask pixel) — `analyzeMask` already produces this for every
- * layer's pocket, so we accept it pre-computed instead of paying for another
- * EDT pass here.
  */
 export function machiningTimeForMask(
   mask: Uint8Array,
@@ -44,20 +38,12 @@ export function machiningTimeForMask(
   clearanceMRR: number,
   vbitMRR: number,
   vbitFeed: number,
-  /**
-   * Optional perimeter (in linear inches) for the V-bit feed-rate pass. When
-   * omitted, the pixel-boundary length of `mask` is used. The plug operation
-   * supplies its pocket's perimeter here, since the V-bit only traces the
-   * plug's *shape* boundary — the outer edge of the stock isn't a precise
-   * pass.
-   */
   perimeterInOverride?: number,
 ): MachiningTimeResult {
   const n = canvasW * canvasH;
   const clearanceRadiusPx = (clearanceDiameterInches * pixelsPerInch) / 2;
   const ppiSq = pixelsPerInch * pixelsPerInch;
 
-  // What the clearance bit can clear inside the mask.
   const opened = morphologicalOpening(mask, dist1, clearanceRadiusPx, canvasW, canvasH);
 
   let clearancePixels = 0, totalMaskPixels = 0;
@@ -70,9 +56,6 @@ export function machiningTimeForMask(
   const clearanceAreaSqIn = clearancePixels / ppiSq;
   const vbitAreaSqIn      = vbitPixels      / ppiSq;
 
-  // Perimeter — pixel boundary length divided by ppi gives an approximate
-  // perimeter in inches. The estimate is fine for time approximation since
-  // each boundary pixel ≈ one linear pixel of perimeter at this resolution.
   let perimeterIn: number;
   if (perimeterInOverride !== undefined) {
     perimeterIn = perimeterInOverride;
@@ -83,7 +66,6 @@ export function machiningTimeForMask(
     perimeterIn = boundaryPixels / pixelsPerInch;
   }
 
-  // Time components, all in minutes.
   const clearanceTimeMin     = clearanceMRR > 0 ? clearanceAreaSqIn * inlayDepthInches / clearanceMRR : 0;
   const vbitAreaTimeMin      = vbitMRR      > 0 ? vbitAreaSqIn      * inlayDepthInches / vbitMRR      : 0;
   const vbitPerimeterTimeMin = vbitFeed     > 0 ? perimeterIn / vbitFeed                              : 0;
@@ -101,16 +83,94 @@ export function machiningTimeForMask(
 }
 
 /**
- * Build the (clearance × V-bit) total-time comparison matrix for one design.
- * Reuses each layer's already-computed pocket and plug-carved masks plus
- * their `dist1` EDTs, so the only extra cost vs. computing one combination
- * is one morphological-opening EDT per (layer × clearance × side) — the
- * V-bit dimension is pure arithmetic.
+ * Format a clearance bit diameter as a fractional inch label.
+ * 0.125 → 1/8", 0.25 → 1/4", 0.5 → 1/2".
+ */
+export function clearanceBitLabel(diameter: number): string {
+  if (diameter === 0.125) return '1/8"';
+  if (diameter === 0.25)  return '1/4"';
+  if (diameter === 0.5)   return '1/2"';
+  return `${diameter.toFixed(3)}"`;
+}
+
+/**
+ * Enumerate every subset of `availableBits` as a `ClearanceStrategy`,
+ * including the empty subset (v-bit only). Diameters within each strategy
+ * are sorted descending (the order they would actually be run on the CNC,
+ * since smaller bits fill the residual the larger ones can't reach).
  *
- * Per cell: sum over layers of `pocketTime + plugTime`, where each side is
- *   `clearanceArea·depth / clearanceMRR + vbitArea·depth / vbitMRR + perim / vbitFeed`
- * and `perim` is the pocket's perimeter (same for both — the plug's V-bit
- * pass traces the plug's *shape* boundary, not the outer stock edge).
+ * Output ordering: by bit count ascending, then by descending-diameter
+ * lexicographic order. With three bits {1/2", 1/4", 1/8"} this produces:
+ *   0. ∅            (V-bit only)
+ *   1. [1/2"]
+ *   2. [1/4"]
+ *   3. [1/8"]
+ *   4. [1/2", 1/4"]
+ *   5. [1/2", 1/8"]
+ *   6. [1/4", 1/8"]
+ *   7. [1/2", 1/4", 1/8"]
+ */
+export function enumerateClearanceStrategies(
+  availableBits: number[],
+): import('@/types').ClearanceStrategy[] {
+  const sorted = [...availableBits].sort((a, b) => b - a); // descending
+  const subsets: number[][] = [[]];
+  for (const bit of sorted) {
+    const next: number[][] = [];
+    for (const s of subsets) {
+      next.push([...s, bit]);
+    }
+    subsets.push(...next);
+  }
+  // Each subset is in descending order because we appended bits in
+  // descending order. Sort the OUTER list by bitCount asc, then by
+  // descending-diameter lexicographic.
+  subsets.sort((a, b) => {
+    if (a.length !== b.length) return a.length - b.length;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return b[i] - a[i];
+    return 0;
+  });
+
+  return subsets.map(diameters => ({
+    diameters,
+    label: diameters.length === 0
+      ? 'V-bit only'
+      : diameters.map(clearanceBitLabel).join(' → '),
+    bitCount: diameters.length + 1, // clearance bits + v-bit
+  }));
+}
+
+/**
+ * Total wall time for a (strategy × v-bit) cell, including tool-change
+ * overhead. The matrix stores cutting time only so the toolChangeMinutes
+ * slider is reactive without recomputing.
+ */
+export function totalCellTime(
+  matrix: import('@/types').MachiningTimeMatrix,
+  strategyIdx: number,
+  vbitIdx: number,
+  toolChangeMinutes: number,
+): number {
+  const cutting = matrix.cuttingTimes[strategyIdx][vbitIdx];
+  if (!isFinite(cutting)) return NaN;
+  return cutting + matrix.strategies[strategyIdx].bitCount * toolChangeMinutes;
+}
+
+/**
+ * Build the (strategy × V-bit) cutting-time comparison matrix for one
+ * design. Pre-computes each layer's per-bit opening pixel count once,
+ * then each strategy is a cheap reduction:
+ *
+ *   For strategy with bits [b1 > b2 > b3] (descending):
+ *     incremental(b1) = open(b1).area
+ *     incremental(b2) = open(b2).area − open(b1).area
+ *     incremental(b3) = open(b3).area − open(b2).area
+ *     vbitArea        = totalMask.area − open(smallest_in_strategy).area
+ *
+ *   With ∅ strategy: vbitArea = totalMask.area; no clearance time.
+ *
+ * Tool-change overhead is NOT included here — `totalCellTime` adds it
+ * at render time using the user-set `toolChangeMinutes`.
  */
 export function buildMachiningTimeMatrix(params: {
   layers: {
@@ -124,96 +184,115 @@ export function buildMachiningTimeMatrix(params: {
   canvasH: number;
   pixelsPerInch: number;
   inlayDepthInches: number;
+  /** All available clearance bits (each with MRR). The strategies enumerated below are subsets of these. */
   clearanceBits: { diameterInches: number; mrr: number }[];
   vbits: import('@/types').MachiningTimeMatrix['vbits'];
 }): import('@/types').MachiningTimeMatrix {
   const { layers, canvasW, canvasH, pixelsPerInch, inlayDepthInches,
           clearanceBits, vbits } = params;
   const ppiSq = pixelsPerInch * pixelsPerInch;
+  const mrrByDiameter = new Map(clearanceBits.map(b => [b.diameterInches, b.mrr]));
 
-  type Areas = { clearanceAreaSqIn: number; vbitAreaSqIn: number };
-  type AreasBoth = { pocket: Areas; plug: Areas };
+  const strategies = enumerateClearanceStrategies(clearanceBits.map(b => b.diameterInches));
 
-  const computeAreas = (mask: Uint8Array, dist1: Float32Array, radiusPx: number): Areas => {
-    const opened = morphologicalOpening(mask, dist1, radiusPx, canvasW, canvasH);
-    let openedPx = 0, totalPx = 0;
-    for (let k = 0; k < opened.length; k++) {
-      if (opened[k]) openedPx++;
-      if (mask[k]) totalPx++;
-    }
-    return {
-      clearanceAreaSqIn: openedPx / ppiSq,
-      vbitAreaSqIn: (totalPx - openedPx) / ppiSq,
-    };
+  // Per-layer pre-computation: for each side and each bit, the opened-area
+  // pixel count, plus the total mask pixel count.
+  type SideAreas = {
+    totalPx: number;
+    openedPxByBit: Map<number, number>; // diameter → opened pixel count
   };
+  const layerSides: { pocket: SideAreas; plug: SideAreas }[] = layers.map(layer => {
+    const compute = (mask: Uint8Array, dist1: Float32Array): SideAreas => {
+      let totalPx = 0;
+      for (let k = 0; k < mask.length; k++) if (mask[k]) totalPx++;
+      const openedPxByBit = new Map<number, number>();
+      for (const b of clearanceBits) {
+        const radiusPx = (b.diameterInches * pixelsPerInch) / 2;
+        const opened = morphologicalOpening(mask, dist1, radiusPx, canvasW, canvasH);
+        let openedPx = 0;
+        for (let k = 0; k < opened.length; k++) if (opened[k]) openedPx++;
+        openedPxByBit.set(b.diameterInches, openedPx);
+      }
+      return { totalPx, openedPxByBit };
+    };
+    return {
+      pocket: compute(layer.pocketMask,     layer.pocketDist1),
+      plug:   compute(layer.plugCarvedMask, layer.plugDist1),
+    };
+  });
 
-  // For each layer × each clearance bit, compute pocket and plug areas.
-  const areasPerLayerPerClearance: AreasBoth[][] = layers.map(layer =>
-    clearanceBits.map(c => {
-      const radiusPx = (c.diameterInches * pixelsPerInch) / 2;
-      return {
-        pocket: computeAreas(layer.pocketMask,     layer.pocketDist1, radiusPx),
-        plug:   computeAreas(layer.plugCarvedMask, layer.plugDist1,   radiusPx),
-      };
-    })
-  );
-
-  // Combine areas + bit rates → total time per (clearance, V-bit) cell.
-  // Infeasible V-bits yield NaN.
-  const times: number[][] = clearanceBits.map((c, ci) =>
+  // For each strategy × vbit, sum cutting time across layers + sides.
+  const cuttingTimes: number[][] = strategies.map(strategy =>
     vbits.map(v => {
       if (!v.feasible) return NaN;
       let total = 0;
+
+      const sideTime = (side: SideAreas, perimIn: number): number => {
+        // Walk strategy bits descending; each bit clears the residual
+        // not yet covered by larger bits. Smaller bits' opens are supersets
+        // of larger ones, so incremental = open(b_i) − open(b_{i-1}).
+        let prevOpenedPx = 0;
+        let clearanceTime = 0;
+        for (const d of strategy.diameters) {
+          const openedPx = side.openedPxByBit.get(d) ?? 0;
+          const incrementalPx = Math.max(0, openedPx - prevOpenedPx);
+          const incrementalAreaSqIn = incrementalPx / ppiSq;
+          const mrr = mrrByDiameter.get(d) ?? 0;
+          if (mrr > 0) clearanceTime += incrementalAreaSqIn * inlayDepthInches / mrr;
+          prevOpenedPx = openedPx;
+        }
+        const vbitPx = side.totalPx - prevOpenedPx;
+        const vbitAreaSqIn = vbitPx / ppiSq;
+        const tVbitArea = v.mrr  > 0 ? vbitAreaSqIn * inlayDepthInches / v.mrr : 0;
+        const tPerim    = v.feed > 0 ? perimIn / v.feed                        : 0;
+        return clearanceTime + tVbitArea + tPerim;
+      };
+
       for (let li = 0; li < layers.length; li++) {
-        const a = areasPerLayerPerClearance[li][ci];
+        const sides = layerSides[li];
         const perim = layers[li].pocketPerimeterIn;
-        const sideTime = (areas: Areas): number => {
-          const tClear    = c.mrr  > 0 ? areas.clearanceAreaSqIn * inlayDepthInches / c.mrr : 0;
-          const tVbitArea = v.mrr  > 0 ? areas.vbitAreaSqIn      * inlayDepthInches / v.mrr : 0;
-          const tPerim    = v.feed > 0 ? perim                                          / v.feed : 0;
-          return tClear + tVbitArea + tPerim;
-        };
-        total += sideTime(a.pocket) + sideTime(a.plug);
+        total += sideTime(sides.pocket, perim) + sideTime(sides.plug, perim);
       }
       return total;
     })
   );
 
-  return { clearanceBits, vbits, times };
+  return { strategies, vbits, cuttingTimes };
 }
 
 export interface FastestFeasibleCell {
-  clearanceIdx: number;
+  strategyIdx: number;
   vbitIdx: number;
   totalTimeMinutes: number;
-  clearanceDiameterInches: number;
+  strategyDiameters: number[];
   vbitAngleDegrees: number;
 }
 
 /**
- * Locate the fastest feasible (clearance, v-bit) combination in a matrix.
- * "Feasible" means the v-bit's column is feasible AND the cell time is
- * finite. Used by both BitMatrixTable (to highlight the green cell) and
- * RecommendedSetupCard (to surface the recommendation prominently).
+ * Locate the fastest feasible (strategy, v-bit) combination in a matrix
+ * given the current tool-change overhead. "Feasible" means the v-bit
+ * column is feasible AND the cell time is finite. Used by both
+ * BitMatrixTable (to highlight the green cell) and RecommendedSetupCard
+ * (to surface the recommendation prominently).
  *
- * Returns null when no combination is feasible — in that case the design
- * needs widening before manufacturing is possible at any preset.
+ * Returns null when no combination is feasible.
  */
 export function findFastestFeasibleCell(
   matrix: import('@/types').MachiningTimeMatrix,
+  toolChangeMinutes: number,
 ): FastestFeasibleCell | null {
   let best: FastestFeasibleCell | null = null;
-  for (let ci = 0; ci < matrix.times.length; ci++) {
-    for (let vi = 0; vi < matrix.times[ci].length; vi++) {
+  for (let si = 0; si < matrix.strategies.length; si++) {
+    for (let vi = 0; vi < matrix.vbits.length; vi++) {
       if (!matrix.vbits[vi].feasible) continue;
-      const t = matrix.times[ci][vi];
+      const t = totalCellTime(matrix, si, vi, toolChangeMinutes);
       if (!isFinite(t)) continue;
       if (best === null || t < best.totalTimeMinutes) {
         best = {
-          clearanceIdx: ci,
+          strategyIdx: si,
           vbitIdx: vi,
           totalTimeMinutes: t,
-          clearanceDiameterInches: matrix.clearanceBits[ci].diameterInches,
+          strategyDiameters: matrix.strategies[si].diameters,
           vbitAngleDegrees: matrix.vbits[vi].angleDegrees,
         };
       }

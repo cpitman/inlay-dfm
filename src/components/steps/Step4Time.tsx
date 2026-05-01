@@ -1,11 +1,8 @@
 'use client';
 
 import type { AnalysisResult, DFMSettings } from '@/types';
-import {
-  CLEARANCE_BIT_OPTIONS, CLEARANCE_BIT_MRR,
-  type ClearanceBitDiameter,
-} from '@/lib/machiningRates';
-import { formatMinutes } from '@/lib/machiningTime';
+import { type ClearanceBitDiameter } from '@/lib/machiningRates';
+import { formatMinutes, totalCellTime } from '@/lib/machiningTime';
 import BitMatrixTable from '../BitMatrixTable';
 import RecommendedSetupCard from '../RecommendedSetupCard';
 import { StepNav } from '../StepperBar';
@@ -17,37 +14,38 @@ interface Step4TimeProps {
   onBack: () => void;
 }
 
-const CLEARANCE_BIT_LABELS: Record<ClearanceBitDiameter, string> = {
-  0.125: '1/8"',
-  0.25:  '1/4"',
-  0.5:   '1/2"',
-};
+const ATC_TOOL_CHANGE_MIN = 0.5;     // ~30 seconds for an Automatic Tool Changer
+const MANUAL_TOOL_CHANGE_MIN = 5;    // typical hand-swap estimate
 
 /**
  * Step 4 — Machining time exploration.
  *
  * Tops with a prominent RecommendedSetupCard naming the fastest feasible
- * (clearance, v-bit) combination. Below: the existing clearance-bit picker
- * and the full BitMatrixTable for exploring trade-offs. Total time at the
- * top derives from the matrix at the current selection so it stays in sync
- * when Step 3 changes the v-bit angle.
+ * (clearance strategy × v-bit) combination including tool-change overhead.
+ * Below: a tool-change time control (ATC vs Manual presets), then the full
+ * BitMatrixTable showing all 8 strategies × 6 v-bit angles.
  */
 export default function Step4Time({
   result, settings, onSettingsChange, onBack,
 }: Step4TimeProps) {
-  const set = <K extends keyof DFMSettings>(k: K, v: DFMSettings[K]) =>
-    onSettingsChange({ ...settings, [k]: v });
-
-  const applyRecommendation = (clearanceDiameter: number, vbitAngle: number) => {
+  const applyCombination = (strategyDiameters: number[], vbitAngle: number) => {
     onSettingsChange({
       ...settings,
-      clearanceBitDiameterInches: clearanceDiameter as ClearanceBitDiameter,
+      clearanceStrategy: strategyDiameters,
+      // Per-wood machining-time displays on Step 2 / 3 use this single bit;
+      // keep it in sync with the largest in the chosen strategy. When the
+      // strategy is empty (v-bit only), fall back to a sensible default
+      // (1/4") so per-wood displays don't break.
+      clearanceBitDiameterInches: (strategyDiameters[0] ?? 0.25) as ClearanceBitDiameter,
       vbitAngleDegrees: vbitAngle,
-      // Switching to a preset clears any custom rates so the analyzer uses
-      // the canonical table values from machiningRates.ts.
+      // Switching to a preset v-bit clears any custom rates.
       vbitMRRInches3PerMin: undefined,
       vbitFeedInchesPerMin: undefined,
     });
+  };
+
+  const setToolChangeMin = (v: number) => {
+    onSettingsChange({ ...settings, toolChangeMinutes: Math.max(0, v) });
   };
 
   return (
@@ -57,20 +55,27 @@ export default function Step4Time({
         {result && (
           <RecommendedSetupCard
             result={result}
-            currentClearanceDiameter={settings.clearanceBitDiameterInches}
+            currentStrategyDiameters={settings.clearanceStrategy}
             currentVbitAngle={settings.vbitAngleDegrees}
-            onApply={applyRecommendation}
+            toolChangeMinutes={settings.toolChangeMinutes}
+            onApply={applyCombination}
           />
         )}
 
-        {/* Total time header — derived from the matrix at the current
-            (clearance, v-bit) selection so it stays in sync when Step 3
+        {/* Total time header — looked up from the matrix at the current
+            (strategy, v-bit) selection so it stays in sync when Step 3
             changes the angle without re-running analysis. */}
         {result && (() => {
           const matrix = result.machiningTimeTable;
-          const ci = matrix.clearanceBits.findIndex(b => b.diameterInches === settings.clearanceBitDiameterInches);
+          const si = matrix.strategies.findIndex(s =>
+            s.diameters.length === settings.clearanceStrategy.length
+            && s.diameters.every((d, i) => d === settings.clearanceStrategy[i])
+          );
           const vi = matrix.vbits.findIndex(v => v.angleDegrees === settings.vbitAngleDegrees);
-          const t = (ci >= 0 && vi >= 0) ? matrix.times[ci][vi] : NaN;
+          const t = (si >= 0 && vi >= 0)
+            ? totalCellTime(matrix, si, vi, settings.toolChangeMinutes)
+            : NaN;
+          const stratLabel = si >= 0 ? matrix.strategies[si].label : 'Custom strategy';
           return (
             <div className="bg-slate-800 rounded-lg px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-2 items-center">
               <span>
@@ -85,62 +90,69 @@ export default function Step4Time({
                 )}
               </span>
               <span className="text-slate-500 text-xs">
-                {settings.vbitAngleDegrees}° v-bit · {CLEARANCE_BIT_LABELS[settings.clearanceBitDiameterInches]} clearance
+                {settings.vbitAngleDegrees}° v-bit · {stratLabel}
               </span>
             </div>
           );
         })()}
 
-        {/* Clearance bit picker */}
+        {/* Tool-change time — drives the per-bit overhead added to every cell */}
         <section>
           <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-            Clearance Bit
+            Tool Change Time
           </h2>
           <p className="text-sm text-slate-400 mb-3">
-            Bigger clearance bits clear bulk material faster but leave more for the
-            v-bit to finish. The matrix below shows total time across every combination.
+            How long it takes your CNC to load or swap a bit. Each strategy
+            below pays this cost once per bit it uses (counting the initial
+            load). ATC machines swap automatically in seconds; manual swaps
+            usually take a few minutes.
           </p>
-          <div className="flex gap-2">
-            {CLEARANCE_BIT_OPTIONS.map(d => (
-              <button
-                key={d}
-                onClick={() => set('clearanceBitDiameterInches', d)}
-                className={`flex-1 py-2 rounded-md text-sm font-semibold border transition-colors
-                  ${settings.clearanceBitDiameterInches === d
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400'}`}
-              >
-                {CLEARANCE_BIT_LABELS[d]}
-              </button>
-            ))}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={settings.toolChangeMinutes}
+                onChange={e => setToolChangeMin(parseFloat(e.target.value) || 0)}
+                className="w-24 bg-slate-700 border border-slate-600 rounded-md px-3 py-1.5 text-sm text-white
+                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <span className="text-xs text-slate-400">min</span>
+            </div>
+            <button
+              onClick={() => setToolChangeMin(ATC_TOOL_CHANGE_MIN)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors
+                ${settings.toolChangeMinutes === ATC_TOOL_CHANGE_MIN
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400'}`}
+            >
+              ATC (30 s)
+            </button>
+            <button
+              onClick={() => setToolChangeMin(MANUAL_TOOL_CHANGE_MIN)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors
+                ${settings.toolChangeMinutes === MANUAL_TOOL_CHANGE_MIN
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400'}`}
+            >
+              Manual (5 min)
+            </button>
           </div>
-          <p className="text-xs text-slate-500 mt-2">
-            MRR {CLEARANCE_BIT_MRR[settings.clearanceBitDiameterInches].toFixed(2)} in³/min
-            for the selected bit.
-          </p>
         </section>
 
-        {/* Bit-comparison matrix */}
+        {/* Strategy × v-bit matrix */}
         {result && (
           <section>
             <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Bit Combinations
+              Clearance Strategy × V-bit
             </h2>
             <BitMatrixTable
               matrix={result.machiningTimeTable}
-              currentClearanceDiameter={settings.clearanceBitDiameterInches}
+              currentStrategyDiameters={settings.clearanceStrategy}
               currentVbitAngle={settings.vbitAngleDegrees}
-              onSelectCombination={(clearanceDiameter, vbitAngle) => {
-                onSettingsChange({
-                  ...settings,
-                  clearanceBitDiameterInches: clearanceDiameter as ClearanceBitDiameter,
-                  vbitAngleDegrees: vbitAngle,
-                  // Switching to a preset V-bit clears any custom rates so
-                  // the analyzer uses the table values from machiningRates.ts.
-                  vbitMRRInches3PerMin: undefined,
-                  vbitFeedInchesPerMin: undefined,
-                });
-              }}
+              toolChangeMinutes={settings.toolChangeMinutes}
+              onSelectCombination={applyCombination}
             />
           </section>
         )}

@@ -5,38 +5,33 @@ import { findFastestFeasibleCell, formatMinutes } from '@/lib/machiningTime';
 
 interface RecommendedSetupCardProps {
   result: AnalysisResult;
-  currentClearanceDiameter: number;
+  /** Current strategy diameters (descending). Empty = v-bit only. */
+  currentStrategyDiameters: number[];
   currentVbitAngle: number;
-  onApply: (clearanceDiameter: number, vbitAngle: number) => void;
+  toolChangeMinutes: number;
+  onApply: (strategyDiameters: number[], vbitAngle: number) => void;
 }
 
-const CLEARANCE_LABEL: Record<number, string> = {
-  0.125: '1/8"',
-  0.25:  '1/4"',
-  0.5:   '1/2"',
-};
-
-function clearanceLabel(d: number): string {
-  return CLEARANCE_LABEL[d] ?? `${d.toFixed(3)}"`;
+function strategiesMatch(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /**
  * Top-of-Step-4 prominent display of the optimal bit combination — the
- * fastest feasible (clearance, v-bit) across every preset combination in
- * the matrix.
+ * fastest feasible (clearance strategy × v-bit) across every preset
+ * combination in the matrix, including tool-change overhead.
  *
  * If the user's current selection is already the recommended combo, shows
  * a "currently selected" confirmation. Otherwise shows an Apply button to
  * switch in one click. The matrix below remains the place to explore
  * trade-offs.
- *
- * Red error state when no combination is feasible — should be rare since
- * Step 2 / Step 3 already surface this, but covered for safety.
  */
 export default function RecommendedSetupCard({
-  result, currentClearanceDiameter, currentVbitAngle, onApply,
+  result, currentStrategyDiameters, currentVbitAngle, toolChangeMinutes, onApply,
 }: RecommendedSetupCardProps) {
-  const best = findFastestFeasibleCell(result.machiningTimeTable);
+  const best = findFastestFeasibleCell(result.machiningTimeTable, toolChangeMinutes);
 
   if (!best) {
     return (
@@ -55,7 +50,8 @@ export default function RecommendedSetupCard({
     );
   }
 
-  const isSelected = best.clearanceDiameterInches === currentClearanceDiameter
+  const bestStrategy = result.machiningTimeTable.strategies[best.strategyIdx];
+  const isSelected = strategiesMatch(best.strategyDiameters, currentStrategyDiameters)
     && best.vbitAngleDegrees === currentVbitAngle;
 
   return (
@@ -68,7 +64,7 @@ export default function RecommendedSetupCard({
           </p>
           <div className="flex items-baseline gap-3 flex-wrap">
             <span className="text-2xl font-bold text-white">
-              {clearanceLabel(best.clearanceDiameterInches)} clearance
+              {bestStrategy.label}
               <span className="text-emerald-400 mx-2">·</span>
               {best.vbitAngleDegrees}° v-bit
             </span>
@@ -77,15 +73,16 @@ export default function RecommendedSetupCard({
             </span>
           </div>
           <p className="text-sm text-emerald-100">
-            Fastest feasible across {result.machiningTimeTable.clearanceBits.length} clearance bits
-            {' '}× {result.machiningTimeTable.vbits.length} v-bit angles. The matrix below shows
-            how every combination compares.
+            Fastest feasible across {result.machiningTimeTable.strategies.length} clearance strategies
+            {' '}× {result.machiningTimeTable.vbits.length} v-bit angles, including
+            {' '}{(bestStrategy.bitCount * toolChangeMinutes).toFixed(1)} min of tool changes
+            {' '}({bestStrategy.bitCount} bit{bestStrategy.bitCount === 1 ? '' : 's'}).
           </p>
           {isSelected ? (
             <p className="text-xs text-emerald-300 font-semibold">✓ Currently selected</p>
           ) : (
             <button
-              onClick={() => onApply(best.clearanceDiameterInches, best.vbitAngleDegrees)}
+              onClick={() => onApply(best.strategyDiameters, best.vbitAngleDegrees)}
               className="px-4 py-2 rounded-md text-sm font-semibold bg-emerald-700 hover:bg-emerald-600 text-white transition-colors"
             >
               Use this setup

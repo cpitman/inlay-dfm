@@ -1,49 +1,54 @@
 'use client';
 
 import type { MachiningTimeMatrix } from '@/types';
-import { formatMinutes, findFastestFeasibleCell } from '@/lib/machiningTime';
+import { formatMinutes, findFastestFeasibleCell, totalCellTime } from '@/lib/machiningTime';
 
 interface BitMatrixTableProps {
   matrix: MachiningTimeMatrix;
-  /** Currently-active clearance bit diameter, in inches. */
-  currentClearanceDiameter: number;
+  /** Currently-active clearance strategy diameters (descending). Empty = v-bit only. */
+  currentStrategyDiameters: number[];
   /** Currently-active V-bit angle, in degrees. */
   currentVbitAngle: number;
   /**
-   * Optional cell click handler — when provided, cells become buttons that
-   * switch the user's settings to that bit combination. The V-bit angles in
-   * the matrix are always presets, so the clearance + angle uniquely identify
-   * the selection.
+   * Tool-change overhead per bit load/swap, in minutes. Each cell shows
+   * `cuttingTime + bitCount × toolChangeMinutes` so the matrix reflows
+   * instantly when the user toggles ATC vs Manual.
    */
-  onSelectCombination?: (clearanceDiameter: number, vbitAngle: number) => void;
+  toolChangeMinutes: number;
+  /**
+   * Optional cell click handler — when provided, cells become buttons that
+   * switch the user's settings to that combination. Receives the strategy
+   * diameters array (descending) and v-bit angle.
+   */
+  onSelectCombination?: (strategyDiameters: number[], vbitAngle: number) => void;
 }
 
-function clearanceLabel(diameter: number): string {
-  if (diameter === 0.125) return '1/8"';
-  if (diameter === 0.25)  return '1/4"';
-  if (diameter === 0.5)   return '1/2"';
-  return `${diameter.toFixed(3)}"`;
+function diametersMatch(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 export default function BitMatrixTable({
-  matrix, currentClearanceDiameter, currentVbitAngle, onSelectCombination,
+  matrix, currentStrategyDiameters, currentVbitAngle, toolChangeMinutes,
+  onSelectCombination,
 }: BitMatrixTableProps) {
-  const fastest = findFastestFeasibleCell(matrix);
-  const minCi = fastest?.clearanceIdx ?? -1;
+  const fastest = findFastestFeasibleCell(matrix, toolChangeMinutes);
+  const minSi = fastest?.strategyIdx ?? -1;
   const minVi = fastest?.vbitIdx ?? -1;
 
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
       <div className="px-4 py-2 border-b border-slate-700 text-xs text-slate-400">
-        Total machining time per (clearance bit × V-bit) combination — pocket + plug across all layers.
+        Total machining time per (clearance strategy × V-bit) combination — pocket + plug across all layers, including tool-change overhead.
         {' '}<span className="text-emerald-400">Green</span> = fastest.
         {' '}<span className="text-blue-300">Blue</span> = current selection.
-        {' '}<span className="text-slate-500">N/A</span> means the V-bit angle either leaves &gt;10% problem area on some layer, or some piece of a layer can't be carved at all (an isolated region with no full-depth coverage).
+        {' '}<span className="text-slate-500">N/A</span> means the V-bit angle is infeasible (&gt;10% problem area on some layer, or an isolated unreachable piece).
       </div>
       <table className="w-full text-xs">
         <thead>
           <tr className="bg-slate-900/40 text-slate-300">
-            <th className="text-left px-3 py-2 font-medium">Clearance ↓ / V-bit →</th>
+            <th className="text-left px-3 py-2 font-medium">Strategy ↓ / V-bit →</th>
             {matrix.vbits.map(v => (
               <th
                 key={v.angleDegrees}
@@ -59,17 +64,19 @@ export default function BitMatrixTable({
           </tr>
         </thead>
         <tbody>
-          {matrix.clearanceBits.map((c, ci) => (
-            <tr key={c.diameterInches} className="border-t border-slate-700">
+          {matrix.strategies.map((s, si) => (
+            <tr key={s.label} className="border-t border-slate-700">
               <td className="px-3 py-2 text-slate-300">
-                <div className="font-medium">{clearanceLabel(c.diameterInches)}</div>
-                <div className="text-slate-500 text-[10px]">{c.mrr.toFixed(2)} in³/min</div>
+                <div className="font-medium">{s.label}</div>
+                <div className="text-slate-500 text-[10px]">
+                  {s.bitCount} bit{s.bitCount === 1 ? '' : 's'} (+{(s.bitCount * toolChangeMinutes).toFixed(1)} min change)
+                </div>
               </td>
               {matrix.vbits.map((v, vi) => {
-                const t = matrix.times[ci][vi];
-                const isCurrent = c.diameterInches === currentClearanceDiameter
-                               && v.angleDegrees   === currentVbitAngle;
-                const isFastest = ci === minCi && vi === minVi;
+                const t = totalCellTime(matrix, si, vi, toolChangeMinutes);
+                const isCurrent = diametersMatch(s.diameters, currentStrategyDiameters)
+                               && v.angleDegrees === currentVbitAngle;
+                const isFastest = si === minSi && vi === minVi;
                 const naCell = !v.feasible || !isFinite(t);
 
                 const baseClass = 'px-3 py-2 text-center transition-colors';
@@ -92,8 +99,8 @@ export default function BitMatrixTable({
                     <td
                       key={v.angleDegrees}
                       className={`${baseClass} ${colorClass} ${interactive}`}
-                      onClick={() => onSelectCombination(c.diameterInches, v.angleDegrees)}
-                      title={`Switch to ${clearanceLabel(c.diameterInches)} clearance + ${v.angleDegrees}° V-bit`}
+                      onClick={() => onSelectCombination(s.diameters, v.angleDegrees)}
+                      title={`Switch to ${s.label} clearance + ${v.angleDegrees}° V-bit`}
                     >
                       {content}
                     </td>
