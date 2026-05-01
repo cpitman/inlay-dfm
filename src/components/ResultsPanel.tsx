@@ -1,6 +1,7 @@
 'use client';
 
 import type { AnalysisResult, SingleAnalysis, DFMSettings } from '@/types';
+import { isSideGrain } from '@/lib/grain';
 
 interface ResultsPanelProps {
   analysis: SingleAnalysis;
@@ -42,7 +43,7 @@ export default function ResultsPanel({ analysis, common, settings, label, hideDe
     vbitAngleWarning, thinWallPixelCount,
   } = analysis;
   const { thinWallThresholdInches } = common;
-  const isSideGrain = settings.grainDirection !== 'end';
+  const sideGrain = isSideGrain(settings.grainDirection);
   const isPocket = label === 'Pocket';
 
   const depthDesc = isPocket
@@ -83,7 +84,7 @@ export default function ResultsPanel({ analysis, common, settings, label, hideDe
           Steeper walls increase tearout risk across fibres.
         </Warning>
       )}
-      {isSideGrain && thinWallPixelCount > 0 && (
+      {sideGrain && thinWallPixelCount > 0 && (
         <Warning>
           <strong>{thinDesc} detected</strong> (amber on overlay).
           These features are at risk of splitting or cracking.

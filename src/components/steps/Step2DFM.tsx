@@ -3,6 +3,7 @@
 import type {
   AnalysisResult, DFMSettings, VectorData, WoodConfig, Layer,
 } from '@/types';
+import { isSideGrain } from '@/lib/grain';
 import WoodPanel from '../WoodPanel';
 import AutoImprovementsPanel from '../AutoImprovementsPanel';
 import StaticTipsPanel from '../StaticTipsPanel';
@@ -120,10 +121,10 @@ export default function Step2DFM({
         {result && (
           <div className="bg-slate-800 rounded-lg px-4 py-3 text-xs">
             <div className="flex flex-wrap gap-x-6 gap-y-2 items-center">
-              {settings.grainDirection !== 'end' && (
+              {isSideGrain(settings.grainDirection) && (
                 <GeomStat label="Thin-wall threshold" value={result.thinWallThresholdInches} />
               )}
-              {settings.grainDirection !== 'end' && <Divider />}
+              {isSideGrain(settings.grainDirection) && <Divider />}
               <span className="text-slate-500">
                 Detailed machining time and bit comparisons are on Step 4.
               </span>
@@ -143,7 +144,7 @@ export default function Step2DFM({
                       Unreachable by any v-bit
                     </span>
                   )}
-                  {settings.grainDirection !== 'end' && (
+                  {isSideGrain(settings.grainDirection) && (
                     <span className="flex items-center gap-1.5">
                       <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgb(220,150,30)' }} />
                       Thin wall opposing grain

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import type {
   AnalysisResult, DFMSettings, VectorData, WoodConfig, Layer, WoodAnalysis,
 } from '@/types';
+import { isSideGrain } from '@/lib/grain';
 import WoodPanel from '../WoodPanel';
 import VbitSelector from '../VbitSelector';
 import { StepNav } from '../StepperBar';
@@ -164,7 +165,7 @@ export default function Step3Vbit({
                       <span className="w-3 h-3 rounded bg-red-500 inline-block" />
                       Unreachable at {settings.vbitAngleDegrees}°
                     </span>
-                    {settings.grainDirection !== 'end' && (
+                    {isSideGrain(settings.grainDirection) && (
                       <span className="flex items-center gap-1.5">
                         <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgb(220,150,30)' }} />
                         Thin wall opposing grain
