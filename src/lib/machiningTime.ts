@@ -44,6 +44,14 @@ export function machiningTimeForMask(
   clearanceMRR: number,
   vbitMRR: number,
   vbitFeed: number,
+  /**
+   * Optional perimeter (in linear inches) for the V-bit feed-rate pass. When
+   * omitted, the pixel-boundary length of `mask` is used. The plug operation
+   * supplies its pocket's perimeter here, since the V-bit only traces the
+   * plug's *shape* boundary — the outer edge of the stock isn't a precise
+   * pass.
+   */
+  perimeterInOverride?: number,
 ): MachiningTimeResult {
   const n = canvasW * canvasH;
   const clearanceRadiusPx = (clearanceDiameterInches * pixelsPerInch) / 2;
@@ -65,10 +73,15 @@ export function machiningTimeForMask(
   // Perimeter — pixel boundary length divided by ppi gives an approximate
   // perimeter in inches. The estimate is fine for time approximation since
   // each boundary pixel ≈ one linear pixel of perimeter at this resolution.
-  const boundary = computeBoundary(mask, canvasW, canvasH);
-  let boundaryPixels = 0;
-  for (let k = 0; k < n; k++) if (boundary[k]) boundaryPixels++;
-  const perimeterIn = boundaryPixels / pixelsPerInch;
+  let perimeterIn: number;
+  if (perimeterInOverride !== undefined) {
+    perimeterIn = perimeterInOverride;
+  } else {
+    const boundary = computeBoundary(mask, canvasW, canvasH);
+    let boundaryPixels = 0;
+    for (let k = 0; k < n; k++) if (boundary[k]) boundaryPixels++;
+    perimeterIn = boundaryPixels / pixelsPerInch;
+  }
 
   // Time components, all in minutes.
   const clearanceTimeMin     = clearanceMRR > 0 ? clearanceAreaSqIn * inlayDepthInches / clearanceMRR : 0;
@@ -89,16 +102,24 @@ export function machiningTimeForMask(
 
 /**
  * Build the (clearance × V-bit) total-time comparison matrix for one design.
- * Reuses each layer's already-computed pocket mask and `dist1` EDT, so the
- * only extra cost vs. computing one combination is one morphological-opening
- * EDT per (layer × clearance bit) — the V-bit dimension is just arithmetic.
+ * Reuses each layer's already-computed pocket and plug-carved masks plus
+ * their `dist1` EDTs, so the only extra cost vs. computing one combination
+ * is one morphological-opening EDT per (layer × clearance × side) — the
+ * V-bit dimension is pure arithmetic.
  *
- * Per cell: total = sum over layers of `(clearanceTime + vbitAreaTime + perimeterTime) × 2`,
- * where `× 2` accounts for both the pocket cut and the plug cut (modeled
- * identically to the pocket — same shape, same depth).
+ * Per cell: sum over layers of `pocketTime + plugTime`, where each side is
+ *   `clearanceArea·depth / clearanceMRR + vbitArea·depth / vbitMRR + perim / vbitFeed`
+ * and `perim` is the pocket's perimeter (same for both — the plug's V-bit
+ * pass traces the plug's *shape* boundary, not the outer stock edge).
  */
 export function buildMachiningTimeMatrix(params: {
-  layers: { mask: Uint8Array; dist1: Float32Array }[];
+  layers: {
+    pocketMask: Uint8Array;
+    pocketDist1: Float32Array;
+    plugCarvedMask: Uint8Array;
+    plugDist1: Float32Array;
+    pocketPerimeterIn: number;
+  }[];
   canvasW: number;
   canvasH: number;
   pixelsPerInch: number;
@@ -110,45 +131,49 @@ export function buildMachiningTimeMatrix(params: {
           clearanceBits, vbits } = params;
   const ppiSq = pixelsPerInch * pixelsPerInch;
 
-  // Per-layer perimeter — independent of bit choice, so compute once.
-  const perimeters = layers.map(l => {
-    const boundary = computeBoundary(l.mask, canvasW, canvasH);
-    let count = 0;
-    for (let k = 0; k < boundary.length; k++) if (boundary[k]) count++;
-    return count / pixelsPerInch;
-  });
-
-  // Per-layer × per-clearance bit: opened (clearance) area and remaining V-bit area.
   type Areas = { clearanceAreaSqIn: number; vbitAreaSqIn: number };
-  const areasPerLayerPerClearance: Areas[][] = layers.map(layer =>
+  type AreasBoth = { pocket: Areas; plug: Areas };
+
+  const computeAreas = (mask: Uint8Array, dist1: Float32Array, radiusPx: number): Areas => {
+    const opened = morphologicalOpening(mask, dist1, radiusPx, canvasW, canvasH);
+    let openedPx = 0, totalPx = 0;
+    for (let k = 0; k < opened.length; k++) {
+      if (opened[k]) openedPx++;
+      if (mask[k]) totalPx++;
+    }
+    return {
+      clearanceAreaSqIn: openedPx / ppiSq,
+      vbitAreaSqIn: (totalPx - openedPx) / ppiSq,
+    };
+  };
+
+  // For each layer × each clearance bit, compute pocket and plug areas.
+  const areasPerLayerPerClearance: AreasBoth[][] = layers.map(layer =>
     clearanceBits.map(c => {
       const radiusPx = (c.diameterInches * pixelsPerInch) / 2;
-      const opened = morphologicalOpening(layer.mask, layer.dist1, radiusPx, canvasW, canvasH);
-      let openedPx = 0, totalPx = 0;
-      for (let k = 0; k < opened.length; k++) {
-        if (opened[k]) openedPx++;
-        if (layer.mask[k]) totalPx++;
-      }
       return {
-        clearanceAreaSqIn: openedPx / ppiSq,
-        vbitAreaSqIn: (totalPx - openedPx) / ppiSq,
+        pocket: computeAreas(layer.pocketMask,     layer.pocketDist1, radiusPx),
+        plug:   computeAreas(layer.plugCarvedMask, layer.plugDist1,   radiusPx),
       };
     })
   );
 
-  // Combine: total time per (clearance, V-bit) cell. Infeasible V-bits
-  // yield NaN — the design wouldn't actually be cuttable with that angle,
-  // so reporting a number would be misleading.
+  // Combine areas + bit rates → total time per (clearance, V-bit) cell.
+  // Infeasible V-bits yield NaN.
   const times: number[][] = clearanceBits.map((c, ci) =>
     vbits.map(v => {
       if (!v.feasible) return NaN;
       let total = 0;
       for (let li = 0; li < layers.length; li++) {
         const a = areasPerLayerPerClearance[li][ci];
-        const tClear     = c.mrr  > 0 ? a.clearanceAreaSqIn * inlayDepthInches / c.mrr : 0;
-        const tVbitArea  = v.mrr  > 0 ? a.vbitAreaSqIn      * inlayDepthInches / v.mrr : 0;
-        const tPerim     = v.feed > 0 ? perimeters[li]                              / v.feed : 0;
-        total += (tClear + tVbitArea + tPerim) * 2; // pocket + plug
+        const perim = layers[li].pocketPerimeterIn;
+        const sideTime = (areas: Areas): number => {
+          const tClear    = c.mrr  > 0 ? areas.clearanceAreaSqIn * inlayDepthInches / c.mrr : 0;
+          const tVbitArea = v.mrr  > 0 ? areas.vbitAreaSqIn      * inlayDepthInches / v.mrr : 0;
+          const tPerim    = v.feed > 0 ? perim                                          / v.feed : 0;
+          return tClear + tVbitArea + tPerim;
+        };
+        total += sideTime(a.pocket) + sideTime(a.plug);
       }
       return total;
     })

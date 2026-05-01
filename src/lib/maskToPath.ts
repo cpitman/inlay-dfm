@@ -189,6 +189,14 @@ interface MaskToPathOptions {
   scaleX: number;
   /** Multiply pixel y-coordinates by this when emitting. */
   scaleY: number;
+  /**
+   * Translation applied AFTER scaling. Use this to align emitted geometry
+   * with a non-zero viewBox origin — without it, the path lives in
+   * `[0, w] × [0, h]` regardless of the document's viewBox window.
+   * Defaults to 0 for backward compatibility.
+   */
+  offsetX?: number;
+  offsetY?: number;
   /** Vertex-collapse tolerance, in pixels. ~1 erases jaggies on straight edges. */
   simplifyEpsilonPx?: number;
   /** Drop polygons smaller than this (in pixels²) to skip stray single-pixel artifacts. */
@@ -212,19 +220,23 @@ export function maskToSvgPath(
   const eps = opts.simplifyEpsilonPx ?? 1;
   const minArea = opts.minAreaPx ?? 1;
   const extra = opts.extraAttrs ?? '';
+  const offX = opts.offsetX ?? 0;
+  const offY = opts.offsetY ?? 0;
 
   const parts: string[] = [];
   for (const raw of polys) {
     if (polygonArea(raw) < minArea) continue;
     const simplified = simplify(raw, eps);
     if (simplified.length < 3) continue;
-    let d = `M ${(simplified[0].x * opts.scaleX).toFixed(3)} ${(simplified[0].y * opts.scaleY).toFixed(3)}`;
+    let d = `M ${(simplified[0].x * opts.scaleX + offX).toFixed(3)} ${(simplified[0].y * opts.scaleY + offY).toFixed(3)}`;
     for (let i = 1; i < simplified.length; i++) {
-      d += ` L ${(simplified[i].x * opts.scaleX).toFixed(3)} ${(simplified[i].y * opts.scaleY).toFixed(3)}`;
+      d += ` L ${(simplified[i].x * opts.scaleX + offX).toFixed(3)} ${(simplified[i].y * opts.scaleY + offY).toFixed(3)}`;
     }
     d += ' Z';
     parts.push(d);
   }
   if (parts.length === 0) return '';
-  return `<path d="${parts.join(' ')}" fill="${opts.fill}" fill-rule="evenodd" stroke="none"${extra ? ' ' + extra : ''}/>`;
+  // Don't hardcode stroke — let extraAttrs control it. SVG default for an
+  // unstyled <path> has no stroke, so omitting it is safe.
+  return `<path d="${parts.join(' ')}" fill="${opts.fill}" fill-rule="evenodd"${extra ? ' ' + extra : ''}/>`;
 }

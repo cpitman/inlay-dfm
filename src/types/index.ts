@@ -30,10 +30,24 @@ export interface DFMSettings {
   analysisResolution: AnalysisResolution;
   /** Diameter of the clearance/end-mill bit (1/8", 1/4", or 1/2"). Used for machining-time estimates. */
   clearanceBitDiameterInches: 0.125 | 0.25 | 0.5;
+  /**
+   * Margin around each plug's convex hull when modeling the plug stock for
+   * machining-time estimates. Plug carved area = (convex hull of plug,
+   * dilated by this margin) − (plug shape).
+   */
+  plugStockMarginInches: number;
   /** User-supplied V-bit material removal rate (in³/min). Set only when the V-bit angle is non-preset. */
   vbitMRRInches3PerMin?: number;
   /** User-supplied V-bit linear feed rate (in/min). Set only when the V-bit angle is non-preset. */
   vbitFeedInchesPerMin?: number;
+  /** Width of the actual board (e.g. cutting board) the design will be inlaid into. Composite-view-only. */
+  boardWidthInches: number;
+  /** Height of the actual board. Composite-view-only. */
+  boardHeightInches: number;
+  /** Left edge of the design on the board (in inches from the left edge of the board). */
+  designOffsetXInches: number;
+  /** Top edge of the design on the board (in inches from the top edge of the board). */
+  designOffsetYInches: number;
 }
 
 /** A single layer's vector geometry, rendered with one fill color. */
@@ -79,6 +93,8 @@ export interface SingleAnalysis {
   problemAreaPercent: number;
   passed: boolean;
   hasAnyFullDepth: boolean;
+  /** True when an entire connected component of the carved mask cannot reach full depth — a piece of the design is too small/narrow for the V-bit. */
+  hasIsolatedUnreachableComponent: boolean;
   vbitAngleWarning: boolean;
   thinWallPixelCount: number;
   overlayDataUrl: string;
@@ -95,8 +111,20 @@ export interface WoodAnalysis {
   clearanceAreaSqIn: number;
   /** Pocket area the V-bit must handle because the clearance bit can't fit there (square inches). */
   vbitAreaSqIn: number;
-  /** Approximate perimeter of the pocket (linear inches), used for the V-bit feed-rate pass. */
+  /** Approximate perimeter of the pocket / plug shape (linear inches). Same value used for both V-bit perimeter passes. */
   perimeterIn: number;
+  /** Plug carved area (stock around the plug) the clearance bit can reach (square inches). */
+  plugClearanceAreaSqIn: number;
+  /** Plug carved area the V-bit must handle (square inches). */
+  plugVbitAreaSqIn: number;
+  /** SVG path fragment outlining the modeled plug stock boundary, ready to drop into a per-layer SVG. Empty when no stock is computable. */
+  plugStockOutlineSvg: string;
+  /** Number of holes in this layer that are completely covered by the union of later inlay layers. */
+  fillableHoleCount: number;
+  /** Total area (in²) of those fillable holes. */
+  fillableHoleAreaSqIn: number;
+  /** Estimated machining time saved by filling these holes (minutes). NaN when V-bit rates are missing. */
+  fillableSavedTimeMin: number;
   /** Estimated minutes for the pocket cut (clearance + V-bit area + V-bit perimeter). */
   pocketMachineTimeMinutes: number;
   /** Estimated minutes for the plug cut (modeled identically to the pocket; same shape, same depth). */
@@ -124,7 +152,6 @@ export interface AnalysisResult {
   /** Shared geometry params (same for all woods) */
   vbitCutWidthInches: number;
   fullDepthRadiusInches: number;
-  thresholdInches: number;
   thinWallThresholdInches: number;
   alignmentThresholdInches: number;
   pixelsPerInch: number;

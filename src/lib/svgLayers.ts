@@ -1,5 +1,21 @@
 import type { Layer } from '@/types';
 
+/**
+ * Parse a viewBox attribute string ("x y w h") into its four components.
+ * After the parse-time whitespace trim, viewBox origins (x, y) can be
+ * non-zero, so any code that emits geometry relative to the viewBox
+ * needs the origin to align with unchanged layer fragments.
+ */
+export function parseViewBox(viewBox: string): { x: number; y: number; w: number; h: number } {
+  const parts = viewBox.trim().split(/[\s,]+/).map(Number);
+  return {
+    x: Number.isFinite(parts[0]) ? parts[0] : 0,
+    y: Number.isFinite(parts[1]) ? parts[1] : 0,
+    w: Number.isFinite(parts[2]) ? parts[2] : 0,
+    h: Number.isFinite(parts[3]) ? parts[3] : 0,
+  };
+}
+
 /** Wrap a single layer's fragment as a standalone, renderable SVG document. */
 export function layerToStandaloneSvg(layer: Layer, viewBox: string, w: number, h: number): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="${w}" height="${h}">

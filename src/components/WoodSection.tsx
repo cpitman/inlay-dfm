@@ -29,6 +29,7 @@ interface WoodSectionProps {
   isModified: boolean;
   busyModification: boolean;
   onExtendForRegistration: () => void;
+  onFillEnclosedHoles: () => void;
   onResetLayer: () => void;
 }
 
@@ -38,7 +39,7 @@ export default function WoodSection({
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
   analysis, vector, overlayMode, common, settings,
   otherWoodLabels,
-  isModified, busyModification, onExtendForRegistration, onResetLayer,
+  isModified, busyModification, onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
 }: WoodSectionProps) {
   const overlay = (side: 'pocket' | 'plug') => {
     if (!analysis) return null;
@@ -54,6 +55,20 @@ export default function WoodSection({
     if (!layer) return undefined;
     return layerToStandaloneSvg(layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight);
   }, [vector, colorHex]);
+
+  // For the plug-side preview, append the modeled plug-stock outline so the
+  // user can see the boundary of the stock the plug is being cut from.
+  const plugLayerSvg = useMemo(() => {
+    if (!vector) return undefined;
+    const layer = vector.layers.find(l => l.colorHex === colorHex);
+    if (!layer) return undefined;
+    const outline = analysis?.plugStockOutlineSvg ?? '';
+    if (!outline) return layerSvg;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vector.viewBox}" width="${vector.naturalWidth}" height="${vector.naturalHeight}">
+${layer.svgFragment}
+${outline}
+</svg>`;
+  }, [vector, colorHex, analysis?.plugStockOutlineSvg, layerSvg]);
 
   return (
     <div className="border border-slate-700 rounded-lg overflow-hidden">
@@ -136,7 +151,7 @@ export default function WoodSection({
             <h3 className="text-sm font-semibold text-slate-300">Plug</h3>
             <p className="text-xs text-slate-500">Raised piece cut from {label || 'this'} stock</p>
           </div>
-          <DesignCanvas vector={vector} overlayDataUrl={overlay('plug')} svgOverride={layerSvg} />
+          <DesignCanvas vector={vector} overlayDataUrl={overlay('plug')} svgOverride={plugLayerSvg} />
           {analysis && common && (
             <ResultsPanel analysis={analysis.plug} common={common} settings={settings} label="Plug" />
           )}
@@ -159,8 +174,16 @@ export default function WoodSection({
             <>
               <span className="text-slate-600">·</span>
               <span className="text-slate-500">
-                Clearance area {analysis.clearanceAreaSqIn.toFixed(2)} in² ·
-                V-bit area {analysis.vbitAreaSqIn.toFixed(2)} in² ·
+                Pocket clearance {analysis.clearanceAreaSqIn.toFixed(2)} in² ·
+                V-bit {analysis.vbitAreaSqIn.toFixed(2)} in²
+              </span>
+              <span className="text-slate-600">·</span>
+              <span className="text-slate-500">
+                Plug clearance {analysis.plugClearanceAreaSqIn.toFixed(2)} in² ·
+                V-bit {analysis.plugVbitAreaSqIn.toFixed(2)} in²
+              </span>
+              <span className="text-slate-600">·</span>
+              <span className="text-slate-500">
                 Perimeter {analysis.perimeterIn.toFixed(2)}"
               </span>
             </>
@@ -200,6 +223,38 @@ export default function WoodSection({
             </button>
             <span className="ml-2 text-xs text-fuchsia-500">
               Re-run analysis to verify the issue is resolved.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Fillable enclosed holes — DFM optimization opportunity */}
+      {analysis && analysis.fillableHoleCount > 0 && (
+        <div className="mx-4 mb-4 border border-cyan-700 rounded-lg bg-cyan-900/20 p-3 space-y-1.5">
+          <p className="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+            <span>○</span>
+            Fillable enclosed holes
+          </p>
+          <p className="text-xs text-cyan-200">
+            <strong>{analysis.fillableHoleCount}</strong> hole{analysis.fillableHoleCount !== 1 ? 's' : ''}
+            {' '}fully covered by later inlay layers ({analysis.fillableHoleAreaSqIn.toFixed(2)} in² total).
+            {isFinite(analysis.fillableSavedTimeMin) && analysis.fillableSavedTimeMin > 0 && (
+              <> Filling them could save approximately <strong>{analysis.fillableSavedTimeMin.toFixed(1)} min</strong> of V-bit perimeter time.</>
+            )}
+          </p>
+          <p className="text-xs text-cyan-500">
+            The covered holes are invisible in the final design; filling them removes the V-bit perimeter passes the bit would otherwise trace on both pocket and plug.
+          </p>
+          <div className="pt-1.5">
+            <button
+              onClick={onFillEnclosedHoles}
+              disabled={busyModification}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {busyModification ? 'Working…' : `Fill ${analysis.fillableHoleCount} hole${analysis.fillableHoleCount !== 1 ? 's' : ''}`}
+            </button>
+            <span className="ml-2 text-xs text-cyan-500">
+              Re-run analysis to update the time estimate.
             </span>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import type { Layer, VectorData } from '@/types';
 import { combineLayers } from './svgLayers';
+import { computeTrimmedViewBox } from './trimSvg';
 
 // ---------------------------------------------------------------------------
 // Color utilities
@@ -200,15 +201,20 @@ export async function parseSvg(file: File): Promise<VectorData> {
   if (!w) w = 500;
   if (!h) h = 500;
 
-  const viewBox = vb ?? `0 0 ${w} ${h}`;
+  const viewBoxOriginal = vb ?? `0 0 ${w} ${h}`;
   const { layers, order } = splitSvgIntoLayers(svgEl);
 
+  // Trim away whitespace around the actual content. The original layer
+  // fragments are kept; the viewBox window selects only the content area.
+  const initialSvg = combineLayers(layers, viewBoxOriginal, w, h);
+  const trimmed = await computeTrimmedViewBox(initialSvg, w, h);
+
   return {
-    svgString: combineLayers(layers, viewBox, w, h),
+    svgString: combineLayers(layers, trimmed.viewBox, trimmed.naturalWidth, trimmed.naturalHeight),
     layers,
-    naturalWidth: w,
-    naturalHeight: h,
-    viewBox,
+    naturalWidth: trimmed.naturalWidth,
+    naturalHeight: trimmed.naturalHeight,
+    viewBox: trimmed.viewBox,
     fileName: file.name,
     fileType: 'svg',
     detectedColors: order,
@@ -431,14 +437,18 @@ export async function parseDxf(file: File): Promise<VectorData> {
     svgFragment: buckets.get(colorHex)!.join('\n'),
   }));
 
-  const viewBox = `0 0 ${w} ${h}`;
+  const viewBoxOriginal = `0 0 ${w} ${h}`;
+
+  // Trim away whitespace around the actual content; same approach as parseSvg.
+  const initialSvg = combineLayers(layers, viewBoxOriginal, w, h);
+  const trimmed = await computeTrimmedViewBox(initialSvg, w, h);
 
   return {
-    svgString: combineLayers(layers, viewBox, w, h),
+    svgString: combineLayers(layers, trimmed.viewBox, trimmed.naturalWidth, trimmed.naturalHeight),
     layers,
-    naturalWidth: w,
-    naturalHeight: h,
-    viewBox,
+    naturalWidth: trimmed.naturalWidth,
+    naturalHeight: trimmed.naturalHeight,
+    viewBox: trimmed.viewBox,
     fileName: file.name,
     fileType: 'dxf',
     detectedColors: order,

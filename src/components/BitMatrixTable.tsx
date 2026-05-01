@@ -44,7 +44,7 @@ export default function BitMatrixTable({
         Total machining time per (clearance bit × V-bit) combination — pocket + plug across all layers.
         {' '}<span className="text-emerald-400">Green</span> = fastest.
         {' '}<span className="text-blue-300">Blue</span> = current selection.
-        {' '}<span className="text-slate-500">N/A</span> means the V-bit angle leaves &gt;10% problem area on some layer.
+        {' '}<span className="text-slate-500">N/A</span> means the V-bit angle either leaves &gt;10% problem area on some layer, or some piece of a layer can't be carved at all (an isolated region with no full-depth coverage).
       </div>
       <table className="w-full text-xs">
         <thead>
@@ -54,7 +54,7 @@ export default function BitMatrixTable({
               <th
                 key={v.angleDegrees}
                 className={`px-3 py-2 font-medium text-center ${v.feasible ? '' : 'text-slate-500'}`}
-                title={v.feasible ? undefined : 'V-bit produces >10% problem area on some layer'}
+                title={v.feasible ? undefined : 'V-bit angle is infeasible: >10% problem area on some layer, or an isolated piece of a layer cannot be carved at all'}
               >
                 <div>{v.angleDegrees}°{!v.feasible && ' ⚠'}</div>
                 <div className="text-slate-500 text-[10px] font-normal">
@@ -109,7 +109,7 @@ export default function BitMatrixTable({
                   <td
                     key={v.angleDegrees}
                     className={`${baseClass} ${colorClass}`}
-                    title={naCell ? 'V-bit angle leaves >10% problem area' : undefined}
+                    title={naCell ? 'V-bit angle is infeasible for this design' : undefined}
                   >
                     {content}
                   </td>

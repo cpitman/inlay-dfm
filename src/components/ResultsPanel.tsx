@@ -31,6 +31,7 @@ function Warning({ children }: { children: React.ReactNode }) {
 export default function ResultsPanel({ analysis, common, settings, label }: ResultsPanelProps) {
   const {
     fullDepthPercent, problemAreaPercent, passed, hasAnyFullDepth,
+    hasIsolatedUnreachableComponent,
     vbitAngleWarning, thinWallPixelCount,
   } = analysis;
   const { thinWallThresholdInches } = common;
@@ -57,6 +58,8 @@ export default function ResultsPanel({ analysis, common, settings, label }: Resu
           <p className="text-xs text-slate-300 mt-0.5">
             {!hasAnyFullDepth
               ? 'No area reaches full inlay depth.'
+              : hasIsolatedUnreachableComponent
+              ? `An isolated piece of the ${isPocket ? 'design' : 'background'} cannot reach full depth at all — too narrow for this V-bit.`
               : passed
               ? 'All not-full-depth zones are within tolerance of a full-depth region.'
               : `${problemAreaPercent.toFixed(2)}% of ${isPocket ? 'design' : 'background'} area: ${depthDesc}.`}

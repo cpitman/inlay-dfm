@@ -2,7 +2,7 @@ import type { Layer, VectorData } from '@/types';
 import { distanceTransform } from './distanceTransform';
 import { maskToSvgPath } from './maskToPath';
 import { detectAlignmentRisk } from './alignmentRisk';
-import { layerToStandaloneSvg } from './svgLayers';
+import { layerToStandaloneSvg, parseViewBox } from './svgLayers';
 
 const DEFAULT_RASTER_WIDTH = 1200;
 const ALIGNMENT_THRESHOLD_INCHES = 0.01;
@@ -12,6 +12,12 @@ const ALIGNMENT_THRESHOLD_INCHES = 0.01;
 // rounding when the analysis re-rasterizes the modified SVG.
 const EXTENSION_INCHES = 0.05;
 const SAFE_MARGIN_INCHES = 0.01;
+// Dilate the appended extension polygon by this many pixels so it overshoots
+// into the original target mask, bridging the half-pixel inset of marching
+// squares and any DP drift. Constrained at use-site to stay inside
+// (extensionMask | targetMask | laterUnion) so it can't bleed into open
+// background or earlier-layer territory.
+const TRACE_OVERSHOOT_PX = 2;
 
 interface RasterContext {
   canvasW: number;
@@ -98,8 +104,9 @@ interface ExtendResult {
  *   3. Compute extension territory = pixels within (gap + extension) of any risk
  *      pixel, NOT already in the target layer, AND at least
  *      `SAFE_MARGIN_INCHES` away from any earlier layer.
- *   4. New target mask = original ∪ extension. Convert to clean polygon path
- *      via marching squares + Douglas–Peucker; replace target layer fragment.
+ *   4. Trace just the extension region as an SVG path (marching squares +
+ *      Douglas-Peucker) and append it to the target layer's existing
+ *      fragment. The original geometry is preserved exactly.
  *
  * Layer order = `colorOrder`, defaults to `vector.detectedColors` (the same
  * order the user can re-arrange in the UI; pass that order to keep "earlier"
@@ -178,15 +185,18 @@ export async function extendForRegistration(
   }
 
   // -----------------------------------------------------------------------
-  // 5. Apply constraints to produce the extension mask.
+  // 5. Apply constraints to produce the extension-only mask. Pixels in the
+  //    original target layer are NOT included — we'll append the new region
+  //    as a separate path rather than re-emitting the whole layer (see
+  //    step 6 for the rationale).
   // -----------------------------------------------------------------------
   let added = 0;
-  const newMask = new Uint8Array(n);
+  const extensionMask = new Uint8Array(n);
   for (let k = 0; k < n; k++) {
-    if (targetMask[k]) { newMask[k] = 1; continue; }
-    if (distToRisk[k] >= reachPx) continue;          // not near a risk site
+    if (targetMask[k]) continue;                                    // already covered
+    if (distToRisk[k] >= reachPx) continue;                         // not near a risk site
     if (distToEarlier && distToEarlier[k] < safeMarginPx) continue; // too close to earlier
-    newMask[k] = 1;
+    extensionMask[k] = 1;
     added++;
   }
 
@@ -195,23 +205,57 @@ export async function extendForRegistration(
   }
 
   // -----------------------------------------------------------------------
-  // 6. Convert newMask → clean polygon path; replace target layer fragment.
-  //    Mask is at canvasW × canvasH; map back to user-space coords using
-  //    naturalWidth / naturalHeight scaling.
+  // 6. Trace ONLY the extension region and APPEND it to the existing
+  //    layer fragment. We deliberately don't trace `original ∪ extension`
+  //    and replace: that round-trips every Bezier in the layer through
+  //    marching squares + Douglas-Peucker, which drifts unrelated edges
+  //    by ~1 px and (e.g.) shrinks thin background gaps between adjacent
+  //    regions. Appending a separate path leaves the original geometry
+  //    byte-identical.
+  //
+  //    Dilate the extension by TRACE_OVERSHOOT_PX so the appended polygon
+  //    overshoots inward (into targetMask) and into later layers — both
+  //    invisible (same color / hidden by z-order). Constrain dilation to
+  //    (extension | target | laterUnion) so the overshoot can't paint
+  //    open background or earlier-layer territory.
   // -----------------------------------------------------------------------
+  const laterUnion = new Uint8Array(n);
+  for (let j = i + 1; j < masks.length; j++) {
+    for (let k = 0; k < n; k++) if (masks[j][k]) laterUnion[k] = 1;
+  }
+  const overshootAllowed = new Uint8Array(n);
+  for (let k = 0; k < n; k++) {
+    overshootAllowed[k] = (extensionMask[k] || targetMask[k] || laterUnion[k]) ? 1 : 0;
+  }
+  const seedsExt = new Uint8Array(n);
+  for (let k = 0; k < n; k++) seedsExt[k] = extensionMask[k] ? 0 : 1;
+  const distFromExt = distanceTransform(seedsExt, canvasW, canvasH);
+  const tracedMask = new Uint8Array(n);
+  for (let k = 0; k < n; k++) {
+    if (overshootAllowed[k] && distFromExt[k] <= TRACE_OVERSHOOT_PX) tracedMask[k] = 1;
+  }
+
   const scaleX = vector.naturalWidth  / canvasW;
   const scaleY = vector.naturalHeight / canvasH;
-  const newFragment = maskToSvgPath(newMask, canvasW, canvasH, {
+  const vb = parseViewBox(vector.viewBox);
+  const extensionPath = maskToSvgPath(tracedMask, canvasW, canvasH, {
     fill: targetColorHex,
     scaleX,
     scaleY,
+    // viewBox origin is non-zero after the parse-time whitespace trim;
+    // emit the new path in document coords so it aligns with the
+    // unchanged layer fragments.
+    offsetX: vb.x,
+    offsetY: vb.y,
     simplifyEpsilonPx: 1,
     minAreaPx: 4,
   });
 
-  const newLayers = vector.layers.map(l =>
-    l.colorHex === targetColorHex ? { ...l, svgFragment: newFragment } : l
-  );
+  const newLayers = vector.layers.map(l => {
+    if (l.colorHex !== targetColorHex) return l;
+    const sep = l.svgFragment ? '\n' : '';
+    return { ...l, svgFragment: `${l.svgFragment}${sep}${extensionPath}` };
+  });
 
   return {
     layers: newLayers,

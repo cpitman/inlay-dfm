@@ -79,8 +79,34 @@ export default function SettingsPanel({ settings, onChange }: SettingsPanelProps
   return (
     <div className="space-y-4">
       <Field
+        label="Board Dimensions"
+        hint="The actual board (e.g. cutting board) the design will sit on. Used only by the Composite view; analysis is unaffected."
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500 w-12">Width</span>
+          <NumberInput
+            value={settings.boardWidthInches}
+            onChange={(v) => set('boardWidthInches', v)}
+            min={0.5}
+            step={0.5}
+            unit="in"
+          />
+        </div>
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-xs text-slate-500 w-12">Height</span>
+          <NumberInput
+            value={settings.boardHeightInches}
+            onChange={(v) => set('boardHeightInches', v)}
+            min={0.5}
+            step={0.5}
+            unit="in"
+          />
+        </div>
+      </Field>
+
+      <Field
         label="Design Width"
-        hint="The real-world width of the uploaded design."
+        hint="Real-world width of the design itself. Updates live when you scale the design on the Composite view."
       >
         <NumberInput
           value={settings.designWidthInches}
@@ -162,6 +188,19 @@ export default function SettingsPanel({ settings, onChange }: SettingsPanelProps
             </button>
           ))}
         </div>
+      </Field>
+
+      <Field
+        label="Plug Stock Margin"
+        hint="Extra material added around each plug's convex hull when modeling the plug stock. Plug carved area = (hull + margin) − plug shape."
+      >
+        <NumberInput
+          value={settings.plugStockMarginInches}
+          onChange={(v) => set('plugStockMarginInches', v)}
+          min={0}
+          step={0.0625}
+          unit="inches"
+        />
       </Field>
 
       <Field

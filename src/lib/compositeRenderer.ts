@@ -1,36 +1,9 @@
 import type { VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
 import { WOOD_SPECIES } from './woodSpecies';
+import { applyGrain } from './woodGrain';
 
 const CANVAS_WIDTH = 1200;
 const COLOR_TOLERANCE_SQ = 900; // ~30 per channel, matches analysis tolerance
-
-function hexToRgb(hex: string): [number, number, number] {
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16),
-  ];
-}
-
-function applyGrain(
-  baseHex: string,
-  grainHex: string,
-  x: number,
-  y: number,
-): [number, number, number] {
-  const [br, bg, bb] = hexToRgb(baseHex);
-  const [gr, gg, gb] = hexToRgb(grainHex);
-  // Primary grain lines: horizontal sine at ~7px period
-  const t = Math.abs(Math.sin((y * Math.PI) / 7));
-  // Subtle long-range figure variation
-  const figure = 0.97 + 0.03 * Math.sin(y / 55 + x / 130);
-  const f = Math.min(1, t * figure);
-  return [
-    Math.round(gr + (br - gr) * f),
-    Math.round(gg + (bg - gg) * f),
-    Math.round(gb + (bb - gb) * f),
-  ];
-}
 
 /**
  * Rasterize the SVG and remap each color region to its assigned wood species

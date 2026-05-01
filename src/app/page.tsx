@@ -8,6 +8,7 @@ import { generateComposite } from '@/lib/compositeRenderer';
 import { WOOD_SPECIES, WOOD_SPECIES_ORDER, guessSpecies } from '@/lib/woodSpecies';
 import { combineLayers } from '@/lib/svgLayers';
 import { extendForRegistration } from '@/lib/extendForRegistration';
+import { fillEnclosedHoles } from '@/lib/fillEnclosedHoles';
 import { downloadSvg } from '@/lib/svgExport';
 import { formatMinutes } from '@/lib/machiningTime';
 import FileUpload from '@/components/FileUpload';
@@ -45,6 +46,11 @@ const DEFAULT_SETTINGS: DFMSettings = {
   grainDirection: 'horizontal',
   analysisResolution: 'default',
   clearanceBitDiameterInches: 0.25,
+  plugStockMarginInches: 0.25,
+  boardWidthInches: 12,
+  boardHeightInches: 9,
+  designOffsetXInches: 3.5,  // ((12 - 5) / 2)
+  designOffsetYInches: 2,    // (9 - 5) / 2 ; refined on file load to actual aspect
 };
 
 /** Convert the user's resolution preset into the canvas pixel width used by the analyzer/extender. */
@@ -178,6 +184,20 @@ export default function Home() {
       setOriginalVector(parsed);
       setHistory([{ layers: parsed.layers, label: 'Original' }]);
       setHistoryIndex(0);
+      // Auto-fit and center the design on the board: clamp design width so
+      // the (aspect-correct) design fits, then center.
+      setSettings(prev => {
+        const aspect = parsed.naturalHeight / parsed.naturalWidth;
+        const maxWForBoard = Math.min(prev.boardWidthInches, prev.boardHeightInches / aspect);
+        const designW = Math.min(prev.designWidthInches, maxWForBoard);
+        const designH = designW * aspect;
+        return {
+          ...prev,
+          designWidthInches: designW,
+          designOffsetXInches: Math.max(0, (prev.boardWidthInches  - designW) / 2),
+          designOffsetYInches: Math.max(0, (prev.boardHeightInches - designH) / 2),
+        };
+      });
       setStatus('idle');
     } catch (e) {
       setErrorMsg((e as Error).message);
@@ -234,6 +254,32 @@ export default function Home() {
       } else {
         const label = woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
         pushSnapshot(res.layers, `Extend ${label} for registration (+${res.addedAreaSqInches.toFixed(3)} in²)`);
+      }
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+      setStatus('error');
+    } finally {
+      setBusyModification(false);
+    }
+  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+
+  const handleFillEnclosedHoles = useCallback(async (colorHex: string) => {
+    if (!vector) return;
+    setBusyModification(true);
+    setErrorMsg('');
+    try {
+      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
+      const res = await fillEnclosedHoles(vector, colorHex, settings.designWidthInches, colorOrder, canvasWidth);
+      if (res.filledHoleCount === 0) {
+        setErrorMsg('No fillable enclosed holes found on this layer.');
+        setStatus('error');
+      } else {
+        const label = woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
+        pushSnapshot(
+          res.layers,
+          `Fill ${res.filledHoleCount} hole${res.filledHoleCount !== 1 ? 's' : ''} in ${label} (+${res.filledAreaSqIn.toFixed(3)} in²)`,
+        );
       }
     } catch (e) {
       setErrorMsg((e as Error).message);
@@ -430,7 +476,7 @@ export default function Home() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 flex flex-col overflow-hidden p-6 min-w-0">
           {/* View toggle + overlay controls */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             {/* Left: legend or placeholder */}
@@ -521,14 +567,30 @@ export default function Home() {
           </div>
 
           {mainView === 'composite' && vector ? (
-            <CompositeView
-              dataUrl={compositeDataUrl}
-              generating={compositeGenerating}
-              woodConfigs={woodConfigs}
-              backgroundSpecies={backgroundSpecies}
-            />
+            <div className="flex-1 min-h-0">
+              <CompositeView
+                dataUrl={compositeDataUrl}
+                generating={compositeGenerating}
+                woodConfigs={woodConfigs}
+                backgroundSpecies={backgroundSpecies}
+                vector={vector}
+                boardWidthInches={settings.boardWidthInches}
+                boardHeightInches={settings.boardHeightInches}
+                designWidthInches={settings.designWidthInches}
+                designOffsetXInches={settings.designOffsetXInches}
+                designOffsetYInches={settings.designOffsetYInches}
+                onCommitPlacement={(offsetX, offsetY, designWidth) => {
+                  setSettings(prev => ({
+                    ...prev,
+                    designOffsetXInches: offsetX,
+                    designOffsetYInches: offsetY,
+                    designWidthInches: designWidth,
+                  }));
+                }}
+              />
+            </div>
           ) : (
-            <>
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {/* Shared geometry */}
               {result && (
                 <div className="bg-slate-800 rounded-lg px-4 py-3 mb-5 text-xs space-y-2">
@@ -536,8 +598,6 @@ export default function Home() {
                     <GeomStat label="V-bit cut width"   value={result.vbitCutWidthInches}    />
                     <Divider />
                     <GeomStat label="Full-depth radius" value={result.fullDepthRadiusInches} />
-                    <Divider />
-                    <GeomStat label="Problem threshold" value={result.thresholdInches}       sub="2× cut width" />
                     {settings.grainDirection !== 'end' && (
                       <>
                         <Divider />
@@ -631,6 +691,7 @@ export default function Home() {
                         isModified={isModified}
                         busyModification={busyModification}
                         onExtendForRegistration={() => handleExtendForRegistration(wc.colorHex)}
+                        onFillEnclosedHoles={() => handleFillEnclosedHoles(wc.colorHex)}
                         onResetLayer={() => handleResetLayer(wc.colorHex)}
                       />
                     );
@@ -652,7 +713,7 @@ export default function Home() {
                   <p>Areas that never reach full inlay depth <em>and</em> are far from any full-depth zone are highlighted in red. Thin opposing-grain walls are highlighted in amber.</p>
                 </div>
               )}
-            </>
+            </div>
           )}
         </main>
       </div>
