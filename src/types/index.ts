@@ -54,6 +54,21 @@ export interface DFMSettings {
    * dilated by this margin) − (plug shape).
    */
   plugStockMarginInches: number;
+  /**
+   * Vertical clearance left between the plug's bottom face and the pocket
+   * floor so glue has room. The plug-side carve depth is reduced uniformly
+   * by this amount, clamped to no-carve where the original depth was less.
+   * Typical values: 0.003"–0.010".
+   */
+  plugGlueGapInches: number;
+  /**
+   * Additional vertical clearance applied to the plug's flat-bottom carve
+   * region only (the area where the v-bit reaches full depth). Creates a
+   * step-down at the foot of the tapered wall so the plug's "shoulder"
+   * doesn't bottom out before the plug seats fully. Typical: 0.005"–0.015".
+   * Net effective plug depth used for time = inlayDepth - glueGap + surfaceGap.
+   */
+  plugSurfaceGapInches: number;
   /** User-supplied V-bit material removal rate (in³/min). Set only when the V-bit angle is non-preset. */
   vbitMRRInches3PerMin?: number;
   /** User-supplied V-bit linear feed rate (in/min). Set only when the V-bit angle is non-preset. */

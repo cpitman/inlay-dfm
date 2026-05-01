@@ -194,6 +194,8 @@ function validateSettings(value: unknown): DFMSettings {
     })(),
     toolChangeMinutes:        expectFiniteNumber(s.toolChangeMinutes,        'settings.toolChangeMinutes'),
     plugStockMarginInches:    expectFiniteNumber(s.plugStockMarginInches,    'settings.plugStockMarginInches'),
+    plugGlueGapInches:        expectFiniteNumber(s.plugGlueGapInches,        'settings.plugGlueGapInches'),
+    plugSurfaceGapInches:     expectFiniteNumber(s.plugSurfaceGapInches,     'settings.plugSurfaceGapInches'),
     boardWidthInches:         expectFiniteNumber(s.boardWidthInches,         'settings.boardWidthInches'),
     boardHeightInches:        expectFiniteNumber(s.boardHeightInches,        'settings.boardHeightInches'),
     designOffsetXInches:      expectFiniteNumber(s.designOffsetXInches,      'settings.designOffsetXInches'),

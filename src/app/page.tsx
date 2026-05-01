@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS: DFMSettings = {
   clearanceStrategy: [0.25],
   toolChangeMinutes: 5,
   plugStockMarginInches: 0.25,
+  plugGlueGapInches: 0.005,
+  plugSurfaceGapInches: 0.010,
   boardWidthInches: 12,
   boardHeightInches: 9,
   designOffsetXInches: 3.5,
@@ -141,6 +143,8 @@ export default function Home() {
     settings.grainDirection,
     settings.analysisResolution,
     settings.plugStockMarginInches,
+    settings.plugGlueGapInches,
+    settings.plugSurfaceGapInches,
     settings.vbitMRRInches3PerMin,
     settings.vbitFeedInchesPerMin,
   ].join('|'), [
@@ -149,6 +153,8 @@ export default function Home() {
     settings.grainDirection,
     settings.analysisResolution,
     settings.plugStockMarginInches,
+    settings.plugGlueGapInches,
+    settings.plugSurfaceGapInches,
     settings.vbitMRRInches3PerMin,
     settings.vbitFeedInchesPerMin,
   ]);

@@ -183,14 +183,25 @@ export function buildMachiningTimeMatrix(params: {
   canvasW: number;
   canvasH: number;
   pixelsPerInch: number;
+  /** Pocket inlay depth — used directly for pocket-side time. */
   inlayDepthInches: number;
+  /**
+   * Plug-fit clearances. When present, plug-side time uses an effective
+   * depth of `max(0, inlayDepthInches - glueGapInches + surfaceGapInches)`
+   * for both clearance and v-bit area; perimeter time is unaffected.
+   * Pocket-side time always uses `inlayDepthInches`.
+   */
+  plugFit?: { glueGapInches: number; surfaceGapInches: number };
   /** All available clearance bits (each with MRR). The strategies enumerated below are subsets of these. */
   clearanceBits: { diameterInches: number; mrr: number }[];
   vbits: import('@/types').MachiningTimeMatrix['vbits'];
 }): import('@/types').MachiningTimeMatrix {
   const { layers, canvasW, canvasH, pixelsPerInch, inlayDepthInches,
-          clearanceBits, vbits } = params;
+          plugFit, clearanceBits, vbits } = params;
   const ppiSq = pixelsPerInch * pixelsPerInch;
+  const plugDepthInches = plugFit
+    ? Math.max(0, inlayDepthInches - plugFit.glueGapInches + plugFit.surfaceGapInches)
+    : inlayDepthInches;
   const mrrByDiameter = new Map(clearanceBits.map(b => [b.diameterInches, b.mrr]));
 
   const strategies = enumerateClearanceStrategies(clearanceBits.map(b => b.diameterInches));
@@ -227,7 +238,7 @@ export function buildMachiningTimeMatrix(params: {
       if (!v.feasible) return NaN;
       let total = 0;
 
-      const sideTime = (side: SideAreas, perimIn: number): number => {
+      const sideTime = (side: SideAreas, perimIn: number, depthInches: number): number => {
         // Walk strategy bits descending; each bit clears the residual
         // not yet covered by larger bits. Smaller bits' opens are supersets
         // of larger ones, so incremental = open(b_i) − open(b_{i-1}).
@@ -238,20 +249,21 @@ export function buildMachiningTimeMatrix(params: {
           const incrementalPx = Math.max(0, openedPx - prevOpenedPx);
           const incrementalAreaSqIn = incrementalPx / ppiSq;
           const mrr = mrrByDiameter.get(d) ?? 0;
-          if (mrr > 0) clearanceTime += incrementalAreaSqIn * inlayDepthInches / mrr;
+          if (mrr > 0) clearanceTime += incrementalAreaSqIn * depthInches / mrr;
           prevOpenedPx = openedPx;
         }
         const vbitPx = side.totalPx - prevOpenedPx;
         const vbitAreaSqIn = vbitPx / ppiSq;
-        const tVbitArea = v.mrr  > 0 ? vbitAreaSqIn * inlayDepthInches / v.mrr : 0;
-        const tPerim    = v.feed > 0 ? perimIn / v.feed                        : 0;
+        const tVbitArea = v.mrr  > 0 ? vbitAreaSqIn * depthInches / v.mrr : 0;
+        const tPerim    = v.feed > 0 ? perimIn / v.feed                   : 0;
         return clearanceTime + tVbitArea + tPerim;
       };
 
       for (let li = 0; li < layers.length; li++) {
         const sides = layerSides[li];
         const perim = layers[li].pocketPerimeterIn;
-        total += sideTime(sides.pocket, perim) + sideTime(sides.plug, perim);
+        total += sideTime(sides.pocket, perim, inlayDepthInches)
+              + sideTime(sides.plug,   perim, plugDepthInches);
       }
       return total;
     })

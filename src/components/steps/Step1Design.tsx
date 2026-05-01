@@ -5,6 +5,7 @@ import { WOOD_SPECIES, WOOD_SPECIES_ORDER } from '@/lib/woodSpecies';
 import FileUpload from '../FileUpload';
 import DesignSettingsPanel from '../DesignSettingsPanel';
 import AdvancedSettingsPanel from '../AdvancedSettingsPanel';
+import PlugFitPanel from '../PlugFitPanel';
 import WoodList from '../WoodList';
 import CompositeView from '../CompositeView';
 import { StepNav } from '../StepperBar';
@@ -75,6 +76,15 @@ export default function Step1Design({
                 Geometry
               </h2>
               <DesignSettingsPanel settings={settings} onChange={onSettingsChange} />
+            </section>
+          )}
+
+          {vector && (
+            <section>
+              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                Plug Fit
+              </h2>
+              <PlugFitPanel settings={settings} onChange={onSettingsChange} />
             </section>
           )}
 

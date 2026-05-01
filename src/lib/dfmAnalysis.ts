@@ -487,6 +487,21 @@ async function buildOverlay(
   return canvasToDataUrl(oc);
 }
 
+/**
+ * Plug-fit clearances applied to the plug-side depth map. When provided,
+ * each plug-side pixel's effective depth is:
+ *   - tapered region (dist1 < fullDepthRadiusPx):
+ *     `max(0, dist1/fullDepthRadiusPx · inlayDepth − glueGap)`
+ *   - flat-bottom region (dist1 ≥ fullDepthRadiusPx):
+ *     `inlayDepth − glueGap + surfaceGap` (uniform)
+ * which produces a visible step-down at the boundary.
+ */
+interface DepthMapPlugFit {
+  glueGapInches: number;
+  surfaceGapInches: number;
+  inlayDepthInches: number;
+}
+
 async function buildDepthMap(
   base: OffscreenCanvas,
   canvasW: number,
@@ -494,20 +509,71 @@ async function buildDepthMap(
   carvedMask: Uint8Array,
   dist1: Float32Array,
   fullDepthRadiusPx: number,
+  plugFit?: DepthMapPlugFit,
 ): Promise<string> {
   const oc = new OffscreenCanvas(canvasW, canvasH);
   const ctx = oc.getContext('2d')!;
   ctx.drawImage(base, 0, 0);
   const img = ctx.getImageData(0, 0, canvasW, canvasH);
   const d = img.data;
+
+  // Without plugFit: ratio in [0,1], red → green.
+  // With plugFit on plug side: ratio can exceed 1 in the flat-bottom region
+  // (effective depth > inlayDepth). Render that range with a cyan tint so
+  // the step-down at the foot of the slope is visually distinguishable.
+  const inlay = plugFit?.inlayDepthInches ?? 0;
+  const glueGap = plugFit?.glueGapInches ?? 0;
+  const surfaceGap = plugFit?.surfaceGapInches ?? 0;
+  // ratio_max for color saturation; floor at 1 so color stays in normal
+  // gradient when surfaceGap is 0.
+  const overshootRatio = inlay > 0 ? Math.max(0, surfaceGap / inlay) : 0;
+
   for (let i = 0, n = canvasW * canvasH; i < n; i++) {
     if (!carvedMask[i]) continue;
-    const ratio = Math.min(1, dist1[i] / fullDepthRadiusPx);
-    // Red (shallow) → green (full depth)
-    d[i*4]   = Math.round(220 - 180 * ratio);
-    d[i*4+1] = Math.round(40  + 160 * ratio);
-    d[i*4+2] = 30;
-    d[i*4+3] = 220;
+    const baseRatio = dist1[i] / fullDepthRadiusPx; // 0 at wall, 1 at full-depth boundary
+
+    let r: number, g: number, b: number, a: number;
+
+    if (!plugFit) {
+      const ratio = Math.min(1, baseRatio);
+      r = Math.round(220 - 180 * ratio);
+      g = Math.round(40  + 160 * ratio);
+      b = 30;
+      a = 220;
+    } else {
+      // Effective depth in inches; capped/floored.
+      const baseDepth = Math.min(1, baseRatio) * inlay;
+      let effDepth: number;
+      if (baseRatio >= 1) {
+        // Flat-bottom region: drop by glueGap then add surfaceGap (uniform).
+        effDepth = Math.max(0, inlay - glueGap + surfaceGap);
+      } else {
+        // Tapered region: just drop by glueGap (clamp at no-carve).
+        effDepth = Math.max(0, baseDepth - glueGap);
+      }
+      const ratio = inlay > 0 ? effDepth / inlay : 0;
+
+      if (ratio <= 1) {
+        // Standard red → green for [0, 1].
+        const r0 = Math.min(1, ratio);
+        r = Math.round(220 - 180 * r0);
+        g = Math.round(40  + 160 * r0);
+        b = 30;
+      } else {
+        // Above nominal full depth — surface-gap region. Lerp from full
+        // green toward a green-cyan tint scaled by how far past 1 we are.
+        const over = Math.min(1, (ratio - 1) / Math.max(overshootRatio, 1e-6));
+        r = Math.round(40   - 30  * over);  // 40 → 10
+        g = Math.round(200);
+        b = Math.round(30   + 180 * over);  // 30 → 210 (cyan-ward)
+      }
+      a = 220;
+    }
+
+    d[i*4]   = r;
+    d[i*4+1] = g;
+    d[i*4+2] = b;
+    d[i*4+3] = a;
   }
   ctx.putImageData(img, 0, 0);
   return canvasToDataUrl(oc);
@@ -561,11 +627,21 @@ export async function runDfmAnalysis(
 
   const args = [canvasW, canvasH, pixelsPerInch, fullDepthRadiusPx, thinWallThresholdPx, grainDirection, vbitAngleDegrees] as const;
 
+  const plugDepthMapFit: DepthMapPlugFit | undefined =
+    (settings.plugGlueGapInches > 0 || settings.plugSurfaceGapInches > 0)
+      ? {
+          glueGapInches: settings.plugGlueGapInches,
+          surfaceGapInches: settings.plugSurfaceGapInches,
+          inlayDepthInches: inlayDepthInches,
+        }
+      : undefined;
+
   const toSingle = async (
     mask: Uint8Array,
     maskData: ReturnType<typeof analyzeMask>,
     layerBase: OffscreenCanvas,
     alignPixels?: Uint8Array,
+    plugFit?: DepthMapPlugFit,
   ): Promise<SingleAnalysis> => ({
     fullDepthPercent:   maskData.fullDepthPercent,
     problemAreaPercent: maskData.problemAreaPercent,
@@ -577,7 +653,7 @@ export async function runDfmAnalysis(
     overlayDataUrl:  await buildOverlay(layerBase, canvasW, canvasH, maskData.isProblem, maskData.isThinWall, alignPixels),
     // Populated in Phase 5.5 once the largest-feasible angle is known.
     suggestionOverlayDataUrl: '',
-    depthMapDataUrl: await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx),
+    depthMapDataUrl: await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx, plugFit),
   });
 
   // -----------------------------------------------------------------------
@@ -794,10 +870,17 @@ export async function runDfmAnalysis(
         vbitRates.feed,
         pocketPerimeterIn,
       );
+      // Plug side: the carve goes inlayDepth - glueGap + surfaceGap deep
+      // (uniform). machiningTimeForMask just multiplies area × depth, so
+      // pass the effective depth here.
+      const effectivePlugDepthInches = Math.max(
+        0,
+        inlayDepthInches - settings.plugGlueGapInches + settings.plugSurfaceGapInches,
+      );
       const tPlug = machiningTimeForMask(
         plugCarvedMask, plugCarvedDist1,
         canvasW, canvasH, pixelsPerInch,
-        inlayDepthInches,
+        effectivePlugDepthInches,
         settings.clearanceBitDiameterInches,
         clearanceMRR,
         vbitRates.mrr,
@@ -875,7 +958,7 @@ ${plugStockOutlineSvg}
     woods.push({
       colorHex,
       pocket: await toSingle(pocketMask, pocketAnalysis, pocketBase, alignVisualPerInlay[idx]),
-      plug:   await toSingle(plugMaskForDfm, plugAnalysis, plugBase),
+      plug:   await toSingle(plugMaskForDfm, plugAnalysis, plugBase, undefined, plugDepthMapFit),
       perPresetAnalysis: [], // populated in Phase 5 below
       widerBitInfeasibleMask: null, // populated in Phase 5.5 below if applicable
       alignmentIssues: alignIssues[idx],
@@ -966,7 +1049,7 @@ ${plugStockOutlineSvg}
         inp.pocketBase, canvasW, canvasH, inp.pocketMask, inp.pocketDist1, angleFdrPx,
       );
       const plugDepth = await buildDepthMap(
-        inp.plugBase, canvasW, canvasH, inp.plugMask, inp.plugDist1, angleFdrPx,
+        inp.plugBase, canvasW, canvasH, inp.plugMask, inp.plugDist1, angleFdrPx, plugDepthMapFit,
       );
 
       perPresetByWood[wIdx].push({
@@ -1011,6 +1094,12 @@ ${plugStockOutlineSvg}
     layers: matrixLayers,
     canvasW, canvasH, pixelsPerInch,
     inlayDepthInches,
+    plugFit: (settings.plugGlueGapInches > 0 || settings.plugSurfaceGapInches > 0)
+      ? {
+          glueGapInches: settings.plugGlueGapInches,
+          surfaceGapInches: settings.plugSurfaceGapInches,
+        }
+      : undefined,
     clearanceBits: CLEARANCE_BIT_OPTIONS.map(d => ({ diameterInches: d, mrr: CLEARANCE_BIT_MRR[d] })),
     vbits: matrixVbits,
   });

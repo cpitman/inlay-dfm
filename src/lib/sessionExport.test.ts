@@ -30,6 +30,8 @@ function makeSession(): SessionFile {
       clearanceStrategy: [0.25],
       toolChangeMinutes: 5,
       plugStockMarginInches: 0.25,
+      plugGlueGapInches: 0.005,
+      plugSurfaceGapInches: 0.010,
       boardWidthInches: 12,
       boardHeightInches: 9,
       designOffsetXInches: 3.5,
@@ -128,6 +130,21 @@ describe('loadSessionFromFile', () => {
     const s = makeSession() as unknown as Record<string, unknown>;
     (s.settings as Record<string, unknown>).clearanceStrategy = ['big', 'small'];
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/clearanceStrategy/);
+  });
+
+  it('round-trips plug-fit settings', async () => {
+    const s = makeSession();
+    s.settings.plugGlueGapInches = 0.007;
+    s.settings.plugSurfaceGapInches = 0.013;
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.settings.plugGlueGapInches).toBe(0.007);
+    expect(loaded.settings.plugSurfaceGapInches).toBe(0.013);
+  });
+
+  it('throws on bad plug-fit value type', async () => {
+    const s = makeSession() as unknown as Record<string, unknown>;
+    (s.settings as Record<string, unknown>).plugGlueGapInches = 'a lot';
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/plugGlueGapInches/);
   });
 
   it('throws on bad currentStep', async () => {

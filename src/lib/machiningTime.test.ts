@@ -57,6 +57,34 @@ describe('machiningTimeForMask', () => {
     expect(t.vbitPerimeterTimeMin).toBeGreaterThan(0);
   });
 
+  it('Plug-fit effective depth scales clearance and v-bit area times linearly', () => {
+    // Same 1×1" square. Pass two different effective depths (one with no
+    // plug-fit, one with glueGap < surfaceGap so net depth is larger) and
+    // verify clearance + v-bit-area times scale proportionally; perimeter
+    // time is independent of depth.
+    const w = 220, h = 220;
+    const mask = new Uint8Array(w * h);
+    for (let y = 10; y < 210; y++) {
+      for (let x = 10; x < 210; x++) mask[y * w + x] = 1;
+    }
+    const dist1 = dist1Of(mask, w, h);
+
+    const tBase = machiningTimeForMask(
+      mask, dist1, w, h, PIXELS_PER_INCH, INLAY_DEPTH,
+      CLEARANCE_DIAMETER, CLEARANCE_MRR, VBIT_MRR, VBIT_FEED,
+    );
+    // Net effective depth = inlay - 0.005 + 0.010 = inlay + 0.005.
+    const effective = INLAY_DEPTH - 0.005 + 0.010;
+    const tPlug = machiningTimeForMask(
+      mask, dist1, w, h, PIXELS_PER_INCH, effective,
+      CLEARANCE_DIAMETER, CLEARANCE_MRR, VBIT_MRR, VBIT_FEED,
+    );
+    const ratio = effective / INLAY_DEPTH;
+    expect(tPlug.clearanceTimeMin).toBeCloseTo(tBase.clearanceTimeMin * ratio, 6);
+    expect(tPlug.vbitAreaTimeMin).toBeCloseTo(tBase.vbitAreaTimeMin * ratio, 6);
+    expect(tPlug.vbitPerimeterTimeMin).toBeCloseTo(tBase.vbitPerimeterTimeMin, 6); // unaffected
+  });
+
   it('Thin 0.05" wide strip: clearance bit cannot fit → all time is V-bit', () => {
     // 200 ppi, 0.05" × 1" strip = 10 px × 200 px. Clearance bit radius is
     // 25 px, so it can never sit anywhere inside a 10-px-wide strip.
