@@ -1,36 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Inlay DFM Analyzer
 
-## Getting Started
+A browser-based Design for Manufacturing (DFM) tool for CNC VCarve inlay designs. Upload an SVG or DXF file, set your tooling parameters, and get an instant feasibility analysis of both the pocket and plug cuts — no server required.
 
-First, run the development server:
+## What it does
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+A VCarve inlay involves two cuts:
+
+- **Pocket** — the design is carved into the base board. The V-bit tip traces the design vectors; depth increases going inward from the boundary.
+- **Plug** — the background around the design is carved away from a second board, leaving the design as a raised feature. The V-bit traces the same vectors from outside.
+
+For both cuts, the depth at any interior point follows:
+
+```
+depth = distance_from_edge / tan(V-bit_angle / 2)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Full inlay depth is reached only where `distance_from_edge ≥ inlay_depth × tan(half_angle)`. Features narrower than this never reach full depth, which causes a poor fit.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The analyzer checks each cut for:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Depth feasibility** — pixels that never reach full depth *and* are far (> 2× cut width) from any full-depth zone are flagged as problem areas.
+2. **Thin walls** (side grain only) — short runs of un-carved material perpendicular to the grain direction that are at risk of splitting. Blobs smaller than 0.25 in² are ignored as noise.
+3. **V-bit angle** (side grain only) — angles below 60° increase tearout risk across wood fibres.
 
-## Learn More
+## Parameters
 
-To learn more about Next.js, take a look at the following resources:
+| Parameter | Description |
+|---|---|
+| Design width | Real-world width of the design in inches (sets the pixel-to-inch scale) |
+| V-bit angle | Included angle of the V-bit (e.g. 60°, 90°) |
+| Inlay depth | Target inlay depth in inches |
+| Grain direction | Horizontal, vertical, or end grain — affects thin-wall and tearout checks |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Visualizations
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+After running analysis, three overlay modes are available for each canvas:
 
-## Deploy on Vercel
+- **Off** — plain SVG preview
+- **Threshold** — binary overlay: gray = OK, red = problem area, amber = thin wall opposing grain
+- **Depth Map** — continuous depth gradient: red = at the edge (zero depth), green = at or past full inlay depth
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## File support
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **SVG** — parsed directly; uses the `viewBox` for natural dimensions
+- **DXF** — converted to SVG via `dxf-parser`; closed polylines and splines are filled, open paths and arcs are stroked
+
+All rendering and analysis runs in the browser using `OffscreenCanvas` and a 4-pass approximate Euclidean Distance Transform.
+
+## Running locally
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## Stack
+
+- Next.js 16.2.4 (App Router, client-side only)
+- React 19, TypeScript, Tailwind CSS v4
+- [`dxf-parser`](https://www.npmjs.com/package/dxf-parser) for DXF support
