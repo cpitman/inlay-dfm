@@ -87,23 +87,31 @@ export default function Home() {
 
   const analysisStale = hasEverAnalyzed && result === null;
 
+  // Order-only key derived from woodConfigs: changes only when the user
+  // re-orders or adds/removes a layer. Label and species edits don't
+  // affect this key, so memos that key on it (like `vector` below) avoid
+  // expensive re-tracing when only display metadata changes.
+  const colorOrderKey = useMemo(() => woodConfigs.map(w => w.colorHex).join('|'), [woodConfigs]);
+
   // Live vector — original metadata plus the current snapshot's layers,
-  // reordered to match woodConfigs so the combined svgString reflects the
-  // user's chosen z-order.
+  // reordered to match woodConfigs's z-order. Keyed on `colorOrderKey`
+  // (not `woodConfigs`) so label/species edits don't recompute the
+  // expensive combineLayers call.
   const vector: VectorData | null = useMemo(() => {
     if (!originalVector) return null;
     const snap = history[historyIndex];
     const snapLayers = snap?.layers ?? originalVector.layers;
+    const orderHexes = colorOrderKey ? colorOrderKey.split('|').filter(Boolean) : [];
 
     let orderedLayers: Layer[];
-    if (woodConfigs.length === 0) {
+    if (orderHexes.length === 0) {
       orderedLayers = snapLayers;
     } else {
       const byHex = new Map(snapLayers.map(l => [l.colorHex, l]));
       orderedLayers = [];
-      for (const wc of woodConfigs) {
-        const l = byHex.get(wc.colorHex);
-        if (l) { orderedLayers.push(l); byHex.delete(wc.colorHex); }
+      for (const hex of orderHexes) {
+        const l = byHex.get(hex);
+        if (l) { orderedLayers.push(l); byHex.delete(hex); }
       }
       for (const l of byHex.values()) orderedLayers.push(l);
     }
@@ -115,7 +123,7 @@ export default function Home() {
         orderedLayers, originalVector.viewBox, originalVector.naturalWidth, originalVector.naturalHeight,
       ),
     };
-  }, [originalVector, history, historyIndex, woodConfigs]);
+  }, [originalVector, history, historyIndex, colorOrderKey]);
 
   // Invalidate every snapshot's cached analysis result when an *analysis-
   // affecting* setting or the layer order changes. Settings that the
@@ -127,7 +135,6 @@ export default function Home() {
   //     clearance bit, so Step 4 cell clicks are free.
   //   - boardWidthInches/boardHeightInches/designOffset*: composite-view
   //     placement only — not consumed by analysis math.
-  const colorOrderKey = useMemo(() => woodConfigs.map(w => w.colorHex).join('|'), [woodConfigs]);
   const analysisInputsKey = useMemo(() => [
     settings.designWidthInches,
     settings.inlayDepthInches,
