@@ -161,6 +161,10 @@ export default function Step2DFM({
                       Widen for {result.step2SuggestionAngleDegrees}° v-bit (faster)
                     </span>
                   )}
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-4 inline-block border-t-2 border-dashed" style={{ borderColor: 'rgb(255,140,0)' }} />
+                    Plug stock outline (modeled, plug side only)
+                  </span>
                 </>
               ) : overlayMode === 'depthmap' ? (
                 <>

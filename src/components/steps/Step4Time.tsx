@@ -39,20 +39,33 @@ export default function Step4Time({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-5">
-        {/* Total time header */}
-        {result && (
-          <div className="bg-slate-800 rounded-lg px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-2 items-center">
-            <span>
-              <span className="text-slate-400">Total machine time</span>
-              <span className="ml-2 font-semibold text-white text-base">
-                {isFinite(result.totalMachineTimeMinutes) ? formatMinutes(result.totalMachineTimeMinutes) : '—'}
+        {/* Total time header — derived from the matrix at the current
+            (clearance, v-bit) selection so it stays in sync when Step 3
+            changes the angle without re-running analysis. */}
+        {result && (() => {
+          const matrix = result.machiningTimeTable;
+          const ci = matrix.clearanceBits.findIndex(b => b.diameterInches === settings.clearanceBitDiameterInches);
+          const vi = matrix.vbits.findIndex(v => v.angleDegrees === settings.vbitAngleDegrees);
+          const t = (ci >= 0 && vi >= 0) ? matrix.times[ci][vi] : NaN;
+          return (
+            <div className="bg-slate-800 rounded-lg px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-2 items-center">
+              <span>
+                <span className="text-slate-400">Total machine time</span>
+                <span className="ml-2 font-semibold text-white text-base">
+                  {isFinite(t) ? formatMinutes(t) : '—'}
+                </span>
+                {!isFinite(t) && (
+                  <span className="ml-2 text-amber-400 text-xs">
+                    (combination is infeasible — pick another row/column below)
+                  </span>
+                )}
               </span>
-            </span>
-            <span className="text-slate-500 text-xs">
-              {settings.vbitAngleDegrees}° v-bit · {CLEARANCE_BIT_LABELS[settings.clearanceBitDiameterInches]} clearance
-            </span>
-          </div>
-        )}
+              <span className="text-slate-500 text-xs">
+                {settings.vbitAngleDegrees}° v-bit · {CLEARANCE_BIT_LABELS[settings.clearanceBitDiameterInches]} clearance
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Clearance bit picker */}
         <section>

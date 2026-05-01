@@ -1,4 +1,4 @@
-import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue } from '@/types';
+import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, MachiningTimeMatrix } from '@/types';
 import { distanceTransform } from './distanceTransform';
 import { layerToStandaloneSvg } from './svgLayers';
 import { detectAlignmentRisk } from './alignmentRisk';
@@ -161,6 +161,21 @@ export function monotonicAscentReachable(
 // and plug). Does the same depth/threshold reasoning as analyzeMask but
 // skips thin-wall analysis and overlay generation.
 // ---------------------------------------------------------------------------
+interface ProblemStatsForAngle {
+  /** Percent of carved pixels that are "problem" pixels (not full depth, no level-set path to a full-depth seed). */
+  percent: number;
+  /** True when an entire connected carved component cannot reach full depth — too narrow for this v-bit. */
+  hasIsolatedComponent: boolean;
+  /** Percent of carved pixels at full depth (dist1 ≥ fullDepthRadiusPx). */
+  fullDepthPercent: number;
+  /** True when at least one carved pixel reaches full depth. */
+  hasAnyFullDepth: boolean;
+  /** True when this side passes the strict 0.1% threshold AND has no isolated unreachable component. */
+  passed: boolean;
+  /** Per-pixel problem mask (only populated when returnMask=true). */
+  problemMask?: Uint8Array;
+}
+
 function problemStatsForAngle(
   carvedMask: Uint8Array,
   dist1: Float32Array,
@@ -168,19 +183,23 @@ function problemStatsForAngle(
   canvasW: number,
   canvasH: number,
   returnMask: boolean = false,
-): { percent: number; hasIsolatedComponent: boolean; problemMask?: Uint8Array } {
+): ProblemStatsForAngle {
   const n = canvasW * canvasH;
   const isFullDepth = new Uint8Array(n);
   let carvedCount = 0;
+  let fullDepthCount = 0;
   for (let i = 0; i < n; i++) {
     if (!carvedMask[i]) continue;
     carvedCount++;
-    if (dist1[i] >= fullDepthRadiusPx) isFullDepth[i] = 1;
+    if (dist1[i] >= fullDepthRadiusPx) { isFullDepth[i] = 1; fullDepthCount++; }
   }
   if (carvedCount === 0) {
     return {
       percent: 0,
       hasIsolatedComponent: false,
+      fullDepthPercent: 0,
+      hasAnyFullDepth: false,
+      passed: true,
       ...(returnMask ? { problemMask: new Uint8Array(n) } : {}),
     };
   }
@@ -198,10 +217,14 @@ function problemStatsForAngle(
   const hasIsolatedComponent = carvedHasComponentWithoutFullDepth(
     carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH,
   );
+  const percent = (problemCount / carvedCount) * 100;
 
   return {
-    percent: (problemCount / carvedCount) * 100,
+    percent,
     hasIsolatedComponent,
+    fullDepthPercent: (fullDepthCount / carvedCount) * 100,
+    hasAnyFullDepth: fullDepthCount > 0,
+    passed: percent < PASS_THRESHOLD_PERCENT && !hasIsolatedComponent,
     ...(problemMask ? { problemMask } : {}),
   };
 }
@@ -853,6 +876,7 @@ ${plugStockOutlineSvg}
       colorHex,
       pocket: await toSingle(pocketMask, pocketAnalysis, pocketBase, alignVisualPerInlay[idx]),
       plug:   await toSingle(plugMaskForDfm, plugAnalysis, plugBase),
+      perPresetAnalysis: [], // populated in Phase 5 below
       widerBitInfeasibleMask: null, // populated in Phase 5.5 below if applicable
       alignmentIssues: alignIssues[idx],
       clearanceAreaSqIn,
@@ -885,38 +909,103 @@ ${plugStockOutlineSvg}
   }
 
   // -----------------------------------------------------------------------
-  // Phase 5: Per-angle feasibility check, then comparison matrix.
+  // Phase 5: Per-preset analysis — overlays, depth maps, stats, AND matrix
+  // feasibility flags in one pass.
   //
-  // For every preset V-bit angle, compute the maximum problem-area % across
-  // all (layer × side) pairs reusing each side's dist1 EDT (so the only
-  // extra cost is one EDT2 + thresholding pass per angle per side). A V-bit
-  // angle is "feasible" only when every pocket and plug stays under
-  // FEASIBILITY_PROBLEM_PCT — otherwise the whole column in the matrix is
-  // marked N/A.
+  // For every preset V-bit angle × every wood × pocket/plug, we compute
+  // problemStatsForAngle (with the mask retained) and immediately build the
+  // overlay + depth-map PNGs at that angle. Step 3 then reads from
+  // WoodAnalysis.perPresetAnalysis to swap displayed overlays instantly when
+  // the user picks an angle — no re-analysis required.
+  //
+  // The matrix's per-angle `maxProblemAreaPercent` and `feasible` are
+  // accumulated as a byproduct of this same pass. We deliberately don't
+  // early-break (unlike the previous design): all sides need to be visited
+  // anyway to populate per-wood per-side overlays.
+  //
+  // Cost: ~36 PNG encodes (6 angles × 2 sides × ~3 woods) and as many
+  // problemStatsForAngle calls. Memory: just the encoded PNG strings —
+  // the masks are dropped immediately after each overlay build.
   // -----------------------------------------------------------------------
-  const matrixVbits = VBIT_PRESET_ANGLES.map(angleDeg => {
+  const perPresetByWood: PerPresetAngleResult[][] = woods.map(() => []);
+  const matrixVbits: MachiningTimeMatrix['vbits'] = [];
+
+  for (let aIdx = 0; aIdx < VBIT_PRESET_ANGLES.length; aIdx++) {
+    const angleDeg = VBIT_PRESET_ANGLES[aIdx];
     const half = (angleDeg / 2) * (Math.PI / 180);
-    const fdrInches = inlayDepthInches * Math.tan(half);
-    const angleFdrPx = fdrInches * pixelsPerInch;
+    const angleFdrPx = inlayDepthInches * Math.tan(half) * pixelsPerInch;
+    const angleVbitWarning = grainDirection !== 'end' && angleDeg < MIN_VBIT_ANGLE_SIDE_GRAIN;
 
     let maxProblem = 0;
     let anyIsolatedComponent = false;
-    for (const side of layerSidesForFeasibility) {
-      const stats = problemStatsForAngle(
-        side.mask, side.dist1, angleFdrPx, canvasW, canvasH,
+
+    for (let wIdx = 0; wIdx < woods.length; wIdx++) {
+      const inp = overlayRebuildInputs[wIdx];
+      const pocketStats = problemStatsForAngle(
+        inp.pocketMask, inp.pocketDist1, angleFdrPx, canvasW, canvasH, true,
       );
-      if (stats.percent > maxProblem) maxProblem = stats.percent;
-      if (stats.hasIsolatedComponent) anyIsolatedComponent = true;
-      // Two disqualifying conditions; once either is breached we can stop
-      // checking further sides.
-      if (maxProblem > FEASIBILITY_PROBLEM_PCT && anyIsolatedComponent) break;
+      const plugStats = problemStatsForAngle(
+        inp.plugMask, inp.plugDist1, angleFdrPx, canvasW, canvasH, true,
+      );
+
+      if (pocketStats.percent > maxProblem) maxProblem = pocketStats.percent;
+      if (plugStats.percent   > maxProblem) maxProblem = plugStats.percent;
+      if (pocketStats.hasIsolatedComponent || plugStats.hasIsolatedComponent) {
+        anyIsolatedComponent = true;
+      }
+
+      const pocketOverlay = await buildOverlay(
+        inp.pocketBase, canvasW, canvasH,
+        pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign,
+      );
+      const plugOverlay = await buildOverlay(
+        inp.plugBase, canvasW, canvasH,
+        plugStats.problemMask!, inp.plugIsThinWall,
+      );
+      const pocketDepth = await buildDepthMap(
+        inp.pocketBase, canvasW, canvasH, inp.pocketMask, inp.pocketDist1, angleFdrPx,
+      );
+      const plugDepth = await buildDepthMap(
+        inp.plugBase, canvasW, canvasH, inp.plugMask, inp.plugDist1, angleFdrPx,
+      );
+
+      perPresetByWood[wIdx].push({
+        angleDegrees: angleDeg,
+        pocket: {
+          fullDepthPercent: pocketStats.fullDepthPercent,
+          problemAreaPercent: pocketStats.percent,
+          passed: pocketStats.passed,
+          hasAnyFullDepth: pocketStats.hasAnyFullDepth,
+          hasIsolatedUnreachableComponent: pocketStats.hasIsolatedComponent,
+          vbitAngleWarning: angleVbitWarning,
+          overlayDataUrl: pocketOverlay,
+          depthMapDataUrl: pocketDepth,
+        },
+        plug: {
+          fullDepthPercent: plugStats.fullDepthPercent,
+          problemAreaPercent: plugStats.percent,
+          passed: plugStats.passed,
+          hasAnyFullDepth: plugStats.hasAnyFullDepth,
+          hasIsolatedUnreachableComponent: plugStats.hasIsolatedComponent,
+          vbitAngleWarning: angleVbitWarning,
+          overlayDataUrl: plugOverlay,
+          depthMapDataUrl: plugDepth,
+        },
+      });
     }
-    return {
+
+    matrixVbits.push({
       angleDegrees: angleDeg,
       ...VBIT_RATES[angleDeg],
       feasible: maxProblem <= FEASIBILITY_PROBLEM_PCT && !anyIsolatedComponent,
-    };
-  });
+      maxProblemAreaPercent: maxProblem,
+      hasIsolatedComponent: anyIsolatedComponent,
+    });
+  }
+
+  for (let wIdx = 0; wIdx < woods.length; wIdx++) {
+    woods[wIdx].perPresetAnalysis = perPresetByWood[wIdx];
+  }
 
   const machiningTimeTable = buildMachiningTimeMatrix({
     layers: matrixLayers,

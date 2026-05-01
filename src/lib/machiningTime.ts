@@ -125,7 +125,7 @@ export function buildMachiningTimeMatrix(params: {
   pixelsPerInch: number;
   inlayDepthInches: number;
   clearanceBits: { diameterInches: number; mrr: number }[];
-  vbits: { angleDegrees: number; mrr: number; feed: number; feasible: boolean }[];
+  vbits: import('@/types').MachiningTimeMatrix['vbits'];
 }): import('@/types').MachiningTimeMatrix {
   const { layers, canvasW, canvasH, pixelsPerInch, inlayDepthInches,
           clearanceBits, vbits } = params;

@@ -63,6 +63,9 @@ export default function Home() {
   // even if a downstream edit invalidated a later step's prerequisite.
   const [currentStep, setCurrentStep] = useState<StepNumber>(1);
   const [maxReachedStep, setMaxReachedStep] = useState<StepNumber>(1);
+  // True once the user has explicitly picked a v-bit on Step 3. Until then,
+  // Step 3 auto-defaults vbitAngleDegrees to the widest feasible preset.
+  const [vbitTouched, setVbitTouched] = useState(false);
 
   // Current analysis result — derived from the snapshot's cache.
   const result: AnalysisResult | null = useMemo(
@@ -102,16 +105,41 @@ export default function Home() {
     };
   }, [originalVector, history, historyIndex, woodConfigs]);
 
-  // Invalidate every snapshot's cached analysis result whenever a setting or
-  // the layer order changes.
+  // Invalidate every snapshot's cached analysis result when an *analysis-
+  // affecting* setting or the layer order changes. Settings that the
+  // analysis pre-computes for every choice are deliberately excluded so
+  // changing them is an instant view swap, not a re-run:
+  //   - vbitAngleDegrees: every preset is in WoodAnalysis.perPresetAnalysis
+  //     and result.machiningTimeTable, so Step 3 picks are free.
+  //   - clearanceBitDiameterInches: machiningTimeTable iterates every
+  //     clearance bit, so Step 4 cell clicks are free.
+  //   - boardWidthInches/boardHeightInches/designOffset*: composite-view
+  //     placement only — not consumed by analysis math.
   const colorOrderKey = useMemo(() => woodConfigs.map(w => w.colorHex).join('|'), [woodConfigs]);
+  const analysisInputsKey = useMemo(() => [
+    settings.designWidthInches,
+    settings.inlayDepthInches,
+    settings.grainDirection,
+    settings.analysisResolution,
+    settings.plugStockMarginInches,
+    settings.vbitMRRInches3PerMin,
+    settings.vbitFeedInchesPerMin,
+  ].join('|'), [
+    settings.designWidthInches,
+    settings.inlayDepthInches,
+    settings.grainDirection,
+    settings.analysisResolution,
+    settings.plugStockMarginInches,
+    settings.vbitMRRInches3PerMin,
+    settings.vbitFeedInchesPerMin,
+  ]);
   useEffect(() => {
     setHistory(prev => {
       if (!prev.some(s => s.result)) return prev;
       return prev.map(s => (s.result ? { ...s, result: undefined } : s));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, colorOrderKey]);
+  }, [analysisInputsKey, colorOrderKey]);
 
   // Init woodConfigs from detected colors whenever a NEW file is parsed.
   useEffect(() => {
@@ -147,6 +175,7 @@ export default function Home() {
     setHasEverAnalyzed(false);
     setCurrentStep(1);
     setMaxReachedStep(1);
+    setVbitTouched(false);
     try {
       const parsed = await parseVectorFile(file);
       setOriginalVector(parsed);
@@ -401,6 +430,11 @@ export default function Home() {
   const advanceTo = useCallback((step: StepNumber) => {
     setCurrentStep(step);
     setMaxReachedStep(prev => (step > prev ? step : prev));
+    // Each step has a sensible default overlay mode. Switching steps
+    // without nudging the mode would leave Step 3 showing 'suggestions'
+    // (only valid on Step 2), or other cross-step mismatches.
+    if (step === 2) setOverlayMode('suggestions');
+    else if (step === 3) setOverlayMode('threshold');
   }, []);
 
   // Step 1's "Next" doubles as Run Analysis. If a fresh result already exists
@@ -413,6 +447,8 @@ export default function Home() {
 
   const onStepperClick = useCallback((step: StepNumber) => {
     setCurrentStep(step);
+    if (step === 2) setOverlayMode('suggestions');
+    else if (step === 3) setOverlayMode('threshold');
   }, []);
 
   const onSettingsChange = useCallback((s: DFMSettings) => setSettings(s), []);
@@ -538,9 +574,22 @@ export default function Home() {
 
         {currentStep === 3 && (
           <Step3Vbit
+            vector={vector}
+            originalLayers={originalLayers}
             settings={settings}
             onSettingsChange={onSettingsChange}
+            woodConfigs={woodConfigs}
             result={result}
+            overlayMode={overlayMode}
+            onOverlayModeChange={setOverlayMode}
+            busyModification={busyModification}
+            vbitTouched={vbitTouched}
+            onVbitTouched={() => setVbitTouched(true)}
+            onExtendForRegistration={handleExtendForRegistration}
+            onFillEnclosedHoles={handleFillEnclosedHoles}
+            onResetLayer={handleResetLayer}
+            onUpdateWoodConfig={updateWoodConfig}
+            onMoveWood={moveWood}
             canAdvance={step3Valid}
             onBack={() => setCurrentStep(2)}
             onNext={() => advanceTo(4)}

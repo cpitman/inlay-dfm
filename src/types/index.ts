@@ -128,10 +128,42 @@ export interface WiderBitInfeasibleMask {
   plug: Uint8Array;
 }
 
+/**
+ * Angle-dependent subset of SingleAnalysis. One entry per preset v-bit
+ * angle is cached on each WoodAnalysis so Step 3 can swap the displayed
+ * overlay/depth-map and refresh stats without re-running the analysis.
+ *
+ * Angle-INDEPENDENT fields (thinWallPixelCount, suggestionOverlayDataUrl)
+ * stay on the parent SingleAnalysis and are reused as-is.
+ */
+export type PerPresetSingleSide = Pick<
+  SingleAnalysis,
+  | 'fullDepthPercent'
+  | 'problemAreaPercent'
+  | 'passed'
+  | 'hasAnyFullDepth'
+  | 'hasIsolatedUnreachableComponent'
+  | 'vbitAngleWarning'
+  | 'overlayDataUrl'
+  | 'depthMapDataUrl'
+>;
+
+export interface PerPresetAngleResult {
+  angleDegrees: number;
+  pocket: PerPresetSingleSide;
+  plug: PerPresetSingleSide;
+}
+
 export interface WoodAnalysis {
   colorHex: string;
   pocket: SingleAnalysis;
   plug: SingleAnalysis;
+  /**
+   * Per-preset v-bit angle stats + overlay PNGs. Indexed in the same order
+   * as VBIT_PRESET_ANGLES. Step 3 reads from this so changing the picked
+   * angle is an instant URL swap, no re-analysis required.
+   */
+  perPresetAnalysis: PerPresetAngleResult[];
   /**
    * Regions only reachable by an infeasible *wider* v-bit. Used in Step 2
    * (DFM) to surface artist-improvement opportunities — widening any of
@@ -175,6 +207,10 @@ export interface MachiningTimeMatrix {
     feed: number;
     /** False when this angle yields >10% problem area on some pocket or plug. */
     feasible: boolean;
+    /** Worst-case problem-area percent across all (layer × side) pairs at this angle. Used for Step 3 button annotations. */
+    maxProblemAreaPercent: number;
+    /** True when at least one (layer × side) pair has an isolated component that can't reach full depth. */
+    hasIsolatedComponent: boolean;
   }[];
   /** times[clearanceIdx][vbitIdx] = total minutes (pocket + plug summed). NaN when V-bit is infeasible. */
   times: number[][];
