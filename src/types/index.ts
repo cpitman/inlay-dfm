@@ -97,14 +97,47 @@ export interface SingleAnalysis {
   hasIsolatedUnreachableComponent: boolean;
   vbitAngleWarning: boolean;
   thinWallPixelCount: number;
+  /** Threshold-overlay PNG built at the user's currently-selected v-bit angle. Used by Step 3 (V-bit) where the user is consciously evaluating one angle. */
   overlayDataUrl: string;
+  /**
+   * Suggestions overlay PNG built at the *largest feasible* v-bit angle for
+   * the whole design, with regions that block the next wider preset shown
+   * in teal. Used by Step 2 (DFM) so the user — who hasn't yet picked an
+   * angle — sees the design at its best with widening suggestions, not red
+   * errors against an arbitrary default angle. Empty string when no
+   * feasible angle exists.
+   */
+  suggestionOverlayDataUrl: string;
   depthMapDataUrl: string;
+}
+
+/**
+ * Per-pixel mask of regions a *wider* (faster) v-bit cannot reach.
+ *
+ * These are areas the artist could widen so a wider, faster bit becomes
+ * feasible — i.e., the next preset above the largest currently-feasible
+ * angle. Null when the largest feasible preset is already 120° (there is
+ * no wider preset to upgrade to) or when no angle is feasible at all.
+ *
+ * Mask geometry matches the analysis canvas (canvasW × canvasH).
+ */
+export interface WiderBitInfeasibleMask {
+  /** The preset angle that cannot reach these pixels. */
+  angleDegrees: number;
+  pocket: Uint8Array;
+  plug: Uint8Array;
 }
 
 export interface WoodAnalysis {
   colorHex: string;
   pocket: SingleAnalysis;
   plug: SingleAnalysis;
+  /**
+   * Regions only reachable by an infeasible *wider* v-bit. Used in Step 2
+   * (DFM) to surface artist-improvement opportunities — widening any of
+   * these regions lets the design upgrade to a wider, faster bit.
+   */
+  widerBitInfeasibleMask: WiderBitInfeasibleMask | null;
   /** Non-empty when this inlay's edge is too close to a later inlay (staged alignment risk). */
   alignmentIssues: AlignmentIssue[];
   /** Pocket area the clearance bit can reach (square inches). */
@@ -155,6 +188,21 @@ export interface AnalysisResult {
   thinWallThresholdInches: number;
   alignmentThresholdInches: number;
   pixelsPerInch: number;
+  /**
+   * Largest preset v-bit angle that is feasible for the whole design (≤10%
+   * problem area on every side AND no isolated unreachable component).
+   * Each wood's `suggestionOverlayDataUrl` is rendered at this angle.
+   * Null when no preset is feasible — Step 2 has no clean baseline to
+   * display and falls back to the user-angle threshold overlay.
+   */
+  step2DisplayAngleDegrees: number | null;
+  /**
+   * Next-wider preset above `step2DisplayAngleDegrees`. The `widerBitInfeasibleMask`
+   * on each wood is computed at this angle and shown in teal as an
+   * artist-improvement suggestion. Null when `step2DisplayAngleDegrees` is
+   * already the widest preset (120°) or when no preset is feasible.
+   */
+  step2SuggestionAngleDegrees: number | null;
   /** Total estimated machining time across all layers (pocket + plug each). NaN when V-bit rates are missing. */
   totalMachineTimeMinutes: number;
   /** In-use rates so the UI can show what produced the time estimate. */

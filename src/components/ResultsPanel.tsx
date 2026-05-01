@@ -7,6 +7,13 @@ interface ResultsPanelProps {
   common: Pick<AnalysisResult, 'thinWallThresholdInches'>;
   settings: DFMSettings;
   label: 'Pocket' | 'Plug';
+  /**
+   * When true, hide the v-bit-angle-dependent depth-check pass/fail header
+   * and the per-piece stat grid. Step 2 sets this because the user hasn't
+   * picked a v-bit yet — depth-check at an arbitrary default would be
+   * misleading. Thin-wall and grain warnings still show (angle-independent).
+   */
+  hideDepthCheck?: boolean;
 }
 
 function Stat({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) {
@@ -28,7 +35,7 @@ function Warning({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function ResultsPanel({ analysis, common, settings, label }: ResultsPanelProps) {
+export default function ResultsPanel({ analysis, common, settings, label, hideDepthCheck }: ResultsPanelProps) {
   const {
     fullDepthPercent, problemAreaPercent, passed, hasAnyFullDepth,
     hasIsolatedUnreachableComponent,
@@ -47,28 +54,30 @@ export default function ResultsPanel({ analysis, common, settings, label }: Resu
 
   return (
     <div className="space-y-3">
-      {/* Pass / Fail */}
-      <div className={`rounded-lg p-3 flex items-start gap-2.5
-        ${passed ? 'bg-green-900/40 border border-green-700' : 'bg-red-900/40 border border-red-700'}`}>
-        <span className="text-xl shrink-0 leading-tight">{passed ? '✓' : '✗'}</span>
-        <div>
-          <p className={`text-sm font-semibold ${passed ? 'text-green-300' : 'text-red-300'}`}>
-            {passed ? 'Depth check passed' : 'Depth check failed'}
-          </p>
-          <p className="text-xs text-slate-300 mt-0.5">
-            {!hasAnyFullDepth
-              ? 'No area reaches full inlay depth.'
-              : hasIsolatedUnreachableComponent
-              ? `An isolated piece of the ${isPocket ? 'design' : 'background'} cannot reach full depth at all — too narrow for this V-bit.`
-              : passed
-              ? 'All not-full-depth zones are within tolerance of a full-depth region.'
-              : `${problemAreaPercent.toFixed(2)}% of ${isPocket ? 'design' : 'background'} area: ${depthDesc}.`}
-          </p>
+      {/* Pass / Fail — angle-dependent, hidden on Step 2 */}
+      {!hideDepthCheck && (
+        <div className={`rounded-lg p-3 flex items-start gap-2.5
+          ${passed ? 'bg-green-900/40 border border-green-700' : 'bg-red-900/40 border border-red-700'}`}>
+          <span className="text-xl shrink-0 leading-tight">{passed ? '✓' : '✗'}</span>
+          <div>
+            <p className={`text-sm font-semibold ${passed ? 'text-green-300' : 'text-red-300'}`}>
+              {passed ? 'Depth check passed' : 'Depth check failed'}
+            </p>
+            <p className="text-xs text-slate-300 mt-0.5">
+              {!hasAnyFullDepth
+                ? 'No area reaches full inlay depth.'
+                : hasIsolatedUnreachableComponent
+                ? `An isolated piece of the ${isPocket ? 'design' : 'background'} cannot reach full depth at all — too narrow for this V-bit.`
+                : passed
+                ? 'All not-full-depth zones are within tolerance of a full-depth region.'
+                : `${problemAreaPercent.toFixed(2)}% of ${isPocket ? 'design' : 'background'} area: ${depthDesc}.`}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Grain warnings */}
-      {vbitAngleWarning && (
+      {/* Grain warnings — angle-independent */}
+      {vbitAngleWarning && !hideDepthCheck && (
         <Warning>
           <strong>V-bit &lt;60° with {settings.grainDirection} grain.</strong>{' '}
           Steeper walls increase tearout risk across fibres.
@@ -81,21 +90,23 @@ export default function ResultsPanel({ analysis, common, settings, label }: Resu
         </Warning>
       )}
 
-      {/* Per-piece stats */}
-      <div className="grid grid-cols-2 gap-2">
-        <Stat
-          label="Full-Depth Area"
-          value={`${fullDepthPercent.toFixed(1)}%`}
-          sub={`Of ${isPocket ? 'carved' : 'background'} area at full depth`}
-          warn={!hasAnyFullDepth}
-        />
-        <Stat
-          label="Problem Area"
-          value={`${problemAreaPercent.toFixed(2)}%`}
-          sub="Not-full-depth & beyond threshold from any full-depth zone"
-          warn={problemAreaPercent >= 0.1}
-        />
-      </div>
+      {/* Per-piece stats — angle-dependent, hidden on Step 2 */}
+      {!hideDepthCheck && (
+        <div className="grid grid-cols-2 gap-2">
+          <Stat
+            label="Full-Depth Area"
+            value={`${fullDepthPercent.toFixed(1)}%`}
+            sub={`Of ${isPocket ? 'carved' : 'background'} area at full depth`}
+            warn={!hasAnyFullDepth}
+          />
+          <Stat
+            label="Problem Area"
+            value={`${problemAreaPercent.toFixed(2)}%`}
+            sub="Not-full-depth & beyond threshold from any full-depth zone"
+            warn={problemAreaPercent >= 0.1}
+          />
+        </div>
+      )}
     </div>
   );
 }

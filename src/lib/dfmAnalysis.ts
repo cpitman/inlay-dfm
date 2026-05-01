@@ -167,7 +167,8 @@ function problemStatsForAngle(
   fullDepthRadiusPx: number,
   canvasW: number,
   canvasH: number,
-): { percent: number; hasIsolatedComponent: boolean } {
+  returnMask: boolean = false,
+): { percent: number; hasIsolatedComponent: boolean; problemMask?: Uint8Array } {
   const n = canvasW * canvasH;
   const isFullDepth = new Uint8Array(n);
   let carvedCount = 0;
@@ -176,19 +177,33 @@ function problemStatsForAngle(
     carvedCount++;
     if (dist1[i] >= fullDepthRadiusPx) isFullDepth[i] = 1;
   }
-  if (carvedCount === 0) return { percent: 0, hasIsolatedComponent: false };
+  if (carvedCount === 0) {
+    return {
+      percent: 0,
+      hasIsolatedComponent: false,
+      ...(returnMask ? { problemMask: new Uint8Array(n) } : {}),
+    };
+  }
 
   const reachable = monotonicAscentReachable(carvedMask, dist1, isFullDepth, canvasW, canvasH);
   let problemCount = 0;
+  const problemMask = returnMask ? new Uint8Array(n) : undefined;
   for (let i = 0; i < n; i++) {
-    if (carvedMask[i] && !isFullDepth[i] && !reachable[i]) problemCount++;
+    if (carvedMask[i] && !isFullDepth[i] && !reachable[i]) {
+      problemCount++;
+      if (problemMask) problemMask[i] = 1;
+    }
   }
 
   const hasIsolatedComponent = carvedHasComponentWithoutFullDepth(
     carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH,
   );
 
-  return { percent: (problemCount / carvedCount) * 100, hasIsolatedComponent };
+  return {
+    percent: (problemCount / carvedCount) * 100,
+    hasIsolatedComponent,
+    ...(problemMask ? { problemMask } : {}),
+  };
 }
 
 /** Problem-area cutoff above which a V-bit angle is considered infeasible for the design. */
@@ -423,6 +438,11 @@ async function buildOverlay(
   isProblem: Uint8Array,
   isThinWall: Uint8Array,
   isAlignment?: Uint8Array,
+  /** Pixels only an infeasible smaller v-bit can't reach — Step 2 artist
+      callouts. Rendered in teal/cyan, beneath the other channels so any
+      pixel that's *also* a real problem at the user's current angle wins
+      and stays red. */
+  isSmallerBitInfeasible?: Uint8Array,
 ): Promise<string> {
   const oc = new OffscreenCanvas(canvasW, canvasH);
   const ctx = oc.getContext('2d')!;
@@ -436,6 +456,8 @@ async function buildOverlay(
       d[i*4]=220; d[i*4+1]=150; d[i*4+2]=30;  d[i*4+3]=210;
     } else if (isAlignment?.[i]) {
       d[i*4]=210; d[i*4+1]=50;  d[i*4+2]=210; d[i*4+3]=210;
+    } else if (isSmallerBitInfeasible?.[i]) {
+      d[i*4]=40;  d[i*4+1]=200; d[i*4+2]=210; d[i*4+3]=180;
     }
   }
   ctx.putImageData(img, 0, 0);
@@ -530,6 +552,8 @@ export async function runDfmAnalysis(
     vbitAngleWarning:   maskData.vbitAngleWarning,
     thinWallPixelCount: maskData.thinWallPixelCount,
     overlayDataUrl:  await buildOverlay(layerBase, canvasW, canvasH, maskData.isProblem, maskData.isThinWall, alignPixels),
+    // Populated in Phase 5.5 once the largest-feasible angle is known.
+    suggestionOverlayDataUrl: '',
     depthMapDataUrl: await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx),
   });
 
@@ -658,6 +682,22 @@ export async function runDfmAnalysis(
   }[] = [];
   // Pocket+plug masks and their dist1's, kept for the per-V-bit feasibility check.
   const layerSidesForFeasibility: { mask: Uint8Array; dist1: Float32Array }[] = [];
+  // Inputs needed to rebuild each wood's overlay later (after the matrix
+  // pass tells us the largest infeasible smaller-bit angle, whose mask is
+  // a fourth color channel in the overlay PNG).
+  const overlayRebuildInputs: {
+    pocketBase: OffscreenCanvas;
+    plugBase: OffscreenCanvas;
+    pocketIsProblem: Uint8Array;
+    pocketIsThinWall: Uint8Array;
+    pocketAlign?: Uint8Array;
+    plugIsProblem: Uint8Array;
+    plugIsThinWall: Uint8Array;
+    pocketMask: Uint8Array;
+    plugMask: Uint8Array;
+    pocketDist1: Float32Array;
+    plugDist1: Float32Array;
+  }[] = [];
   let totalMachineTime = 0;
   let anyMachineTimeMissing = false;
 
@@ -813,6 +853,7 @@ ${plugStockOutlineSvg}
       colorHex,
       pocket: await toSingle(pocketMask, pocketAnalysis, pocketBase, alignVisualPerInlay[idx]),
       plug:   await toSingle(plugMaskForDfm, plugAnalysis, plugBase),
+      widerBitInfeasibleMask: null, // populated in Phase 5.5 below if applicable
       alignmentIssues: alignIssues[idx],
       clearanceAreaSqIn,
       vbitAreaSqIn,
@@ -826,6 +867,20 @@ ${plugStockOutlineSvg}
       pocketMachineTimeMinutes,
       plugMachineTimeMinutes,
       layerMachineTimeMinutes,
+    });
+
+    overlayRebuildInputs.push({
+      pocketBase,
+      plugBase,
+      pocketIsProblem: pocketAnalysis.isProblem,
+      pocketIsThinWall: pocketAnalysis.isThinWall,
+      pocketAlign: alignVisualPerInlay[idx],
+      plugIsProblem: plugAnalysis.isProblem,
+      plugIsThinWall: plugAnalysis.isThinWall,
+      pocketMask,
+      plugMask: plugMaskForDfm,
+      pocketDist1: pocketAnalysis.dist1,
+      plugDist1:   plugAnalysis.dist1,
     });
   }
 
@@ -871,6 +926,125 @@ ${plugStockOutlineSvg}
     vbits: matrixVbits,
   });
 
+  // -----------------------------------------------------------------------
+  // Phase 5.5: Step 2 (DFM) display data.
+  //
+  // Step 2 shows the design as if carved with the *largest feasible*
+  // preset v-bit angle — i.e., the best the design supports today, with no
+  // red errors. Layered on top is a teal "suggestion" overlay marking
+  // regions only the *next-wider* preset cannot reach. Widening any of
+  // those unlocks a wider, faster bit, which is typically a significant
+  // machining-time win.
+  //
+  // We compute one suggestion-overlay PNG per side. The user-angle overlay
+  // attached to each SingleAnalysis (overlayDataUrl) is left untouched for
+  // Step 3 to consume. Cost: two extra problemStatsForAngle calls per side
+  // (one at displayAngle, one at suggestionAngle) plus two PNG encodes —
+  // only when there's a feasible angle.
+  // -----------------------------------------------------------------------
+  let largestFeasibleIdx = -1;
+  for (let i = matrixVbits.length - 1; i >= 0; i--) {
+    if (matrixVbits[i].feasible) { largestFeasibleIdx = i; break; }
+  }
+  let step2DisplayAngleDegrees: number | null = null;
+  let step2SuggestionAngleDegrees: number | null = null;
+
+  if (largestFeasibleIdx >= 0) {
+    // Feasible case: display at the largest feasible preset; suggestions
+    // (teal) at the next wider preset if one exists.
+    const displayAngle = VBIT_PRESET_ANGLES[largestFeasibleIdx];
+    step2DisplayAngleDegrees = displayAngle;
+    const dHalf = (displayAngle / 2) * (Math.PI / 180);
+    const dFdrPx = inlayDepthInches * Math.tan(dHalf) * pixelsPerInch;
+
+    const suggestionIdx = largestFeasibleIdx + 1;
+    const hasSuggestion = suggestionIdx < VBIT_PRESET_ANGLES.length;
+    let sFdrPx = 0;
+    if (hasSuggestion) {
+      step2SuggestionAngleDegrees = VBIT_PRESET_ANGLES[suggestionIdx];
+      const sHalf = (step2SuggestionAngleDegrees / 2) * (Math.PI / 180);
+      sFdrPx = inlayDepthInches * Math.tan(sHalf) * pixelsPerInch;
+    }
+
+    for (let i = 0; i < woods.length; i++) {
+      const inp = overlayRebuildInputs[i];
+
+      const pocketDisplayStats = problemStatsForAngle(
+        inp.pocketMask, inp.pocketDist1, dFdrPx, canvasW, canvasH, true,
+      );
+      const plugDisplayStats = problemStatsForAngle(
+        inp.plugMask, inp.plugDist1, dFdrPx, canvasW, canvasH, true,
+      );
+      const pocketDisplayProblem = pocketDisplayStats.problemMask!;
+      const plugDisplayProblem   = plugDisplayStats.problemMask!;
+
+      let pocketSuggestion: Uint8Array | undefined;
+      let plugSuggestion: Uint8Array | undefined;
+      if (hasSuggestion) {
+        const pocketSugStats = problemStatsForAngle(
+          inp.pocketMask, inp.pocketDist1, sFdrPx, canvasW, canvasH, true,
+        );
+        const plugSugStats = problemStatsForAngle(
+          inp.plugMask, inp.plugDist1, sFdrPx, canvasW, canvasH, true,
+        );
+        const pocketWider = pocketSugStats.problemMask!;
+        const plugWider   = plugSugStats.problemMask!;
+
+        pocketSuggestion = new Uint8Array(canvasW * canvasH);
+        plugSuggestion   = new Uint8Array(canvasW * canvasH);
+        for (let k = 0; k < canvasW * canvasH; k++) {
+          if (pocketWider[k] && !pocketDisplayProblem[k]) pocketSuggestion[k] = 1;
+          if (plugWider[k]   && !plugDisplayProblem[k])   plugSuggestion[k]   = 1;
+        }
+
+        woods[i].widerBitInfeasibleMask = {
+          angleDegrees: step2SuggestionAngleDegrees!,
+          pocket: pocketSuggestion,
+          plug:   plugSuggestion,
+        };
+      }
+
+      woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
+        inp.pocketBase, canvasW, canvasH,
+        pocketDisplayProblem, inp.pocketIsThinWall, inp.pocketAlign,
+        pocketSuggestion,
+      );
+      woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
+        inp.plugBase, canvasW, canvasH,
+        plugDisplayProblem, inp.plugIsThinWall, undefined,
+        plugSuggestion,
+      );
+    }
+  } else {
+    // No feasible preset — even the sharpest v-bit fails. Display at the
+    // smallest preset (15°) with its problem mask in RED. These are
+    // irreducible regions: no preset can carve them. The artist needs to
+    // widen or remove these features for the design to be manufacturable.
+    const fallbackAngle = VBIT_PRESET_ANGLES[0];
+    const fHalf = (fallbackAngle / 2) * (Math.PI / 180);
+    const fFdrPx = inlayDepthInches * Math.tan(fHalf) * pixelsPerInch;
+
+    for (let i = 0; i < woods.length; i++) {
+      const inp = overlayRebuildInputs[i];
+      const pocketStats = problemStatsForAngle(
+        inp.pocketMask, inp.pocketDist1, fFdrPx, canvasW, canvasH, true,
+      );
+      const plugStats = problemStatsForAngle(
+        inp.plugMask, inp.plugDist1, fFdrPx, canvasW, canvasH, true,
+      );
+      woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
+        inp.pocketBase, canvasW, canvasH,
+        pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign,
+        undefined, // no teal suggestion — there's no upgrade path
+      );
+      woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
+        inp.plugBase, canvasW, canvasH,
+        plugStats.problemMask!, inp.plugIsThinWall, undefined,
+        undefined,
+      );
+    }
+  }
+
   return {
     woods,
     vbitCutWidthInches,
@@ -878,6 +1052,8 @@ ${plugStockOutlineSvg}
     thinWallThresholdInches: THIN_WALL_THRESHOLD_INCHES,
     alignmentThresholdInches: ALIGNMENT_THRESHOLD_INCHES,
     pixelsPerInch,
+    step2DisplayAngleDegrees,
+    step2SuggestionAngleDegrees,
     totalMachineTimeMinutes: anyMachineTimeMissing || !haveMachiningRates ? NaN : totalMachineTime,
     clearanceBitDiameterInches: settings.clearanceBitDiameterInches,
     clearanceMRR,

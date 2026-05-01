@@ -36,7 +36,7 @@ function resolvedCanvasWidth(res: DFMSettings['analysisResolution']): number {
 }
 
 type Status = 'idle' | 'parsing' | 'analyzing' | 'done' | 'error';
-type OverlayMode = 'none' | 'threshold' | 'depthmap';
+type OverlayMode = 'none' | 'threshold' | 'suggestions' | 'depthmap';
 
 export default function Home() {
   // `originalVector` is the parsed file (immutable after parse).
@@ -48,7 +48,7 @@ export default function Home() {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [settings, setSettings] = useState<DFMSettings>(DEFAULT_SETTINGS);
   const [hasEverAnalyzed, setHasEverAnalyzed] = useState(false);
-  const [overlayMode, setOverlayMode] = useState<OverlayMode>('threshold');
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>('suggestions');
   const [woodConfigs, setWoodConfigs] = useState<WoodConfig[]>([]);
   const [backgroundSpecies, setBackgroundSpecies] = useState<WoodSpeciesKey>('maple');
   const [compositeDataUrl, setCompositeDataUrl] = useState<string | null>(null);
@@ -249,6 +249,100 @@ export default function Home() {
     }
   }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
 
+  // Apply extend-for-registration to every eligible layer in a single
+  // undoable snapshot. Threads the per-step result through a working layer
+  // array so each call sees the previous one's output, instead of relying
+  // on React state which is async.
+  const handleExtendAll = useCallback(async (colorHexes: string[]) => {
+    if (!vector || colorHexes.length === 0) return;
+    setBusyModification(true);
+    setErrorMsg('');
+    try {
+      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
+      let workingLayers = vector.layers;
+      let totalAdded = 0;
+      let appliedCount = 0;
+      for (const colorHex of colorHexes) {
+        const workingVector: VectorData = {
+          ...vector,
+          layers: workingLayers,
+          svgString: combineLayers(
+            workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
+          ),
+        };
+        const res = await extendForRegistration(
+          workingVector, colorHex, settings.designWidthInches, colorOrder, canvasWidth,
+        );
+        if (res.addedPixelCount > 0) {
+          workingLayers = res.layers;
+          totalAdded += res.addedAreaSqInches;
+          appliedCount++;
+        }
+      }
+      if (appliedCount > 0) {
+        pushSnapshot(
+          workingLayers,
+          `Extend ${appliedCount} layer${appliedCount === 1 ? '' : 's'} for registration (+${totalAdded.toFixed(3)} in²)`,
+        );
+      } else {
+        setErrorMsg('No alignment risk regions found across the eligible layers.');
+        setStatus('error');
+      }
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+      setStatus('error');
+    } finally {
+      setBusyModification(false);
+    }
+  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+
+  const handleFillAll = useCallback(async (colorHexes: string[]) => {
+    if (!vector || colorHexes.length === 0) return;
+    setBusyModification(true);
+    setErrorMsg('');
+    try {
+      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
+      let workingLayers = vector.layers;
+      let totalFilled = 0;
+      let totalArea = 0;
+      let appliedLayerCount = 0;
+      for (const colorHex of colorHexes) {
+        const workingVector: VectorData = {
+          ...vector,
+          layers: workingLayers,
+          svgString: combineLayers(
+            workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
+          ),
+        };
+        const res = await fillEnclosedHoles(
+          workingVector, colorHex, settings.designWidthInches, colorOrder, canvasWidth,
+        );
+        if (res.filledHoleCount > 0) {
+          workingLayers = res.layers;
+          totalFilled += res.filledHoleCount;
+          totalArea += res.filledAreaSqIn;
+          appliedLayerCount++;
+        }
+      }
+      if (totalFilled > 0) {
+        pushSnapshot(
+          workingLayers,
+          `Fill ${totalFilled} hole${totalFilled === 1 ? '' : 's'} across ${appliedLayerCount} layer${appliedLayerCount === 1 ? '' : 's'} (+${totalArea.toFixed(3)} in²)`,
+        );
+      } else {
+        setErrorMsg('No fillable enclosed holes found across the eligible layers.');
+        setStatus('error');
+      }
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+      setStatus('error');
+    } finally {
+      setBusyModification(false);
+    }
+  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+
   const handleExportSvg = useCallback(() => {
     if (vector) downloadSvg(vector);
   }, [vector]);
@@ -270,7 +364,10 @@ export default function Home() {
       const r = await runDfmAnalysis(vector, settings, colorOrder, canvasWidth);
       setHistory(prev => prev.map(s => (s === snapshotAtStart ? { ...s, result: r } : s)));
       setHasEverAnalyzed(true);
-      setOverlayMode('threshold');
+      // Step 2 is the immediate destination after analysis; default its
+      // overlay to suggestions (DFM mode). Step 3 will switch to 'threshold'
+      // when the user advances there.
+      setOverlayMode('suggestions');
       setStatus('done');
       return r;
     } catch (e) {
@@ -428,6 +525,8 @@ export default function Home() {
             onAnalyze={() => { void handleAnalyze(); }}
             onExtendForRegistration={handleExtendForRegistration}
             onFillEnclosedHoles={handleFillEnclosedHoles}
+            onExtendAll={handleExtendAll}
+            onFillAll={handleFillAll}
             onResetLayer={handleResetLayer}
             onUpdateWoodConfig={updateWoodConfig}
             onMoveWood={moveWood}

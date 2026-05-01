@@ -3,11 +3,13 @@
 import type {
   AnalysisResult, DFMSettings, VectorData, WoodConfig, Layer,
 } from '@/types';
-import { formatMinutes } from '@/lib/machiningTime';
 import WoodPanel from '../WoodPanel';
+import AutoImprovementsPanel from '../AutoImprovementsPanel';
+import StaticTipsPanel from '../StaticTipsPanel';
+import FeasibilityCallout from '../FeasibilityCallout';
 import { StepNav } from '../StepperBar';
 
-type OverlayMode = 'none' | 'threshold' | 'depthmap';
+type OverlayMode = 'none' | 'threshold' | 'suggestions' | 'depthmap';
 
 interface Step2DFMProps {
   vector: VectorData | null;
@@ -25,6 +27,8 @@ interface Step2DFMProps {
   onAnalyze: () => void;
   onExtendForRegistration: (colorHex: string) => void;
   onFillEnclosedHoles: (colorHex: string) => void;
+  onExtendAll: (colorHexes: string[]) => void;
+  onFillAll: (colorHexes: string[]) => void;
   onResetLayer: (colorHex: string) => void;
   onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
   onMoveWood: (i: number, dir: -1 | 1) => void;
@@ -62,6 +66,7 @@ export default function Step2DFM({
   analysisStale, status, errorMsg, overlayMode, onOverlayModeChange,
   busyModification,
   onAnalyze, onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
+  onExtendAll, onFillAll,
   onUpdateWoodConfig, onMoveWood,
   canAdvance, onBack, onNext,
 }: Step2DFMProps) {
@@ -108,32 +113,19 @@ export default function Step2DFM({
           <p className="text-xs text-red-300 bg-red-900/30 border border-red-800 rounded p-2">{errorMsg}</p>
         )}
 
-        {/* Geometry + machine time header */}
+        {/* Headline: feasibility ceiling for the whole design */}
+        {result && <FeasibilityCallout result={result} />}
+
+        {/* Geometry stats — angle-independent (depend on grain + thresholds) */}
         {result && (
-          <div className="bg-slate-800 rounded-lg px-4 py-3 text-xs space-y-2">
+          <div className="bg-slate-800 rounded-lg px-4 py-3 text-xs">
             <div className="flex flex-wrap gap-x-6 gap-y-2 items-center">
-              <GeomStat label="V-bit cut width"   value={result.vbitCutWidthInches}    />
-              <Divider />
-              <GeomStat label="Full-depth radius" value={result.fullDepthRadiusInches} />
               {settings.grainDirection !== 'end' && (
-                <>
-                  <Divider />
-                  <GeomStat label="Thin-wall threshold" value={result.thinWallThresholdInches} />
-                </>
+                <GeomStat label="Thin-wall threshold" value={result.thinWallThresholdInches} />
               )}
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 items-center pt-2 border-t border-slate-700">
-              <span>
-                <span className="text-slate-400">Total machine time</span>
-                <span className="ml-2 font-semibold text-white">
-                  {isFinite(result.totalMachineTimeMinutes) ? formatMinutes(result.totalMachineTimeMinutes) : '—'}
-                </span>
-                {!isFinite(result.totalMachineTimeMinutes) && (
-                  <span className="ml-2 text-amber-400">(set V-bit MRR + feed for custom angle)</span>
-                )}
-              </span>
-              <span className="text-slate-500 text-xs">
-                Detailed bit comparison and recommendations are on Step 4.
+              {settings.grainDirection !== 'end' && <Divider />}
+              <span className="text-slate-500">
+                Detailed machining time and bit comparisons are on Step 4.
               </span>
             </div>
           </div>
@@ -143,16 +135,14 @@ export default function Step2DFM({
         {result && (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
-              {overlayMode === 'threshold' ? (
+              {overlayMode === 'suggestions' ? (
                 <>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-slate-300 inline-block" />
-                    OK
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-red-500 inline-block" />
-                    Too narrow — never reaches full depth
-                  </span>
+                  {result.step2DisplayAngleDegrees === null && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded bg-red-500 inline-block" />
+                      Unreachable by any v-bit
+                    </span>
+                  )}
                   {settings.grainDirection !== 'end' && (
                     <span className="flex items-center gap-1.5">
                       <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgb(220,150,30)' }} />
@@ -163,6 +153,12 @@ export default function Step2DFM({
                     <span className="flex items-center gap-1.5">
                       <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgb(210,50,210)' }} />
                       Alignment risk
+                    </span>
+                  )}
+                  {result.step2SuggestionAngleDegrees !== null && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded inline-block" style={{ background: 'rgb(40,200,210)' }} />
+                      Widen for {result.step2SuggestionAngleDegrees}° v-bit (faster)
                     </span>
                   )}
                 </>
@@ -181,21 +177,32 @@ export default function Step2DFM({
             </div>
 
             <div className="flex items-center gap-1">
-              {(['none', 'threshold', 'depthmap'] as const).map(mode => (
+              {(['none', 'suggestions', 'depthmap'] as const).map(mode => (
                 <button
                   key={mode}
                   onClick={() => onOverlayModeChange(mode)}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors
                     ${overlayMode === mode ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
                 >
-                  {mode === 'none' ? 'Off' : mode === 'threshold' ? 'Threshold' : 'Depth Map'}
+                  {mode === 'none' ? 'Off' : mode === 'suggestions' ? 'Suggestions' : 'Depth Map'}
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* Per-wood panels (existing component, unchanged for PR 1) */}
+        {/* Auto-improvements summary — apply to all eligible layers in one click */}
+        {result && (
+          <AutoImprovementsPanel
+            result={result}
+            woodConfigs={woodConfigs}
+            busy={busyModification}
+            onExtendAll={onExtendAll}
+            onFillAll={onFillAll}
+          />
+        )}
+
+        {/* Per-wood panels */}
         {vector && result && (
           <div className="space-y-6">
             {woodConfigs.map((wc, i) => {
@@ -226,6 +233,7 @@ export default function Step2DFM({
                   otherWoodLabels={otherWoodLabels}
                   isModified={isModified}
                   busyModification={busyModification}
+                  step2Mode={true}
                   onExtendForRegistration={() => onExtendForRegistration(wc.colorHex)}
                   onFillEnclosedHoles={() => onFillEnclosedHoles(wc.colorHex)}
                   onResetLayer={() => onResetLayer(wc.colorHex)}
@@ -234,6 +242,9 @@ export default function Step2DFM({
             })}
           </div>
         )}
+
+        {/* Static general-purpose DFM tips */}
+        {result && <StaticTipsPanel />}
       </div>
 
       <StepNav currentStep={2} canAdvance={canAdvance} onBack={onBack} onNext={onNext} />

@@ -20,7 +20,7 @@ interface WoodPanelProps {
   onMoveDown: () => void;
   analysis: WoodAnalysis | null;
   vector: VectorData | null;
-  overlayMode: 'none' | 'threshold' | 'depthmap';
+  overlayMode: 'none' | 'threshold' | 'suggestions' | 'depthmap';
   common: Pick<AnalysisResult, 'thinWallThresholdInches' | 'alignmentThresholdInches'> | null;
   settings: DFMSettings;
   /** colorHex → label map for all woods (used in alignment warning messages). */
@@ -28,6 +28,10 @@ interface WoodPanelProps {
   /** True if this layer's geometry differs from the original parsed file. */
   isModified: boolean;
   busyModification: boolean;
+  /** When true, hide the angle-dependent depth-check pass/fail block in the
+   *  per-side ResultsPanel. Step 2 sets this because the user hasn't picked
+   *  a v-bit yet — feasibility is summarized at the page level instead. */
+  step2Mode?: boolean;
   onExtendForRegistration: () => void;
   onFillEnclosedHoles: () => void;
   onResetLayer: () => void;
@@ -39,12 +43,14 @@ export default function WoodPanel({
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
   analysis, vector, overlayMode, common, settings,
   otherWoodLabels,
-  isModified, busyModification, onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
+  isModified, busyModification, step2Mode,
+  onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
 }: WoodPanelProps) {
   const overlay = (side: 'pocket' | 'plug') => {
     if (!analysis) return null;
-    if (overlayMode === 'threshold') return analysis[side].overlayDataUrl;
-    if (overlayMode === 'depthmap')  return analysis[side].depthMapDataUrl;
+    if (overlayMode === 'threshold')   return analysis[side].overlayDataUrl;
+    if (overlayMode === 'suggestions') return analysis[side].suggestionOverlayDataUrl || analysis[side].overlayDataUrl;
+    if (overlayMode === 'depthmap')    return analysis[side].depthMapDataUrl;
     return null;
   };
 
@@ -142,7 +148,7 @@ ${outline}
           </div>
           <DesignCanvas vector={vector} overlayDataUrl={overlay('pocket')} svgOverride={layerSvg} />
           {analysis && common && (
-            <ResultsPanel analysis={analysis.pocket} common={common} settings={settings} label="Pocket" />
+            <ResultsPanel analysis={analysis.pocket} common={common} settings={settings} label="Pocket" hideDepthCheck={step2Mode} />
           )}
         </div>
 
@@ -153,7 +159,7 @@ ${outline}
           </div>
           <DesignCanvas vector={vector} overlayDataUrl={overlay('plug')} svgOverride={plugLayerSvg} />
           {analysis && common && (
-            <ResultsPanel analysis={analysis.plug} common={common} settings={settings} label="Plug" />
+            <ResultsPanel analysis={analysis.plug} common={common} settings={settings} label="Plug" hideDepthCheck={step2Mode} />
           )}
         </div>
       </div>
