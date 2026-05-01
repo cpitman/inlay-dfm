@@ -31,20 +31,22 @@ export default function WoodList({ woodConfigs, onUpdate, onMove }: WoodListProp
             <button
               onClick={() => onMove(i, -1)}
               disabled={i === 0}
+              aria-label={`Move ${wc.label} up (carved earlier)`}
               className="w-5 h-4 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
               title="Move up (carved earlier)"
             >
-              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
                 <path d="M6 2l5 7H1z" />
               </svg>
             </button>
             <button
               onClick={() => onMove(i, 1)}
               disabled={i === woodConfigs.length - 1}
+              aria-label={`Move ${wc.label} down (carved later)`}
               className="w-5 h-4 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
               title="Move down (carved later)"
             >
-              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
                 <path d="M6 10L1 3h10z" />
               </svg>
             </button>

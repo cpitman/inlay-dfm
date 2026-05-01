@@ -85,20 +85,22 @@ ${outline}
           <button
             onClick={onMoveUp}
             disabled={!canMoveUp}
+            aria-label={`Move ${label} up`}
             className="w-5 h-4 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
             title="Move up"
           >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
               <path d="M6 2l5 7H1z" />
             </svg>
           </button>
           <button
             onClick={onMoveDown}
             disabled={!canMoveDown}
+            aria-label={`Move ${label} down`}
             className="w-5 h-4 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-700 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
             title="Move down"
           >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
               <path d="M6 10L1 3h10z" />
             </svg>
           </button>
