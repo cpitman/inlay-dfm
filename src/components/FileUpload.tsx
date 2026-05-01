@@ -13,8 +13,8 @@ export default function FileUpload({ onFile, fileName }: FileUploadProps) {
 
   const handle = (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
-    if (ext !== 'svg' && ext !== 'dxf') {
-      alert('Please upload an SVG or DXF file.');
+    if (ext !== 'svg' && ext !== 'dxf' && ext !== 'json') {
+      alert('Please upload an SVG, DXF, or .inlay-session.json file.');
       return;
     }
     onFile(file);
@@ -39,7 +39,7 @@ export default function FileUpload({ onFile, fileName }: FileUploadProps) {
       <input
         ref={inputRef}
         type="file"
-        accept=".svg,.dxf"
+        accept=".svg,.dxf,.json"
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handle(f); }}
       />
@@ -52,7 +52,7 @@ export default function FileUpload({ onFile, fileName }: FileUploadProps) {
       ) : (
         <>
           <p className="text-sm font-medium text-slate-300">Drop design file here</p>
-          <p className="text-xs text-slate-500 mt-1">SVG or DXF — click to browse</p>
+          <p className="text-xs text-slate-500 mt-1">SVG, DXF, or saved <code className="font-mono">.inlay-session.json</code> — click to browse</p>
         </>
       )}
     </div>
