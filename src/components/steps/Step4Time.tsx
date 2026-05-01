@@ -7,6 +7,7 @@ import {
 } from '@/lib/machiningRates';
 import { formatMinutes } from '@/lib/machiningTime';
 import BitMatrixTable from '../BitMatrixTable';
+import RecommendedSetupCard from '../RecommendedSetupCard';
 import { StepNav } from '../StepperBar';
 
 interface Step4TimeProps {
@@ -25,10 +26,11 @@ const CLEARANCE_BIT_LABELS: Record<ClearanceBitDiameter, string> = {
 /**
  * Step 4 — Machining time exploration.
  *
- * For PR 1: clearance bit picker + bit-comparison matrix + total-time stat.
- * PR 4 will add a prominent RecommendedSetupCard highlighting the fastest
- * feasible combination, and lift the fastest-feasible-cell finder out of
- * BitMatrixTable into a shared helper.
+ * Tops with a prominent RecommendedSetupCard naming the fastest feasible
+ * (clearance, v-bit) combination. Below: the existing clearance-bit picker
+ * and the full BitMatrixTable for exploring trade-offs. Total time at the
+ * top derives from the matrix at the current selection so it stays in sync
+ * when Step 3 changes the v-bit angle.
  */
 export default function Step4Time({
   result, settings, onSettingsChange, onBack,
@@ -36,9 +38,31 @@ export default function Step4Time({
   const set = <K extends keyof DFMSettings>(k: K, v: DFMSettings[K]) =>
     onSettingsChange({ ...settings, [k]: v });
 
+  const applyRecommendation = (clearanceDiameter: number, vbitAngle: number) => {
+    onSettingsChange({
+      ...settings,
+      clearanceBitDiameterInches: clearanceDiameter as ClearanceBitDiameter,
+      vbitAngleDegrees: vbitAngle,
+      // Switching to a preset clears any custom rates so the analyzer uses
+      // the canonical table values from machiningRates.ts.
+      vbitMRRInches3PerMin: undefined,
+      vbitFeedInchesPerMin: undefined,
+    });
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-5">
+        {/* Recommended setup — fastest feasible combo, with one-click apply */}
+        {result && (
+          <RecommendedSetupCard
+            result={result}
+            currentClearanceDiameter={settings.clearanceBitDiameterInches}
+            currentVbitAngle={settings.vbitAngleDegrees}
+            onApply={applyRecommendation}
+          />
+        )}
+
         {/* Total time header — derived from the matrix at the current
             (clearance, v-bit) selection so it stays in sync when Step 3
             changes the angle without re-running analysis. */}

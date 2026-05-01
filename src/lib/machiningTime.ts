@@ -182,6 +182,46 @@ export function buildMachiningTimeMatrix(params: {
   return { clearanceBits, vbits, times };
 }
 
+export interface FastestFeasibleCell {
+  clearanceIdx: number;
+  vbitIdx: number;
+  totalTimeMinutes: number;
+  clearanceDiameterInches: number;
+  vbitAngleDegrees: number;
+}
+
+/**
+ * Locate the fastest feasible (clearance, v-bit) combination in a matrix.
+ * "Feasible" means the v-bit's column is feasible AND the cell time is
+ * finite. Used by both BitMatrixTable (to highlight the green cell) and
+ * RecommendedSetupCard (to surface the recommendation prominently).
+ *
+ * Returns null when no combination is feasible — in that case the design
+ * needs widening before manufacturing is possible at any preset.
+ */
+export function findFastestFeasibleCell(
+  matrix: import('@/types').MachiningTimeMatrix,
+): FastestFeasibleCell | null {
+  let best: FastestFeasibleCell | null = null;
+  for (let ci = 0; ci < matrix.times.length; ci++) {
+    for (let vi = 0; vi < matrix.times[ci].length; vi++) {
+      if (!matrix.vbits[vi].feasible) continue;
+      const t = matrix.times[ci][vi];
+      if (!isFinite(t)) continue;
+      if (best === null || t < best.totalTimeMinutes) {
+        best = {
+          clearanceIdx: ci,
+          vbitIdx: vi,
+          totalTimeMinutes: t,
+          clearanceDiameterInches: matrix.clearanceBits[ci].diameterInches,
+          vbitAngleDegrees: matrix.vbits[vi].angleDegrees,
+        };
+      }
+    }
+  }
+  return best;
+}
+
 /** Format a duration in minutes as "Hh MMm" or "MM min" depending on size. */
 export function formatMinutes(minutes: number): string {
   if (!isFinite(minutes) || minutes <= 0) return '0 min';

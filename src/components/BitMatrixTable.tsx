@@ -1,7 +1,7 @@
 'use client';
 
 import type { MachiningTimeMatrix } from '@/types';
-import { formatMinutes } from '@/lib/machiningTime';
+import { formatMinutes, findFastestFeasibleCell } from '@/lib/machiningTime';
 
 interface BitMatrixTableProps {
   matrix: MachiningTimeMatrix;
@@ -28,15 +28,9 @@ function clearanceLabel(diameter: number): string {
 export default function BitMatrixTable({
   matrix, currentClearanceDiameter, currentVbitAngle, onSelectCombination,
 }: BitMatrixTableProps) {
-  // Find min total time across feasible cells only.
-  let minTime = Infinity, minCi = -1, minVi = -1;
-  for (let ci = 0; ci < matrix.times.length; ci++) {
-    for (let vi = 0; vi < matrix.times[ci].length; vi++) {
-      if (!matrix.vbits[vi].feasible) continue;
-      const t = matrix.times[ci][vi];
-      if (isFinite(t) && t < minTime) { minTime = t; minCi = ci; minVi = vi; }
-    }
-  }
+  const fastest = findFastestFeasibleCell(matrix);
+  const minCi = fastest?.clearanceIdx ?? -1;
+  const minVi = fastest?.vbitIdx ?? -1;
 
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
