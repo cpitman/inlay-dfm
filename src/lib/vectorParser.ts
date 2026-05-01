@@ -187,7 +187,21 @@ export async function parseSvg(file: File): Promise<VectorData> {
   const text = await file.text();
   const parser = new DOMParser();
   const doc = parser.parseFromString(text, 'image/svg+xml');
+
+  // DOMParser doesn't throw on malformed XML — it returns a document with a
+  // <parsererror> root (or a <parsererror> descendant in some browsers).
+  // Catch that explicitly so a corrupt upload produces an actionable
+  // message instead of silently proceeding with a blank doc.
+  const parserError = doc.querySelector('parsererror');
+  if (parserError || doc.documentElement.tagName.toLowerCase() === 'parsererror') {
+    const detail = parserError?.textContent?.trim() ?? 'Unknown parse error';
+    throw new Error(`SVG file is malformed: ${detail.split('\n')[0]}`);
+  }
+
   const svgEl = doc.documentElement as unknown as SVGSVGElement;
+  if (!svgEl || svgEl.tagName.toLowerCase() !== 'svg') {
+    throw new Error('SVG file has no <svg> root element.');
+  }
 
   const vb = svgEl.getAttribute('viewBox');
   let w = 0, h = 0;
@@ -203,6 +217,10 @@ export async function parseSvg(file: File): Promise<VectorData> {
 
   const viewBoxOriginal = vb ?? `0 0 ${w} ${h}`;
   const { layers, order } = splitSvgIntoLayers(svgEl);
+
+  if (order.length === 0) {
+    throw new Error('No non-white colors detected in this SVG. The file appears to have no inlay regions to analyze.');
+  }
 
   // Trim away whitespace around the actual content. The original layer
   // fragments are kept; the viewBox window selects only the content area.
@@ -430,6 +448,10 @@ export async function parseDxf(file: File): Promise<VectorData> {
       order.push(colorHex);
     }
     buckets.get(colorHex)!.push(svg);
+  }
+
+  if (order.length === 0) {
+    throw new Error('No non-white colors detected in this DXF. The file appears to have no inlay regions to analyze.');
   }
 
   const layers: Layer[] = order.map(colorHex => ({
