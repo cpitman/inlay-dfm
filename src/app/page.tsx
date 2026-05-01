@@ -445,8 +445,14 @@ export default function Home() {
   }, [vector]);
 
   // Returns the new result so callers (like Step-1 Next) can chain on success.
+  // Coalesces re-runs: if an analysis is already in flight, returns null
+  // immediately so a rapid double-click doesn't kick off two parallel runs
+  // (the second of which would silently lose its result, since both runs
+  // capture the same `snapshotAtStart` and the first commit replaces the
+  // snapshot reference the second is looking for).
   const handleAnalyze = useCallback(async (): Promise<AnalysisResult | null> => {
     if (!vector) return null;
+    if (status === 'analyzing') return null;
     if (settings.designWidthInches <= 0 || settings.inlayDepthInches <= 0) {
       setErrorMsg('Design width and inlay depth must be greater than zero.');
       setStatus('error');
@@ -472,7 +478,7 @@ export default function Home() {
       setStatus('error');
       return null;
     }
-  }, [vector, settings, woodConfigs, history, historyIndex]);
+  }, [vector, settings, woodConfigs, history, historyIndex, status]);
 
   // Watch for the deferred-analysis flag set by the session-load branch of
   // handleFile. Once `vector` and `woodConfigs` have settled into the
