@@ -36,7 +36,7 @@ export interface QuoteOptimizationInput {
   vector: VectorData;
   woodConfigs: WoodConfig[];
   designWidthInches: number;
-  /** Optional override; defaults to 0.125". */
+  /** Optional override; defaults to 0.25" for the guided experience. */
   inlayDepthInches?: number;
   /** Optional progress callback — receives a short status label per phase. */
   onProgress?: (label: string) => void;
@@ -64,7 +64,7 @@ export async function runQuoteOptimization(
   input: QuoteOptimizationInput,
 ): Promise<QuoteOptimizationResult> {
   const { vector: initialVector, woodConfigs: initialWoodConfigs, designWidthInches, onProgress } = input;
-  const inlayDepthInches = input.inlayDepthInches ?? 0.125;
+  const inlayDepthInches = input.inlayDepthInches ?? 0.25;
   const canvasWidth = ANALYSIS_RESOLUTION_DEFAULT_PX;
 
   const settings: DFMSettings = {

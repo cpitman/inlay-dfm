@@ -166,10 +166,17 @@ export default function QuoteApp() {
         onProgress: setOptimizingLabel,
       });
       const totalMachineMinutes = isFinite(opt.totalMachineMinutes) ? opt.totalMachineMinutes : 0;
+      // Per-inlay plug-stock area, aligned with the OPTIMIZED woodConfig order.
+      // dfmAnalysis stores this on each WoodAnalysis after the final analysis pass.
+      const plugStockUsageSqIn = opt.woodConfigs.map(wc => {
+        const w = opt.result.woods.find(x => x.colorHex === wc.colorHex);
+        return w?.plugStockUsageSqIn;
+      });
       const q = computeQuote({
         boardConfig,
         woodConfigs: opt.woodConfigs,
         totalMachineMinutes,
+        plugStockUsageSqIn,
       });
       setOptimizedVector(opt.vector);
       setOptimizedWoodConfigs(opt.woodConfigs);

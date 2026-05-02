@@ -223,6 +223,14 @@ export interface WoodAnalysis {
   fillableHoleAreaSqIn: number;
   /** Estimated machining time saved by filling these holes (minutes). NaN when V-bit rates are missing. */
   fillableSavedTimeMin: number;
+  /**
+   * Estimated plug-stock area required to carve this layer's plug pieces,
+   * in square inches. Computed as the sum of oriented-bounding-box areas
+   * over the connected components of (pocketMask dilated by ~0.51"). Used
+   * by the guided quote pipeline to charge a fractional sheet cost when
+   * an inlay's plugs would consume only part of a stock sheet.
+   */
+  plugStockUsageSqIn: number;
   /** Estimated minutes for the pocket cut (clearance + V-bit area + V-bit perimeter). */
   pocketMachineTimeMinutes: number;
   /** Estimated minutes for the plug cut (modeled identically to the pocket; same shape, same depth). */

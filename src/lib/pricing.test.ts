@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { computeQuote, BASE_BOARD_PRICE, INLAY_WOOD_PRICE, ADDON_FEET, LABOR_HOURLY } from './pricing';
+import {
+  computeQuote, BASE_BOARD_PRICE, INLAY_WOOD_PRICE, ADDON_FEET, LABOR_HOURLY,
+  INLAY_SHEET_AREA_SQ_IN, INLAY_PACKING_THRESHOLD,
+} from './pricing';
 import { DEFAULT_BOARD_CONFIG, type BoardConfig } from '../types/board';
 import type { WoodConfig } from '../types';
 
@@ -105,6 +108,69 @@ describe('computeQuote', () => {
     expect(feet.breakdown.addOnDollars).toBe(ADDON_FEET);
     expect(dual.breakdown.addOnDollars).toBe(0);
     expect(feet.breakdown.totalEstimate - dual.breakdown.totalEstimate).toBeCloseTo(ADDON_FEET, 6);
+  });
+
+  it('plug-stock usage at 50% of sheet → 50% of full inlay price', () => {
+    const halfSheet = INLAY_SHEET_AREA_SQ_IN * 0.5;
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      woodConfigs: makeWoods(['walnut']),
+      totalMachineMinutes: 0,
+      plugStockUsageSqIn: [halfSheet],
+    });
+    // Materials = base + 0.5 × walnut.
+    const expected = BASE_BOARD_PRICE.cherry + 0.5 * INLAY_WOOD_PRICE.walnut;
+    expect(q.breakdown.materialsDollars).toBeCloseTo(expected, 6);
+  });
+
+  it('plug-stock usage above 70% of sheet → full inlay price', () => {
+    const justOverThreshold = INLAY_SHEET_AREA_SQ_IN * (INLAY_PACKING_THRESHOLD + 0.05);
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      woodConfigs: makeWoods(['walnut']),
+      totalMachineMinutes: 0,
+      plugStockUsageSqIn: [justOverThreshold],
+    });
+    const expected = BASE_BOARD_PRICE.cherry + INLAY_WOOD_PRICE.walnut;
+    expect(q.breakdown.materialsDollars).toBe(expected);
+  });
+
+  it('plug-stock usage exactly at 70% → fractional (boundary inclusive of fractional path)', () => {
+    // Threshold is strictly greater-than: utilization > 0.70 → full price.
+    // At exactly 0.70 utilization, the fractional path applies.
+    const atThreshold = INLAY_SHEET_AREA_SQ_IN * INLAY_PACKING_THRESHOLD;
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      woodConfigs: makeWoods(['walnut']),
+      totalMachineMinutes: 0,
+      plugStockUsageSqIn: [atThreshold],
+    });
+    const expected = BASE_BOARD_PRICE.cherry + INLAY_PACKING_THRESHOLD * INLAY_WOOD_PRICE.walnut;
+    expect(q.breakdown.materialsDollars).toBeCloseTo(expected, 6);
+  });
+
+  it('mixes per-inlay scaling: small layer fractional, big layer full', () => {
+    const small = INLAY_SHEET_AREA_SQ_IN * 0.1;
+    const big   = INLAY_SHEET_AREA_SQ_IN * 0.85;
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      woodConfigs: makeWoods(['walnut', 'maple']),
+      totalMachineMinutes: 0,
+      plugStockUsageSqIn: [small, big],
+    });
+    const expected = BASE_BOARD_PRICE.cherry
+      + 0.1 * INLAY_WOOD_PRICE.walnut   // small → fractional
+      + INLAY_WOOD_PRICE.maple;         // big   → full
+    expect(q.breakdown.materialsDollars).toBeCloseTo(expected, 6);
+  });
+
+  it('omitting plugStockUsageSqIn falls back to full sheet price (back-compat)', () => {
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      woodConfigs: makeWoods(['walnut']),
+      totalMachineMinutes: 0,
+    });
+    expect(q.breakdown.materialsDollars).toBe(BASE_BOARD_PRICE.cherry + INLAY_WOOD_PRICE.walnut);
   });
 
   it('machine cost uses MACHINE_HOURLY', () => {

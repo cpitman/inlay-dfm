@@ -8,6 +8,7 @@ import { computePlugCarvedMask, computePlugStockMask } from './plugStock';
 import { computeBoundary, findEnclosedHoles } from './morphology';
 import { maskToSvgPath } from './maskToPath';
 import { parseViewBox } from './svgLayers';
+import { computePlugStockUsageSqIn } from './plugStockPacking';
 
 const DEFAULT_CANVAS_WIDTH = 1200;
 const THIN_WALL_THRESHOLD_INCHES = 0.05;
@@ -955,6 +956,14 @@ ${plugStockOutlineSvg}
 </svg>`;
       plugBase = await renderSvgToCanvas(plugBaseSvg, canvasW, canvasH);
     }
+    // Plug-stock packing estimate: per-component OBB sum of the plug
+    // shapes dilated by ~0.51" cutting margin. Drives the fractional
+    // inlay cost in the guided quote pipeline; harmless to compute for
+    // the expert flow.
+    const plugStockUsageSqIn = computePlugStockUsageSqIn(
+      pocketMask, canvasW, canvasH, pixelsPerInch,
+    );
+
     woods.push({
       colorHex,
       pocket: await toSingle(pocketMask, pocketAnalysis, pocketBase, alignVisualPerInlay[idx]),
@@ -971,6 +980,7 @@ ${plugStockOutlineSvg}
       fillableHoleCount,
       fillableHoleAreaSqIn,
       fillableSavedTimeMin,
+      plugStockUsageSqIn,
       pocketMachineTimeMinutes,
       plugMachineTimeMinutes,
       layerMachineTimeMinutes,
