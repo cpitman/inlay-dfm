@@ -2,7 +2,13 @@
 
 export type StepNumber = 1 | 2 | 3 | 4;
 
-const STEP_DEFS: { n: StepNumber; label: string; subtitle: string }[] = [
+export interface StepDef {
+  n: number;
+  label: string;
+  subtitle: string;
+}
+
+const DEFAULT_EXPERT_STEPS: StepDef[] = [
   { n: 1, label: 'Design',  subtitle: 'Set up the inlay'             },
   { n: 2, label: 'DFM',     subtitle: 'Optimize for manufacturing'   },
   { n: 3, label: 'V-bit',   subtitle: 'Pick the carving bit'         },
@@ -10,10 +16,13 @@ const STEP_DEFS: { n: StepNumber; label: string; subtitle: string }[] = [
 ];
 
 interface StepperBarProps {
-  currentStep: StepNumber;
-  maxReachedStep: StepNumber;
-  validity: Record<StepNumber, boolean>;
-  onStepClick: (step: StepNumber) => void;
+  currentStep: number;
+  maxReachedStep: number;
+  /** Per-step prerequisite validity. Keyed by step number (1-based). */
+  validity: Record<number, boolean>;
+  onStepClick: (step: number) => void;
+  /** Optional override of the default 4-step expert config. */
+  steps?: StepDef[];
 }
 
 /**
@@ -28,14 +37,15 @@ interface StepperBarProps {
  * temporarily invalidates a later step. This keeps navigation predictable.
  */
 export default function StepperBar({
-  currentStep, maxReachedStep, validity, onStepClick,
+  currentStep, maxReachedStep, validity, onStepClick, steps,
 }: StepperBarProps) {
+  const stepDefs = steps ?? DEFAULT_EXPERT_STEPS;
   return (
     <nav
       className="bg-slate-800/80 border-b border-slate-700 px-6 py-3 flex items-center gap-2 backdrop-blur"
       aria-label="Workflow steps"
     >
-      {STEP_DEFS.map((def, idx) => {
+      {stepDefs.map((def, idx) => {
         const isCurrent  = currentStep === def.n;
         const isReached  = def.n <= maxReachedStep;
         const isComplete = isReached && def.n < currentStep && validity[def.n];
@@ -85,7 +95,7 @@ export default function StepperBar({
               </span>
             </button>
 
-            {idx < STEP_DEFS.length - 1 && (
+            {idx < stepDefs.length - 1 && (
               <span className="shrink-0 text-slate-600 select-none">›</span>
             )}
           </div>
@@ -96,20 +106,22 @@ export default function StepperBar({
 }
 
 interface StepNavProps {
-  currentStep: StepNumber;
+  currentStep: number;
   canAdvance: boolean;
   nextLabel?: string;
   onBack?: () => void;
   onNext?: () => void;
+  /** Highest step number in the flow. Defaults to 4 (expert). */
+  totalSteps?: number;
 }
 
 /**
  * Bottom-of-step Back/Next pair. Each step renders this at the end of its
  * content area; `canAdvance` reflects step-specific validity.
  */
-export function StepNav({ currentStep, canAdvance, nextLabel, onBack, onNext }: StepNavProps) {
+export function StepNav({ currentStep, canAdvance, nextLabel, onBack, onNext, totalSteps }: StepNavProps) {
   const isFirst = currentStep === 1;
-  const isLast  = currentStep === 4;
+  const isLast  = currentStep === (totalSteps ?? 4);
 
   return (
     <div className="flex items-center justify-between gap-3 mt-6 pt-4 border-t border-slate-700">

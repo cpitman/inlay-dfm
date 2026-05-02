@@ -631,7 +631,7 @@ export default function Home() {
         currentStep={currentStep}
         maxReachedStep={maxReachedStep}
         validity={validity}
-        onStepClick={goToStep}
+        onStepClick={(n) => goToStep(n as StepNumber)}
       />
 
       <main className="flex-1 overflow-hidden p-6 min-h-0">
