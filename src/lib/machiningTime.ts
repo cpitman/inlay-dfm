@@ -232,44 +232,62 @@ export function buildMachiningTimeMatrix(params: {
     };
   });
 
-  // For each strategy × vbit, sum cutting time across layers + sides.
-  const cuttingTimes: number[][] = strategies.map(strategy =>
-    vbits.map(v => {
-      if (!v.feasible) return NaN;
+  // For each layer × strategy × vbit, compute the layer's contribution
+  // to cutting time. Aggregate sums to `cuttingTimes`. Per-layer
+  // disaggregation goes to `layerCuttingTimes` for the per-layer v-bit
+  // picker in the guided pipeline.
+  const sideTime = (
+    side: SideAreas,
+    perimIn: number,
+    depthInches: number,
+    strategy: import('@/types').ClearanceStrategy,
+    v: import('@/types').MachiningTimeMatrix['vbits'][number],
+  ): number => {
+    // Walk strategy bits descending; each bit clears the residual
+    // not yet covered by larger bits. Smaller bits' opens are supersets
+    // of larger ones, so incremental = open(b_i) − open(b_{i-1}).
+    let prevOpenedPx = 0;
+    let clearanceTime = 0;
+    for (const d of strategy.diameters) {
+      const openedPx = side.openedPxByBit.get(d) ?? 0;
+      const incrementalPx = Math.max(0, openedPx - prevOpenedPx);
+      const incrementalAreaSqIn = incrementalPx / ppiSq;
+      const mrr = mrrByDiameter.get(d) ?? 0;
+      if (mrr > 0) clearanceTime += incrementalAreaSqIn * depthInches / mrr;
+      prevOpenedPx = openedPx;
+    }
+    const vbitPx = side.totalPx - prevOpenedPx;
+    const vbitAreaSqIn = vbitPx / ppiSq;
+    const tVbitArea = v.mrr  > 0 ? vbitAreaSqIn * depthInches / v.mrr : 0;
+    const tPerim    = v.feed > 0 ? perimIn / v.feed                   : 0;
+    return clearanceTime + tVbitArea + tPerim;
+  };
+
+  const layerCuttingTimes: number[][][] = layers.map(() =>
+    strategies.map(() => vbits.map(() => 0)),
+  );
+  const cuttingTimes: number[][] = strategies.map((strategy, si) =>
+    vbits.map((v, vi) => {
+      if (!v.feasible) {
+        // Mirror NaN through every layer's slot so the picker sees the
+        // infeasibility at the per-layer level.
+        for (let li = 0; li < layers.length; li++) layerCuttingTimes[li][si][vi] = NaN;
+        return NaN;
+      }
       let total = 0;
-
-      const sideTime = (side: SideAreas, perimIn: number, depthInches: number): number => {
-        // Walk strategy bits descending; each bit clears the residual
-        // not yet covered by larger bits. Smaller bits' opens are supersets
-        // of larger ones, so incremental = open(b_i) − open(b_{i-1}).
-        let prevOpenedPx = 0;
-        let clearanceTime = 0;
-        for (const d of strategy.diameters) {
-          const openedPx = side.openedPxByBit.get(d) ?? 0;
-          const incrementalPx = Math.max(0, openedPx - prevOpenedPx);
-          const incrementalAreaSqIn = incrementalPx / ppiSq;
-          const mrr = mrrByDiameter.get(d) ?? 0;
-          if (mrr > 0) clearanceTime += incrementalAreaSqIn * depthInches / mrr;
-          prevOpenedPx = openedPx;
-        }
-        const vbitPx = side.totalPx - prevOpenedPx;
-        const vbitAreaSqIn = vbitPx / ppiSq;
-        const tVbitArea = v.mrr  > 0 ? vbitAreaSqIn * depthInches / v.mrr : 0;
-        const tPerim    = v.feed > 0 ? perimIn / v.feed                   : 0;
-        return clearanceTime + tVbitArea + tPerim;
-      };
-
       for (let li = 0; li < layers.length; li++) {
         const sides = layerSides[li];
         const perim = layers[li].pocketPerimeterIn;
-        total += sideTime(sides.pocket, perim, inlayDepthInches)
-              + sideTime(sides.plug,   perim, plugDepthInches);
+        const layerTotal = sideTime(sides.pocket, perim, inlayDepthInches, strategy, v)
+                         + sideTime(sides.plug,   perim, plugDepthInches,  strategy, v);
+        layerCuttingTimes[li][si][vi] = layerTotal;
+        total += layerTotal;
       }
       return total;
     })
   );
 
-  return { strategies, vbits, cuttingTimes };
+  return { strategies, vbits, cuttingTimes, layerCuttingTimes };
 }
 
 export interface FastestFeasibleCell {
@@ -278,6 +296,134 @@ export interface FastestFeasibleCell {
   totalTimeMinutes: number;
   strategyDiameters: number[];
   vbitAngleDegrees: number;
+}
+
+/** Per-layer feasibility test, given a per-layer v-bit angle index. */
+function isLayerFeasibleAtVbit(
+  perPresetAnalysis: import('@/types').PerPresetAngleResult[],
+  vbitIdx: number,
+): boolean {
+  const presetEntry = perPresetAnalysis[vbitIdx];
+  if (!presetEntry) return false;
+  // Match the design-wide feasibility threshold (FEASIBILITY_PROBLEM_PCT
+  // in dfmAnalysis.ts) at the per-layer level. A layer is feasible at
+  // a given v-bit angle iff both pocket and plug stay under the same
+  // 10% threshold AND neither has an isolated unreachable component.
+  const FEASIBILITY_PROBLEM_PCT = 10;
+  return (
+    presetEntry.pocket.problemAreaPercent <= FEASIBILITY_PROBLEM_PCT
+    && !presetEntry.pocket.hasIsolatedUnreachableComponent
+    && presetEntry.plug.problemAreaPercent  <= FEASIBILITY_PROBLEM_PCT
+    && !presetEntry.plug.hasIsolatedUnreachableComponent
+  );
+}
+
+export interface PerLayerBitPlan {
+  /** Index into matrix.strategies of the chosen clearance strategy. */
+  strategyIdx: number;
+  /** Diameters of the chosen clearance strategy (largest-first). */
+  strategyDiameters: number[];
+  /** Picked v-bit angle index per layer (into matrix.vbits). */
+  perLayerVbitIdxs: number[];
+  /** Picked v-bit angle in degrees per layer. */
+  perLayerVbitAngles: number[];
+  /** Distinct v-bit angles used. Drives tool-change overhead. */
+  distinctVbitCount: number;
+  /** Sum across layers of per-layer cutting time at the chosen angle. */
+  cuttingTimeMinutes: number;
+  /** Tool-change overhead minutes (clearance bits + distinct v-bits) × tcMin. */
+  toolChangeOverheadMinutes: number;
+  /** Cutting + tool-change overhead. The number for cost calc + display. */
+  totalTimeMinutes: number;
+}
+
+/**
+ * Pick a per-layer v-bit plan that minimizes total wall time, given the
+ * machining matrix and per-layer feasibility data. Used by the guided
+ * quote pipeline (`/quote`) when each layer can choose its OWN v-bit
+ * independently — typically a faster widest-feasible bit per layer
+ * than the design-wide widest-feasible from `findFastestFeasibleCell`.
+ *
+ * Algorithm — for each clearance strategy:
+ *   1. Per layer, pick the largest preset v-bit at which that layer is
+ *      feasible (pocket+plug). If any layer has no feasible preset,
+ *      this strategy is infeasible (skip).
+ *   2. Sum each layer's `layerCuttingTimes[L][si][bestL]` for cutting time.
+ *   3. Tool changes = (clearance bit count + distinct v-bits used) ×
+ *      toolChangeMinutes. The "distinct v-bits" replaces the implicit
+ *      single-v-bit accounting in `strategy.bitCount`.
+ *   4. Total = cutting + overhead. Track the minimum across strategies.
+ *
+ * Returns null when no strategy makes every layer feasible — same
+ * "irreducibly non-manufacturable" signal as `findFastestFeasibleCell`
+ * returning null.
+ *
+ * Per-layer feasibility comes from each wood's `perPresetAnalysis`
+ * (already populated by `dfmAnalysis`). The caller passes that data
+ * keyed by layer index — the matrix's layer order is the same as the
+ * `colorOrder` passed into `runDfmAnalysis`.
+ */
+export function pickPerLayerBitPlan(
+  matrix: import('@/types').MachiningTimeMatrix,
+  perLayerPresetAnalysis: import('@/types').PerPresetAngleResult[][],
+  toolChangeMinutes: number,
+): PerLayerBitPlan | null {
+  const numLayers = perLayerPresetAnalysis.length;
+  if (numLayers === 0) return null;
+  // Sanity-check the dimensions agree.
+  if (matrix.layerCuttingTimes.length !== numLayers) return null;
+
+  let best: PerLayerBitPlan | null = null;
+  for (let si = 0; si < matrix.strategies.length; si++) {
+    const strategy = matrix.strategies[si];
+
+    // Pick the largest feasible v-bit for each layer.
+    const perLayerVbitIdxs: number[] = [];
+    let allFeasible = true;
+    for (let li = 0; li < numLayers; li++) {
+      let pickedVi = -1;
+      // Walk from widest preset down; first feasible wins.
+      for (let vi = matrix.vbits.length - 1; vi >= 0; vi--) {
+        if (!matrix.vbits[vi].feasible) continue;
+        if (!isFinite(matrix.layerCuttingTimes[li][si][vi])) continue;
+        if (!isLayerFeasibleAtVbit(perLayerPresetAnalysis[li], vi)) continue;
+        pickedVi = vi; break;
+      }
+      if (pickedVi < 0) { allFeasible = false; break; }
+      perLayerVbitIdxs.push(pickedVi);
+    }
+    if (!allFeasible) continue;
+
+    // Cutting time = sum across layers at each layer's chosen v-bit.
+    let cutting = 0;
+    for (let li = 0; li < numLayers; li++) {
+      cutting += matrix.layerCuttingTimes[li][si][perLayerVbitIdxs[li]];
+    }
+    if (!isFinite(cutting)) continue;
+
+    // Tool-change overhead: each clearance bit + each distinct v-bit
+    // counts as one load. (The matrix's strategy.bitCount counts one
+    // v-bit by default; we replace that with the distinct count here.)
+    const distinctVbitIdxs = new Set(perLayerVbitIdxs);
+    const distinctVbitCount = distinctVbitIdxs.size;
+    const bitsLoaded = strategy.diameters.length + distinctVbitCount;
+    const overhead = bitsLoaded * toolChangeMinutes;
+    const total = cutting + overhead;
+
+    if (best === null || total < best.totalTimeMinutes) {
+      best = {
+        strategyIdx: si,
+        strategyDiameters: strategy.diameters,
+        perLayerVbitIdxs,
+        perLayerVbitAngles: perLayerVbitIdxs.map(vi => matrix.vbits[vi].angleDegrees),
+        distinctVbitCount,
+        cuttingTimeMinutes: cutting,
+        toolChangeOverheadMinutes: overhead,
+        totalTimeMinutes: total,
+      };
+    }
+  }
+  return best;
 }
 
 /**

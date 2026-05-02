@@ -3,7 +3,7 @@ import { runDfmAnalysis } from './dfmAnalysis';
 import { extendForRegistration } from './extendForRegistration';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
 import { combineLayers } from './svgLayers';
-import { findFastestFeasibleCell, type FastestFeasibleCell } from './machiningTime';
+import { pickPerLayerBitPlan, type PerLayerBitPlan } from './machiningTime';
 
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
@@ -17,17 +17,18 @@ export interface QuoteOptimizationResult {
   /** Final analysis result after every modification + re-analysis pass. */
   result: AnalysisResult;
   /**
-   * Fastest feasible (clearance strategy × v-bit) cell from the final
-   * matrix at manual tool-change overhead. `null` when no preset is
-   * feasible — the design has features only sub-15° v-bits could reach,
-   * which we treat as a "needs design changes" failure mode.
+   * Per-layer bit plan: chosen clearance strategy + the largest feasible
+   * v-bit for each layer + total wall time including tool-change
+   * overhead. `null` when no strategy makes every layer feasible — the
+   * design is irreducibly non-manufacturable, same as the previous
+   * "no feasible v-bit at any preset" failure mode.
    */
-  optimalCell: FastestFeasibleCell | null;
+  bitPlan: PerLayerBitPlan | null;
   /** True iff the pipeline ran a fill-holes pass. */
   appliedFill: boolean;
   /** True iff the pipeline ran an extend-for-registration pass. */
   appliedExtend: boolean;
-  /** Total wall time (incl. tool changes) at the optimal cell. NaN when not feasible. */
+  /** Total wall time (incl. tool changes) at the chosen bit plan. NaN when not feasible. */
   totalMachineMinutes: number;
 }
 
@@ -132,10 +133,16 @@ export async function runQuoteOptimization(
     result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
   }
 
-  // Phase 5: pick optimal bits at manual tool-change overhead.
-  onProgress?.('Picking optimal cutting bits…');
-  const optimalCell = findFastestFeasibleCell(
+  // Phase 5: pick the per-layer bit plan. Each layer chooses the widest
+  // v-bit angle that's still feasible for its own pocket+plug; the
+  // optimizer minimizes total time across (clearance strategy × distinct
+  // v-bits used). The clearance bit + distinct v-bit count drives the
+  // tool-change overhead at manual swap (5 min/load).
+  onProgress?.('Picking optimal cutting bits per layer…');
+  const perLayerPresetAnalysis = result.woods.map(w => w.perPresetAnalysis);
+  const bitPlan = pickPerLayerBitPlan(
     result.machiningTimeTable,
+    perLayerPresetAnalysis,
     TOOL_CHANGE_MINUTES_MANUAL,
   );
 
@@ -143,10 +150,10 @@ export async function runQuoteOptimization(
     vector: workingVector,
     woodConfigs: sortedWoodConfigs,
     result,
-    optimalCell,
+    bitPlan,
     appliedFill,
     appliedExtend,
-    totalMachineMinutes: optimalCell?.totalTimeMinutes ?? NaN,
+    totalMachineMinutes: bitPlan?.totalTimeMinutes ?? NaN,
   };
 }
 

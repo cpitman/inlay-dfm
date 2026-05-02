@@ -93,7 +93,14 @@ function makeMatrix(opts: {
     maxProblemAreaPercent: 0,
     hasIsolatedComponent: false,
   }));
-  return { strategies, vbits, cuttingTimes };
+  // The matrix-API contract requires layerCuttingTimes; for tests of
+  // higher-level helpers (totalCellTime, findFastestFeasibleCell) we
+  // don't actually inspect it, so emit a single-layer "all from layer 0"
+  // disaggregation that sums to cuttingTimes by row.
+  const layerCuttingTimes: number[][][] = [
+    cuttingTimes.map(row => row.slice()),
+  ];
+  return { strategies, vbits, cuttingTimes, layerCuttingTimes };
 }
 
 describe('totalCellTime', () => {
@@ -148,7 +155,8 @@ describe('findFastestFeasibleCell', () => {
     const cuttingTimes: number[][] = strategies.map(() => [99, 99]);
     cuttingTimes[0][1] = 5;
     cuttingTimes[4][0] = 1;
-    const matrix: MachiningTimeMatrix = { strategies, vbits, cuttingTimes };
+    const layerCuttingTimes: number[][][] = [cuttingTimes.map(r => r.slice())];
+    const matrix: MachiningTimeMatrix = { strategies, vbits, cuttingTimes, layerCuttingTimes };
     const best = findFastestFeasibleCell(matrix, 5);
     expect(best).not.toBeNull();
     expect(best!.strategyIdx).toBe(0);
@@ -166,8 +174,9 @@ describe('findFastestFeasibleCell', () => {
     const cuttingTimes: number[][] = strategies.map(() => [Number.NaN]);
     cuttingTimes[0][0] = 30;
     cuttingTimes[7][0] = 10;
+    const layerCuttingTimes: number[][][] = [cuttingTimes.map(r => r.slice())];
 
-    const matrix: MachiningTimeMatrix = { strategies, vbits, cuttingTimes };
+    const matrix: MachiningTimeMatrix = { strategies, vbits, cuttingTimes, layerCuttingTimes };
 
     // ATC: 0.5 min/change. Strategy 7 total = 10 + 4*0.5 = 12. Strategy 0 = 30 + 0.5 = 30.5. Strategy 7 wins.
     const atcBest = findFastestFeasibleCell(matrix, 0.5);

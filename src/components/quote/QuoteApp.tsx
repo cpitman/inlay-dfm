@@ -10,6 +10,7 @@ import { generateComposite } from '@/lib/compositeRenderer';
 import { guessSpecies, WOOD_SPECIES } from '@/lib/woodSpecies';
 import { INLAY_WOOD_OPTIONS, computeQuote, type QuoteResult } from '@/lib/pricing';
 import { runQuoteOptimization } from '@/lib/quoteOptimizer';
+import type { PerLayerBitPlan } from '@/lib/machiningTime';
 import Step1BoardForm from './Step1BoardForm';
 import Step2ArtPlacement, { type Placement } from './Step2ArtPlacement';
 import Step3QuoteDisplay from './Step3QuoteDisplay';
@@ -61,6 +62,7 @@ export default function QuoteApp() {
   const [optimizedVector, setOptimizedVector] = useState<VectorData | null>(null);
   const [optimizedWoodConfigs, setOptimizedWoodConfigs] = useState<WoodConfig[]>([]);
   const [optimizedResult, setOptimizedResult] = useState<AnalysisResult | null>(null);
+  const [bitPlan, setBitPlan] = useState<PerLayerBitPlan | null>(null);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [noFeasibleAngle, setNoFeasibleAngle] = useState(false);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
@@ -100,6 +102,7 @@ export default function QuoteApp() {
       // Loading new art invalidates any previously-computed quote.
       setOptimizedVector(null);
       setOptimizedResult(null);
+      setBitPlan(null);
       setQuote(null);
       setNoFeasibleAngle(false);
     } catch (e) {
@@ -136,6 +139,7 @@ export default function QuoteApp() {
     // Wood-color change invalidates the cached quote (different material cost).
     setQuote(null);
     setOptimizedResult(null);
+    setBitPlan(null);
   }, []);
 
   // Board changes invalidate the quote too — every cost lever depends on it.
@@ -143,6 +147,7 @@ export default function QuoteApp() {
     setBoardConfig(next);
     setQuote(null);
     setOptimizedResult(null);
+    setBitPlan(null);
   }, []);
 
   // ---------------------------------------------------------------
@@ -169,8 +174,9 @@ export default function QuoteApp() {
       setOptimizedVector(opt.vector);
       setOptimizedWoodConfigs(opt.woodConfigs);
       setOptimizedResult(opt.result);
+      setBitPlan(opt.bitPlan);
       setQuote(q);
-      setNoFeasibleAngle(opt.optimalCell === null);
+      setNoFeasibleAngle(opt.bitPlan === null);
       // Advance.
       setCurrentStep(3);
       setMaxReachedStep(prev => prev < 3 ? 3 : prev);
@@ -241,6 +247,7 @@ export default function QuoteApp() {
             woodConfigs={optimizedWoodConfigs}
             result={optimizedResult}
             quote={quote}
+            bitPlan={bitPlan}
             noFeasibleAngle={noFeasibleAngle}
             designCompositeUrl={designCompositeUrl}
             placement={placement}

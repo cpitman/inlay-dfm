@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { AnalysisResult, VectorData, WoodConfig } from '@/types';
 import type { BoardConfig } from '@/types/board';
 import type { QuoteResult } from '@/lib/pricing';
+import type { PerLayerBitPlan } from '@/lib/machiningTime';
+import { clearanceBitLabel } from '@/lib/machiningTime';
 import {
   ADDON_FEET,
   MACHINE_HOURLY,
@@ -22,6 +24,8 @@ interface Step3QuoteDisplayProps {
   woodConfigs: WoodConfig[];
   result: AnalysisResult;
   quote: QuoteResult;
+  /** Per-layer bit plan from the optimizer. Drives the tooling summary. */
+  bitPlan: PerLayerBitPlan | null;
   /** True when the optimizer found NO feasible v-bit at any preset. */
   noFeasibleAngle: boolean;
   designCompositeUrl: string | null;
@@ -41,7 +45,7 @@ interface Step3QuoteDisplayProps {
  * unmanufacturable as-is").
  */
 export default function Step3QuoteDisplay({
-  boardConfig, vector, woodConfigs, result, quote, noFeasibleAngle,
+  boardConfig, vector, woodConfigs, result, quote, bitPlan, noFeasibleAngle,
   designCompositeUrl, placement,
   onBack, onRequestManufacturing,
 }: Step3QuoteDisplayProps) {
@@ -175,6 +179,10 @@ export default function Step3QuoteDisplay({
 
         {/* Tips + actions column */}
         <div className="space-y-4 overflow-y-auto pr-1 min-h-0">
+          {bitPlan && (
+            <ToolingSummary bitPlan={bitPlan} woodConfigs={woodConfigs} />
+          )}
+
           {tips.length > 0 && (
             <section className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-3">
               <p className="text-sm font-semibold text-slate-200">Cost-reduction tips</p>
@@ -210,6 +218,44 @@ export default function Step3QuoteDisplay({
         onBack={onBack}
       />
     </div>
+  );
+}
+
+function ToolingSummary({ bitPlan, woodConfigs }: { bitPlan: PerLayerBitPlan; woodConfigs: WoodConfig[] }) {
+  // Group layers by chosen v-bit angle so the summary reads e.g.
+  // "60° v-bit: Cherry · Walnut" + "30° v-bit: Padauk".
+  const byAngle = new Map<number, string[]>();
+  for (let i = 0; i < bitPlan.perLayerVbitAngles.length; i++) {
+    const angle = bitPlan.perLayerVbitAngles[i];
+    const wc = woodConfigs[i];
+    if (!byAngle.has(angle)) byAngle.set(angle, []);
+    byAngle.get(angle)!.push(wc?.label ?? `Layer ${i + 1}`);
+  }
+  // Sort angles ascending so the summary reads sharpest-first.
+  const entries = [...byAngle.entries()].sort((a, b) => a[0] - b[0]);
+
+  const clearanceLabel = bitPlan.strategyDiameters.length === 0
+    ? 'V-bit only (no clearance pass)'
+    : `${bitPlan.strategyDiameters.map(clearanceBitLabel).join(' → ')} clearance`;
+
+  return (
+    <section className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-2">
+      <p className="text-sm font-semibold text-slate-200">Tooling</p>
+      <p className="text-xs text-slate-400">{clearanceLabel}</p>
+      <ul className="space-y-1.5">
+        {entries.map(([angle, labels]) => (
+          <li key={angle} className="text-xs">
+            <span className="font-medium text-slate-200">{angle}° v-bit</span>
+            <span className="text-slate-500"> · {labels.join(', ')}</span>
+          </li>
+        ))}
+      </ul>
+      {entries.length > 1 && (
+        <p className="text-[11px] text-slate-500 pt-1">
+          Using a different v-bit per layer saves machining time vs. forcing every layer to the sharpest angle.
+        </p>
+      )}
+    </section>
   );
 }
 

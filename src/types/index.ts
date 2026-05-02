@@ -269,6 +269,16 @@ export interface MachiningTimeMatrix {
    * when v-bit rates are unavailable.
    */
   cuttingTimes: number[][];
+  /**
+   * Per-layer disaggregation of `cuttingTimes`. `layerCuttingTimes[L][si][vi]`
+   * is the cutting time contributed by layer L for the (strategy si,
+   * vbit vi) cell, summing to `cuttingTimes[si][vi]` across L. Used by
+   * the guided pipeline's per-layer v-bit picker (`pickPerLayerBitPlan`)
+   * to combine different v-bits across layers without re-running
+   * machining-time computation. NaN propagates when the v-bit is
+   * infeasible at the design level.
+   */
+  layerCuttingTimes: number[][][];
 }
 
 export interface AnalysisResult {
