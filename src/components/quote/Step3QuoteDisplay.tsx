@@ -102,10 +102,12 @@ export default function Step3QuoteDisplay({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Headline price */}
-      <section className={`rounded-xl border-2 p-5 mb-4 shrink-0
-        ${noFeasibleAngle
-          ? 'bg-red-900/40 border-red-700'
-          : 'bg-emerald-900/40 border-emerald-700'}`}
+      <section
+        aria-live="polite"
+        className={`rounded-xl border-2 p-5 mb-4 shrink-0
+          ${noFeasibleAngle
+            ? 'bg-red-900/40 border-red-700'
+            : 'bg-emerald-900/40 border-emerald-700'}`}
       >
         <div className="flex items-baseline gap-3 flex-wrap">
           <p className={`text-sm font-semibold uppercase tracking-wider
@@ -113,8 +115,10 @@ export default function Step3QuoteDisplay({
             {noFeasibleAngle ? 'Estimate (rough)' : 'Estimated price'}
           </p>
           <p className="text-3xl font-bold text-white">
+            <span className="sr-only">Range: </span>
             ${quote.lowDollars.toLocaleString()}
-            <span className="text-emerald-200 mx-2">–</span>
+            <span className="text-emerald-200 mx-2" aria-hidden="true">–</span>
+            <span className="sr-only">to </span>
             ${quote.highDollars.toLocaleString()}
           </p>
         </div>

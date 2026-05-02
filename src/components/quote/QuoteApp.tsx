@@ -14,6 +14,7 @@ import Step1BoardForm from './Step1BoardForm';
 import Step2ArtPlacement, { type Placement } from './Step2ArtPlacement';
 import Step3QuoteDisplay from './Step3QuoteDisplay';
 import OptimizingOverlay from './OptimizingOverlay';
+import RequestManufacturingDialog from './RequestManufacturingDialog';
 
 const QUOTE_STEPS: StepDef[] = [
   { n: 1, label: 'Board',      subtitle: 'Pick your cutting board' },
@@ -62,6 +63,7 @@ export default function QuoteApp() {
   const [optimizedResult, setOptimizedResult] = useState<AnalysisResult | null>(null);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [noFeasibleAngle, setNoFeasibleAngle] = useState(false);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
 
   // ---------------------------------------------------------------
   // File upload → parse → init woodConfigs → auto-fit placement.
@@ -243,12 +245,22 @@ export default function QuoteApp() {
             designCompositeUrl={designCompositeUrl}
             placement={placement}
             onBack={() => goToStep(2)}
-            onRequestManufacturing={() => alert('Request manufacturing — coming in PR E.')}
+            onRequestManufacturing={() => setRequestDialogOpen(true)}
           />
         )}
       </main>
 
       {optimizingLabel !== null && <OptimizingOverlay label={optimizingLabel} />}
+
+      {quote && (
+        <RequestManufacturingDialog
+          open={requestDialogOpen}
+          onClose={() => setRequestDialogOpen(false)}
+          boardConfig={boardConfig}
+          woodConfigs={optimizedWoodConfigs}
+          quote={quote}
+        />
+      )}
     </div>
   );
 }
