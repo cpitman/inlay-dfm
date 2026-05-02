@@ -305,3 +305,11 @@ export interface AnalysisResult {
   /** All-combination time comparison (preset clearance × preset V-bit angles). */
   machiningTimeTable: MachiningTimeMatrix;
 }
+
+// Re-export the guided-quote board types so callers can import them via
+// `@/types`. Vite's path resolution doesn't auto-resolve `@/types/board`
+// (no index.ts at that subpath), so re-exports keep paths uniform.
+export type {
+  BoardWoodKey, BoardSided, JuiceGroove, EdgeTreatment, HandleStyle, BoardConfig,
+} from './board';
+export { DEFAULT_BOARD_CONFIG, TOP_GROOVE_INLAY_MARGIN_INCHES, hasTopGroove } from './board';

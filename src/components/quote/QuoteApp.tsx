@@ -4,13 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import StepperBar, { type StepDef } from '../StepperBar';
 import { DEFAULT_BOARD_CONFIG, hasTopGroove, TOP_GROOVE_INLAY_MARGIN_INCHES, type BoardConfig } from '@/types/board';
-import type { VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
+import type { AnalysisResult, VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
 import { parseVectorFile } from '@/lib/vectorParser';
 import { generateComposite } from '@/lib/compositeRenderer';
 import { guessSpecies, WOOD_SPECIES } from '@/lib/woodSpecies';
-import { INLAY_WOOD_OPTIONS } from '@/lib/pricing';
+import { INLAY_WOOD_OPTIONS, computeQuote, type QuoteResult } from '@/lib/pricing';
+import { runQuoteOptimization } from '@/lib/quoteOptimizer';
 import Step1BoardForm from './Step1BoardForm';
 import Step2ArtPlacement, { type Placement } from './Step2ArtPlacement';
+import Step3QuoteDisplay from './Step3QuoteDisplay';
+import OptimizingOverlay from './OptimizingOverlay';
 
 const QUOTE_STEPS: StepDef[] = [
   { n: 1, label: 'Board',      subtitle: 'Pick your cutting board' },
@@ -29,16 +32,11 @@ function pickPricedSpecies(hex: string): WoodSpeciesKey {
 }
 
 /**
- * Top-level container for the guided "Get a quote" experience. Holds all
- * state for the flow and renders whichever step is active.
+ * Top-level container for the guided "Get a quote" experience.
  *
- * State:
- *   - boardConfig: physical board features (Step 1).
- *   - vector: parsed design file (loaded in Step 2).
- *   - woodConfigs: per-detected-color species choice (priced set).
- *   - placement: design's offset + width on the board, in inches.
- *   - designCompositeUrl: PNG of the design with each color mapped to
- *     its assigned wood — overlaid on the board preview.
+ * Step 1 (Board) → Step 2 (Art + woods + placement) → optimizer pipeline
+ * (background, with progress overlay) → Step 3 (Quote display + tips +
+ * Request Manufacturing).
  */
 export default function QuoteApp() {
   const [currentStep, setCurrentStep] = useState<QuoteStep>(1);
@@ -56,6 +54,14 @@ export default function QuoteApp() {
 
   const [designCompositeUrl, setDesignCompositeUrl] = useState<string | null>(null);
   const compositeAbort = useRef<{ cancelled: boolean }>({ cancelled: false });
+
+  // Optimization + quote state.
+  const [optimizingLabel, setOptimizingLabel] = useState<string | null>(null);
+  const [optimizedVector, setOptimizedVector] = useState<VectorData | null>(null);
+  const [optimizedWoodConfigs, setOptimizedWoodConfigs] = useState<WoodConfig[]>([]);
+  const [optimizedResult, setOptimizedResult] = useState<AnalysisResult | null>(null);
+  const [quote, setQuote] = useState<QuoteResult | null>(null);
+  const [noFeasibleAngle, setNoFeasibleAngle] = useState(false);
 
   // ---------------------------------------------------------------
   // File upload → parse → init woodConfigs → auto-fit placement.
@@ -77,20 +83,23 @@ export default function QuoteApp() {
       });
       setWoodConfigs(initialConfigs);
 
-      // Auto-fit: largest size that fits inside the placeable area, centered.
       const aspect = parsed.naturalHeight / parsed.naturalWidth;
       const margin = hasTopGroove(boardConfig.juiceGroove) ? TOP_GROOVE_INLAY_MARGIN_INCHES : 0;
       const placeableW = boardConfig.widthInches  - 2 * margin;
       const placeableH = boardConfig.heightInches - 2 * margin;
-      const widthFromW = placeableW;
-      const widthFromH = placeableH / aspect;
-      const designWidthInches = Math.min(widthFromW, widthFromH);
+      const designWidthInches = Math.min(placeableW, placeableH / aspect);
       const designHeightInches = designWidthInches * aspect;
       setPlacement({
         offsetXInches: margin + (placeableW - designWidthInches)  / 2,
         offsetYInches: margin + (placeableH - designHeightInches) / 2,
         designWidthInches,
       });
+
+      // Loading new art invalidates any previously-computed quote.
+      setOptimizedVector(null);
+      setOptimizedResult(null);
+      setQuote(null);
+      setNoFeasibleAngle(false);
     } catch (e) {
       setErrorMsg((e as Error).message);
     } finally {
@@ -99,10 +108,8 @@ export default function QuoteApp() {
   }, [boardConfig.juiceGroove, boardConfig.widthInches, boardConfig.heightInches]);
 
   // ---------------------------------------------------------------
-  // Composite regeneration whenever vector or wood assignments change.
-  // generateComposite renders the design with each layer remapped to
-  // its chosen wood; backgroundSpecies = the board wood so the composite
-  // visually blends into the board surface.
+  // Composite regeneration whenever vector / wood assignments / board
+  // wood change. Used as the design overlay on Steps 2 and 3.
   // ---------------------------------------------------------------
   useEffect(() => {
     if (!vector || woodConfigs.length === 0) {
@@ -124,14 +131,58 @@ export default function QuoteApp() {
 
   const updateWoodConfig = useCallback((colorHex: string, patch: Partial<WoodConfig>) => {
     setWoodConfigs(prev => prev.map(wc => wc.colorHex === colorHex ? { ...wc, ...patch } : wc));
+    // Wood-color change invalidates the cached quote (different material cost).
+    setQuote(null);
+    setOptimizedResult(null);
   }, []);
 
-  // Step validity. Step 2 requires a parsed vector with at least one inlay
-  // color; the picker forces the species into the priced set so type-wise
-  // we just need woodConfigs.length > 0 alongside the vector.
+  // Board changes invalidate the quote too — every cost lever depends on it.
+  const updateBoardConfig = useCallback((next: BoardConfig) => {
+    setBoardConfig(next);
+    setQuote(null);
+    setOptimizedResult(null);
+  }, []);
+
+  // ---------------------------------------------------------------
+  // Step 2 → Quote: run the optimizer, then compute the quote and
+  // advance to Step 3. Failures bubble up as a banner on Step 2.
+  // ---------------------------------------------------------------
+  const runOptimizationAndQuote = useCallback(async () => {
+    if (!vector || woodConfigs.length === 0) return;
+    setOptimizingLabel('Starting…');
+    setErrorMsg('');
+    try {
+      const opt = await runQuoteOptimization({
+        vector,
+        woodConfigs,
+        designWidthInches: placement.designWidthInches,
+        onProgress: setOptimizingLabel,
+      });
+      const totalMachineMinutes = isFinite(opt.totalMachineMinutes) ? opt.totalMachineMinutes : 0;
+      const q = computeQuote({
+        boardConfig,
+        woodConfigs: opt.woodConfigs,
+        totalMachineMinutes,
+      });
+      setOptimizedVector(opt.vector);
+      setOptimizedWoodConfigs(opt.woodConfigs);
+      setOptimizedResult(opt.result);
+      setQuote(q);
+      setNoFeasibleAngle(opt.optimalCell === null);
+      // Advance.
+      setCurrentStep(3);
+      setMaxReachedStep(prev => prev < 3 ? 3 : prev);
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+    } finally {
+      setOptimizingLabel(null);
+    }
+  }, [vector, woodConfigs, placement.designWidthInches, boardConfig]);
+
+  // Validity
   const step1Valid = true;
   const step2Valid = vector !== null && woodConfigs.length > 0;
-  const step3Valid = step2Valid; // becomes "results computed" in PR D
+  const step3Valid = quote !== null;
   const validity: Record<number, boolean> = { 1: step1Valid, 2: step2Valid, 3: step3Valid };
 
   const goToStep = (step: number) => {
@@ -160,7 +211,7 @@ export default function QuoteApp() {
         {currentStep === 1 && (
           <Step1BoardForm
             config={boardConfig}
-            onChange={setBoardConfig}
+            onChange={updateBoardConfig}
             onNext={() => goToStep(2)}
           />
         )}
@@ -177,22 +228,27 @@ export default function QuoteApp() {
             onPlacementChange={setPlacement}
             designCompositeUrl={designCompositeUrl}
             onBack={() => goToStep(1)}
-            onNext={() => goToStep(3)}
+            onNext={runOptimizationAndQuote}
             canAdvance={step2Valid}
           />
         )}
-        {currentStep === 3 && (
-          <ComingSoonStub label="Step 3: Quote display (PR D)" />
+        {currentStep === 3 && optimizedVector && optimizedResult && quote && (
+          <Step3QuoteDisplay
+            boardConfig={boardConfig}
+            vector={optimizedVector}
+            woodConfigs={optimizedWoodConfigs}
+            result={optimizedResult}
+            quote={quote}
+            noFeasibleAngle={noFeasibleAngle}
+            designCompositeUrl={designCompositeUrl}
+            placement={placement}
+            onBack={() => goToStep(2)}
+            onRequestManufacturing={() => alert('Request manufacturing — coming in PR E.')}
+          />
         )}
       </main>
-    </div>
-  );
-}
 
-function ComingSoonStub({ label }: { label: string }) {
-  return (
-    <div className="h-full flex items-center justify-center">
-      <p className="text-sm text-slate-400">🚧 {label} — coming in the next PR.</p>
+      {optimizingLabel !== null && <OptimizingOverlay label={optimizingLabel} />}
     </div>
   );
 }
