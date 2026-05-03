@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import StepperBar, { type StepDef } from '../StepperBar';
-import { DEFAULT_BOARD_CONFIG, hasTopGroove, TOP_GROOVE_INLAY_MARGIN_INCHES, type BoardConfig } from '@/types/board';
+import {
+  DEFAULT_BOARD_CONFIG, hasTopGroove, hasBottomGroove,
+  TOP_GROOVE_INLAY_MARGIN_INCHES, BOTTOM_GROOVE_INLAY_MARGIN_INCHES,
+  backSideFeatureAabbs,
+  type BoardConfig,
+} from '@/types/board';
 import type { Design, Placement, WoodConfig, WoodSpeciesKey } from '@/types';
 import { parseVectorFile } from '@/lib/vectorParser';
 import { generateComposite } from '@/lib/compositeRenderer';
@@ -44,19 +49,40 @@ export function designAabb(d: Design): AABB {
   };
 }
 
-/** True iff any pair of designs overlaps. */
-function anyOverlap(designs: readonly Design[]): boolean {
+/** True iff any same-side pair of designs overlaps, OR if any design
+ *  on the back side overlaps a fixed back-side feature (feet /
+ *  underside handle). Two designs on opposite sides don't conflict. */
+function anyOverlap(designs: readonly Design[], boardConfig: BoardConfig): boolean {
+  // Same-side pairwise.
   for (let i = 0; i < designs.length; i++) {
     for (let j = i + 1; j < designs.length; j++) {
+      if (designs[i].side !== designs[j].side) continue;
       if (boxesOverlap(designAabb(designs[i]), designAabb(designs[j]))) return true;
+    }
+  }
+  // Back-side designs vs fixed features.
+  const backFeatures = backSideFeatureAabbs(boardConfig);
+  if (backFeatures.length > 0) {
+    for (const d of designs) {
+      if (d.side !== 'bottom') continue;
+      const a = designAabb(d);
+      for (const f of backFeatures) if (boxesOverlap(a, f)) return true;
     }
   }
   return false;
 }
 
-/** Inset rectangle on the board where designs are allowed. */
-function placeableRect(boardConfig: BoardConfig): AABB {
-  const margin = hasTopGroove(boardConfig.juiceGroove) ? TOP_GROOVE_INLAY_MARGIN_INCHES : 0;
+/** Inset rectangle on the board where designs of a given side are
+ *  allowed. Top side respects only the top juice groove margin;
+ *  bottom side respects the bottom groove margin. (Feet + handles
+ *  are checked as separate AABB obstacles, not via this rect.) */
+function placeableRect(boardConfig: BoardConfig, side: 'top' | 'bottom'): AABB {
+  const grooveOnSide = side === 'top'
+    ? hasTopGroove(boardConfig.juiceGroove)
+    : hasBottomGroove(boardConfig.juiceGroove);
+  const margin = grooveOnSide
+    ? (side === 'top' ? TOP_GROOVE_INLAY_MARGIN_INCHES : BOTTOM_GROOVE_INLAY_MARGIN_INCHES)
+    : 0;
   return {
     x: margin, y: margin,
     w: boardConfig.widthInches  - 2 * margin,
@@ -83,6 +109,9 @@ export default function QuoteApp() {
   const [boardConfig, setBoardConfig] = useState<BoardConfig>(DEFAULT_BOARD_CONFIG);
 
   const [designs, setDesigns] = useState<Design[]>([]);
+  /** Which face the user is currently viewing in Step 2 / Step 3.
+   *  New uploads attach to this side. */
+  const [currentSide, setCurrentSide] = useState<'top' | 'bottom'>('top');
   const [parsing, setParsing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -123,44 +152,45 @@ export default function QuoteApp() {
       });
 
       const aspect = parsed.naturalHeight / parsed.naturalWidth;
-      const bounds = placeableRect(boardConfig);
+      const bounds = placeableRect(boardConfig, currentSide);
+
+      // Same-side designs participate in the free-spot search; designs
+      // on the other side are irrelevant (different physical face).
+      // On the back side we also need to dodge feet + underside-handle
+      // pockets, which we treat as fixed AABB obstacles.
+      const sameSideAabbs = designs.filter(d => d.side === currentSide).map(designAabb);
+      const fixedFeatureAabbs = currentSide === 'bottom' ? backSideFeatureAabbs(boardConfig) : [];
+      const obstacles = [...sameSideAabbs, ...fixedFeatureAabbs];
 
       // Default size: a quarter of the placeable area (capped to fit
-      // both dimensions). Centered if first design; otherwise slotted
-      // into a free spot.
+      // both dimensions). For the FIRST design on this side, fill the
+      // placeable area as before. Otherwise pick a free non-
+      // overlapping spot.
+      const isFirstOnSide = sameSideAabbs.length === 0 && fixedFeatureAabbs.length === 0;
       const defaultW = Math.min(bounds.w * 0.5, bounds.h / aspect * 0.5);
-      const defaultH = defaultW * aspect;
 
       let offsetX: number;
       let offsetY: number;
-      if (designs.length === 0) {
-        // Center a solo design; sized to fill placeable area like before.
-        const designWidthInches = Math.min(bounds.w, bounds.h / aspect);
+      let designWidthInches: number;
+      if (isFirstOnSide) {
+        designWidthInches = Math.min(bounds.w, bounds.h / aspect);
         const designHeightInches = designWidthInches * aspect;
         offsetX = bounds.x + (bounds.w - designWidthInches)  / 2;
         offsetY = bounds.y + (bounds.h - designHeightInches) / 2;
-        const newDesign: Design = {
-          id: crypto.randomUUID(),
-          vector: parsed,
-          woodConfigs: initialConfigs,
-          placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches },
-        };
-        setDesigns(prev => [...prev, newDesign]);
-        invalidateQuote();
-        return;
+      } else {
+        const defaultH = defaultW * aspect;
+        const spot = findFreeSpot(defaultW, defaultH, bounds, obstacles);
+        offsetX = spot?.x ?? bounds.x;
+        offsetY = spot?.y ?? bounds.y;
+        designWidthInches = defaultW;
       }
-
-      // Multi-design: pick a non-overlapping spot.
-      const existingAabbs = designs.map(designAabb);
-      const spot = findFreeSpot(defaultW, defaultH, bounds, existingAabbs);
-      offsetX = spot?.x ?? bounds.x;
-      offsetY = spot?.y ?? bounds.y;
 
       const newDesign: Design = {
         id: crypto.randomUUID(),
         vector: parsed,
         woodConfigs: initialConfigs,
-        placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches: defaultW },
+        placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches },
+        side: currentSide,
       };
       setDesigns(prev => [...prev, newDesign]);
       invalidateQuote();
@@ -169,7 +199,7 @@ export default function QuoteApp() {
     } finally {
       setParsing(false);
     }
-  }, [boardConfig, designs, invalidateQuote]);
+  }, [boardConfig, designs, currentSide, invalidateQuote]);
 
   const removeDesign = useCallback((id: string) => {
     setDesigns(prev => prev.filter(d => d.id !== id));
@@ -242,15 +272,20 @@ export default function QuoteApp() {
         designs,
         onProgress: setOptimizingLabel,
       });
-      const totalCutting = isFinite(opt.aggregated.totalCuttingMinutes)
-        ? opt.aggregated.totalCuttingMinutes
-        : 0;
+      // Replace any NaN cutting times (a side with all-infeasible
+      // designs) with 0 so the cost model proceeds rather than
+      // propagating NaN. The "approximate quote" banner is gated on
+      // `noFeasibleAngle` instead.
+      const sanitizeSide = (s: typeof opt.aggregated.perSide.top) => ({
+        ...s,
+        totalCuttingMinutes: isFinite(s.totalCuttingMinutes) ? s.totalCuttingMinutes : 0,
+      });
       const q = computeQuote({
         boardConfig,
-        totalCuttingMinutes: totalCutting,
-        jointToolChangeMinutes: opt.aggregated.jointToolChangeMinutes,
-        uniqueSpeciesCount: opt.aggregated.uniqueSpeciesCount,
-        plugStockUsageBySpecies: opt.aggregated.plugStockUsageBySpecies,
+        perSide: {
+          top:    sanitizeSide(opt.aggregated.perSide.top),
+          bottom: sanitizeSide(opt.aggregated.perSide.bottom),
+        },
       });
       setOptimization(opt);
       setQuote(q);
@@ -267,7 +302,7 @@ export default function QuoteApp() {
   // Validity gates.
   // Step 2 valid iff at least one design AND no overlaps.
   // ---------------------------------------------------------------
-  const overlapping = useMemo(() => anyOverlap(designs), [designs]);
+  const overlapping = useMemo(() => anyOverlap(designs, boardConfig), [designs, boardConfig]);
   const step1Valid = true;
   const step2Valid = designs.length > 0 && !overlapping;
   const step3Valid = quote !== null;
@@ -311,6 +346,8 @@ export default function QuoteApp() {
             parsing={parsing}
             errorMsg={errorMsg}
             overlapping={overlapping}
+            currentSide={currentSide}
+            onChangeSide={setCurrentSide}
             onAddDesign={handleFile}
             onRemoveDesign={removeDesign}
             onUpdateDesignPlacement={updateDesignPlacement}
@@ -326,6 +363,8 @@ export default function QuoteApp() {
             optimization={optimization}
             quote={quote}
             compositeUrls={compositeUrls}
+            currentSide={currentSide}
+            onChangeSide={setCurrentSide}
             onBack={() => goToStep(2)}
             onRequestManufacturing={() => setRequestDialogOpen(true)}
           />

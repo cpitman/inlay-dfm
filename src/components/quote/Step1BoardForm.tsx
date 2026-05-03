@@ -1,6 +1,7 @@
 'use client';
 
 import type { BoardConfig, BoardWoodKey, JuiceGroove, EdgeTreatment, HandleStyle, BoardSided } from '@/types/board';
+import { hasBottomGroove } from '@/types/board';
 import { BASE_BOARD_PRICE, ADDON_FEET } from '@/lib/pricing';
 import BoardPreview from './BoardPreview';
 import { StepNav } from '../StepperBar';
@@ -49,6 +50,34 @@ export default function Step1BoardForm({ config, onChange, onNext }: Step1BoardF
   const set = <K extends keyof BoardConfig>(k: K, v: BoardConfig[K]) =>
     onChange({ ...config, [k]: v });
 
+  // Mutual-exclusion flags: a back juice groove is incompatible with
+  // both feet and underside-handle pockets (the groove path would
+  // crash through them on the back face). Disabling propagates both
+  // ways — picking either side of the pair greys out the other.
+  const backGrooveSelected   = hasBottomGroove(config.juiceGroove);
+  const feetSelected         = config.sided   === 'feet';
+  const undersideSelected    = config.handles === 'underside';
+
+  // Per-juice-groove-option disabled state + explanation.
+  const grooveDisabledFor = (g: JuiceGroove): string | null => {
+    if (g !== 'bottom' && g !== 'both') return null;
+    if (feetSelected)      return `Disabled while "Feet on bottom" is selected.`;
+    if (undersideSelected) return `Disabled while "Underside pocket" handles are selected.`;
+    return null;
+  };
+  // Per-sided-option disabled state.
+  const sidedDisabledFor = (s: BoardSided): string | null => {
+    if (s !== 'feet') return null;
+    if (backGrooveSelected) return `Disabled while a bottom juice groove is selected.`;
+    return null;
+  };
+  // Per-handle-option disabled state.
+  const handlesDisabledFor = (h: HandleStyle): string | null => {
+    if (h !== 'underside') return null;
+    if (backGrooveSelected) return `Disabled while a bottom juice groove is selected.`;
+    return null;
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="grid grid-cols-1 lg:grid-cols-[20rem_1fr] gap-6 flex-1 min-h-0">
@@ -80,6 +109,7 @@ export default function Step1BoardForm({ config, onChange, onNext }: Step1BoardF
               options={SIDED_OPTIONS}
               value={config.sided}
               onChange={v => set('sided', v as BoardSided)}
+              disabledFor={k => sidedDisabledFor(k as BoardSided)}
             />
           </FieldGroup>
 
@@ -87,12 +117,15 @@ export default function Step1BoardForm({ config, onChange, onNext }: Step1BoardF
             label="Juice groove"
             hint={config.juiceGroove === 'top' || config.juiceGroove === 'both'
               ? 'Top groove requires a 1" margin around the inlay area.'
-              : ''}
+              : config.juiceGroove === 'bottom'
+                ? 'Bottom groove requires a 1" margin on the back side.'
+                : ''}
           >
             <ChoicePills
               options={GROOVE_OPTIONS}
               value={config.juiceGroove}
               onChange={v => set('juiceGroove', v as JuiceGroove)}
+              disabledFor={k => grooveDisabledFor(k as JuiceGroove)}
             />
           </FieldGroup>
 
@@ -109,6 +142,7 @@ export default function Step1BoardForm({ config, onChange, onNext }: Step1BoardF
               options={HANDLE_OPTIONS}
               value={config.handles}
               onChange={v => set('handles', v as HandleStyle)}
+              disabledFor={k => handlesDisabledFor(k as HandleStyle)}
             />
           </FieldGroup>
         </div>
@@ -145,52 +179,87 @@ function FieldGroup({ label, hint, children }: { label: string; hint?: string; c
 interface ChoiceOption { key: string; label: string }
 
 function ChoicePills<K extends string>({
-  options, value, onChange,
+  options, value, onChange, disabledFor,
 }: {
   options: readonly { key: K; label: string }[];
   value: K;
   onChange: (v: K) => void;
+  /** Return null if the option is enabled, or a short human-readable
+   *  reason string when disabled. The reason is shown as a tooltip
+   *  on the disabled pill and as a footer line under the row. */
+  disabledFor?: (k: K) => string | null;
 }) {
+  // Aggregate disabled-reason lines once per row so we can show a
+  // small footer explaining what's blocked and why.
+  const disabledReasons = options
+    .map(o => ({ key: o.key, reason: disabledFor?.(o.key) ?? null }))
+    .filter(x => x.reason !== null);
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {options.map(o => (
-        <button
-          key={o.key}
-          onClick={() => onChange(o.key)}
-          className={`flex-1 min-w-16 py-1.5 rounded-md text-sm font-medium border transition-colors
-            ${value === o.key
-              ? 'bg-blue-600 border-blue-500 text-white'
-              : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400'}`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(o => {
+          const reason = disabledFor?.(o.key) ?? null;
+          const isDisabled = reason !== null;
+          return (
+            <button
+              key={o.key}
+              onClick={() => { if (!isDisabled) onChange(o.key); }}
+              disabled={isDisabled}
+              title={reason ?? undefined}
+              className={`flex-1 min-w-16 py-1.5 rounded-md text-sm font-medium border transition-colors
+                ${isDisabled
+                  ? 'bg-slate-800/40 border-slate-800 text-slate-600 cursor-not-allowed'
+                  : value === o.key
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400'}`}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      {disabledReasons.length > 0 && (
+        <p className="text-xs text-slate-500 mt-1.5">
+          {disabledReasons[0].reason}
+        </p>
+      )}
+    </>
   );
 }
 
 function ChoiceList<K extends string>({
-  options, value, onChange,
+  options, value, onChange, disabledFor,
 }: {
   options: readonly (ChoiceOption & { key: K; hint: string })[];
   value: K;
   onChange: (v: K) => void;
+  disabledFor?: (k: K) => string | null;
 }) {
   return (
     <div className="space-y-1.5">
-      {options.map(o => (
-        <button
-          key={o.key}
-          onClick={() => onChange(o.key)}
-          className={`w-full text-left px-3 py-2 rounded-md border transition-colors
-            ${value === o.key
-              ? 'bg-blue-600/20 border-blue-500 text-blue-100'
-              : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'}`}
-        >
-          <div className="text-sm font-medium">{o.label}</div>
-          <div className="text-xs text-slate-500 mt-0.5">{o.hint}</div>
-        </button>
-      ))}
+      {options.map(o => {
+        const reason = disabledFor?.(o.key) ?? null;
+        const isDisabled = reason !== null;
+        return (
+          <button
+            key={o.key}
+            onClick={() => { if (!isDisabled) onChange(o.key); }}
+            disabled={isDisabled}
+            title={reason ?? undefined}
+            className={`w-full text-left px-3 py-2 rounded-md border transition-colors
+              ${isDisabled
+                ? 'bg-slate-800/40 border-slate-800 text-slate-600 cursor-not-allowed'
+                : value === o.key
+                  ? 'bg-blue-600/20 border-blue-500 text-blue-100'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500'}`}
+          >
+            <div className="text-sm font-medium">{o.label}</div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {isDisabled ? reason : o.hint}
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }

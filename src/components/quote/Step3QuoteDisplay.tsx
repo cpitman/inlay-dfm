@@ -18,6 +18,7 @@ import { clearanceBitLabel } from '@/lib/machiningTime';
 import type { DesignOptimizationResult, MultiDesignOptimizationResult } from '@/lib/quoteOptimizer';
 import HoverMagnifier from '../HoverMagnifier';
 import IssueLocatorBadges, { type IssueVariant } from '../IssueLocatorBadges';
+import BoardFlipView from '../BoardFlipView';
 import { StepNav } from '../StepperBar';
 
 interface Step3QuoteDisplayProps {
@@ -26,6 +27,9 @@ interface Step3QuoteDisplayProps {
   quote: QuoteResult;
   /** Per-design composite PNG dataURL, keyed by design id. */
   compositeUrls: Map<string, string>;
+  /** Which face the user is viewing — controls the flip animation. */
+  currentSide: 'top' | 'bottom';
+  onChangeSide: (next: 'top' | 'bottom') => void;
   onBack: () => void;
   onRequestManufacturing: () => void;
 }
@@ -43,19 +47,26 @@ interface Step3QuoteDisplayProps {
  */
 export default function Step3QuoteDisplay({
   boardConfig, optimization, quote, compositeUrls,
+  currentSide, onChangeSide,
   onBack, onRequestManufacturing,
 }: Step3QuoteDisplayProps) {
   const { perDesign, aggregated } = optimization;
   const noFeasibleAngle = aggregated.noFeasibleAngle;
 
-  // Render the board PNG and fit-to-container.
-  const [boardUrl, setBoardUrl] = useState<string | null>(null);
+  // Render BOTH board faces for the flip view.
+  const [topBoardUrl,    setTopBoardUrl]    = useState<string | null>(null);
+  const [bottomBoardUrl, setBottomBoardUrl] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [boardPx, setBoardPx] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   useEffect(() => {
     let cancelled = false;
-    renderBoardWithFeatures(boardConfig).then(url => {
-      if (!cancelled) setBoardUrl(url);
+    Promise.all([
+      renderBoardWithFeatures(boardConfig, 100, 'top'),
+      renderBoardWithFeatures(boardConfig, 100, 'bottom'),
+    ]).then(([top, bottom]) => {
+      if (cancelled) return;
+      setTopBoardUrl(top);
+      setBottomBoardUrl(bottom);
     });
     return () => { cancelled = true; };
   }, [boardConfig]);
@@ -88,9 +99,14 @@ export default function Step3QuoteDisplay({
     return m === null ? a : Math.max(m, a);
   }, null);
 
+  // For "fewer species" tip, use the cost-relevant count: species are
+  // charged per side, so two walnut sides count as 2.
+  const speciesChargeCount =
+    aggregated.perSide.top.uniqueSpeciesCount + aggregated.perSide.bottom.uniqueSpeciesCount;
+
   const tips = buildTips({
     boardConfig,
-    uniqueSpeciesCount: aggregated.uniqueSpeciesCount,
+    uniqueSpeciesCount: speciesChargeCount,
     noFeasibleAngle,
     suggestionAngleDegrees: widestSuggestion,
   });
@@ -133,30 +149,43 @@ export default function Step3QuoteDisplay({
         {/* Composite preview + legend */}
         <div className="min-h-0 flex flex-col gap-2">
           <div ref={wrapRef} className="min-h-0 flex-1 flex items-center justify-center bg-slate-950 rounded-lg">
-            {boardUrl && (
-              <HoverMagnifier zoom={3} lensSize={180}>
-                <div
-                  className="relative shadow-xl"
-                  style={{ width: boardPx.width, height: boardPx.height }}
-                >
-                  <img
-                    src={boardUrl}
-                    alt={`${boardConfig.wood} board preview`}
-                    className="absolute inset-0 w-full h-full object-cover rounded select-none pointer-events-none"
-                    draggable={false}
-                  />
-                  {perDesign.map(d => (
-                    <DesignOverlay
-                      key={d.designId}
-                      design={d}
-                      compositeUrl={compositeUrls.get(d.designId)}
-                      noFeasibleAngle={noFeasibleAngle}
-                      pctX={pctX}
-                      pctY={pctY}
-                    />
-                  ))}
-                </div>
-              </HoverMagnifier>
+            {boardPx.width > 0 && boardPx.height > 0 && (topBoardUrl || bottomBoardUrl) && (
+              <BoardFlipView
+                side={currentSide}
+                onFlip={onChangeSide}
+                width={boardPx.width}
+                height={boardPx.height}
+                faces={{
+                  top: (
+                    <HoverMagnifier zoom={3} lensSize={180} className="w-full h-full">
+                      <FaceContent
+                        boardUrl={topBoardUrl}
+                        boardConfig={boardConfig}
+                        side="top"
+                        designs={perDesign.filter(d => d.side === 'top')}
+                        compositeUrls={compositeUrls}
+                        noFeasibleAngle={noFeasibleAngle}
+                        pctX={pctX}
+                        pctY={pctY}
+                      />
+                    </HoverMagnifier>
+                  ),
+                  bottom: (
+                    <HoverMagnifier zoom={3} lensSize={180} className="w-full h-full">
+                      <FaceContent
+                        boardUrl={bottomBoardUrl}
+                        boardConfig={boardConfig}
+                        side="bottom"
+                        designs={perDesign.filter(d => d.side === 'bottom')}
+                        compositeUrls={compositeUrls}
+                        noFeasibleAngle={noFeasibleAngle}
+                        pctX={pctX}
+                        pctY={pctY}
+                      />
+                    </HoverMagnifier>
+                  ),
+                }}
+              />
             )}
           </div>
           <OverlayLegend
@@ -204,6 +233,46 @@ export default function Step3QuoteDisplay({
         totalSteps={3}
         onBack={onBack}
       />
+    </div>
+  );
+}
+
+/**
+ * One face of the board on Step 3 — board image + per-design composite
+ * + per-design overlay PNG + locator badges. Used by both top and
+ * bottom faces inside the BoardFlipView.
+ */
+function FaceContent({
+  boardUrl, boardConfig, side, designs, compositeUrls, noFeasibleAngle, pctX, pctY,
+}: {
+  boardUrl: string | null;
+  boardConfig: BoardConfig;
+  side: 'top' | 'bottom';
+  designs: DesignOptimizationResult[];
+  compositeUrls: Map<string, string>;
+  noFeasibleAngle: boolean;
+  pctX: (i: number) => string;
+  pctY: (i: number) => string;
+}) {
+  if (!boardUrl) return null;
+  return (
+    <div className="relative shadow-xl w-full h-full">
+      <img
+        src={boardUrl}
+        alt={`${boardConfig.wood} board ${side === 'top' ? 'front' : 'back'}`}
+        className="absolute inset-0 w-full h-full object-cover rounded select-none pointer-events-none"
+        draggable={false}
+      />
+      {designs.map(d => (
+        <DesignOverlay
+          key={d.designId}
+          design={d}
+          compositeUrl={compositeUrls.get(d.designId)}
+          noFeasibleAngle={noFeasibleAngle}
+          pctX={pctX}
+          pctY={pctY}
+        />
+      ))}
     </div>
   );
 }

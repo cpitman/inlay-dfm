@@ -76,6 +76,24 @@ export default function HoverMagnifier({
   const lensInnerRef  = useRef<HTMLDivElement>(null);
   const [hovering, setHovering] = useState(false);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  // Track the wrapper's pixel size so the cloned lens content (DOM mode)
+  // can be sized to MATCH it, not the lens. If the inner div were 100%
+  // of the lens (e.g. 180×180), `scale(zoom)` would only ever show the
+  // top-left 180×180 of the actual content — that's the bug we're
+  // working around here.
+  const [wrapperSize, setWrapperSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setWrapperSize({ w: width, h: height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const mode: 'canvas' | 'dom' = sourceCanvasRef ? 'canvas' : 'dom';
 
@@ -198,8 +216,13 @@ export default function HoverMagnifier({
                 position: 'absolute',
                 left: 0,
                 top: 0,
-                width: '100%',
-                height: '100%',
+                // Size to the WRAPPER, not the lens — `scale(zoom)` is
+                // applied to a copy of the full wrapper-content, which
+                // the lens then circularly clips. 100% of the lens
+                // would only show the top-left zoom-fraction of the
+                // content.
+                width: wrapperSize.w || undefined,
+                height: wrapperSize.h || undefined,
                 willChange: 'transform',
               }}
             >

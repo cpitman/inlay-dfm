@@ -119,10 +119,10 @@ export interface Placement {
 
 /**
  * One design on a multi-design board. The user can upload several;
- * each gets its own SVG vector, color→wood mapping, and placement.
- * Two designs cannot overlap on the board (AABB-disjoint, edge-touch
- * allowed). Colors aren't deduplicated across designs — the user
- * picks species per design.
+ * each gets its own SVG vector, color→wood mapping, placement, and
+ * side. Two designs on the SAME side cannot overlap (AABB-disjoint,
+ * edge-touch allowed). Front and back are independent. Colors aren't
+ * deduplicated across designs — the user picks species per design.
  */
 export interface Design {
   /** Stable client-side UUID — used for React keys, drag tracking, and save/load. */
@@ -130,6 +130,10 @@ export interface Design {
   vector: VectorData;
   woodConfigs: WoodConfig[];
   placement: Placement;
+  /** Which face of the board this design lives on. Default `'top'`
+   *  for back-compat with files / sessions written before sides
+   *  existed. Each side is analyzed and costed independently. */
+  side: 'top' | 'bottom';
 }
 
 /** A snapshot of all layers at one point in history. */

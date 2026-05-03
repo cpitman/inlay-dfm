@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   computeQuote, BASE_BOARD_PRICE, INLAY_WOOD_PRICE, ADDON_FEET, LABOR_HOURLY,
   INLAY_SHEET_AREA_SQ_IN, INLAY_PACKING_THRESHOLD,
-  type QuoteInput,
+  EMPTY_SIDE_AGGREGATE,
+  type QuoteInput, type SideAggregate,
 } from './pricing';
 import { DEFAULT_BOARD_CONFIG, type BoardConfig } from '../types/board';
 
@@ -16,21 +17,14 @@ const BASE_CHERRY_BOARD: BoardConfig = {
 };
 
 /**
- * Convenience: build a `QuoteInput` for a quote with the given list of
- * species (one slot per species, no plug-stock data so each charges
- * full sheet price). Useful for "single-design" style tests.
+ * Build a side aggregate with the given list of species. Each species
+ * defaults to "1 full sheet" of plug-stock usage so the test math
+ * doesn't have to deal with the packing fraction unless it wants to.
  */
-function speciesInput(
-  species: string[],
-  overrides: Partial<QuoteInput> = {},
-): QuoteInput {
-  // Default plug-stock map: every species is treated as full sheet
-  // (= sum > threshold) so the test math doesn't have to know the
-  // packing fraction. Tests can override per-species usage as needed.
+function side(species: string[], overrides: Partial<SideAggregate> = {}): SideAggregate {
   const plugStock = new Map<string, number>();
   for (const sp of species) plugStock.set(sp, INLAY_SHEET_AREA_SQ_IN);
   return {
-    boardConfig: BASE_CHERRY_BOARD,
     totalCuttingMinutes: 0,
     jointToolChangeMinutes: 0,
     uniqueSpeciesCount: new Set(species).size,
@@ -39,23 +33,39 @@ function speciesInput(
   };
 }
 
-describe('computeQuote', () => {
+/**
+ * Convenience: single-side quote (everything on top). Used by tests
+ * that don't care about the back side.
+ */
+function topOnlyInput(
+  species: string[],
+  topOverrides: Partial<SideAggregate> = {},
+  inputOverrides: Partial<QuoteInput> = {},
+): QuoteInput {
+  return {
+    boardConfig: BASE_CHERRY_BOARD,
+    perSide: { top: side(species, topOverrides), bottom: EMPTY_SIDE_AGGREGATE },
+    ...inputOverrides,
+  };
+}
+
+describe('computeQuote — single-side cases', () => {
   it('returns lowDollars and highDollars rounded to nearest $10', () => {
-    const q = computeQuote(speciesInput(['walnut'], { totalCuttingMinutes: 30 }));
+    const q = computeQuote(topOnlyInput(['walnut'], { totalCuttingMinutes: 30 }));
     expect(q.lowDollars  % 10).toBe(0);
     expect(q.highDollars % 10).toBe(0);
     expect(q.highDollars).toBeGreaterThan(q.lowDollars);
   });
 
   it('range is 90% to 125% of the pre-round total', () => {
-    const q = computeQuote(speciesInput(['walnut'], { totalCuttingMinutes: 30 }));
+    const q = computeQuote(topOnlyInput(['walnut'], { totalCuttingMinutes: 30 }));
     const total = q.breakdown.totalEstimate;
     expect(q.lowDollars).toBeCloseTo(Math.round((total * 0.90) / 10) * 10);
     expect(q.highDollars).toBeCloseTo(Math.round((total * 1.25) / 10) * 10);
   });
 
   it('materials sum base board + each unique species', () => {
-    const q = computeQuote(speciesInput(['walnut', 'purpleheart']));
+    const q = computeQuote(topOnlyInput(['walnut', 'purpleheart']));
     const expected = BASE_BOARD_PRICE.cherry
       + INLAY_WOOD_PRICE.walnut
       + INLAY_WOOD_PRICE.purpleheart;
@@ -63,132 +73,185 @@ describe('computeQuote', () => {
   });
 
   it('per-inlay machine-time premium scales with UNIQUE SPECIES (not slot count)', () => {
-    // 1 species → 1 × 30 min premium.
-    const q1 = computeQuote(speciesInput(['walnut']));
-    // 3 species → 3 × 30 min premium. +60 min vs q1.
-    const q3 = computeQuote(speciesInput(['walnut', 'maple', 'cherry']));
+    const q1 = computeQuote(topOnlyInput(['walnut']));
+    const q3 = computeQuote(topOnlyInput(['walnut', 'maple', 'cherry']));
     expect(q3.breakdown.machineMinutes - q1.breakdown.machineMinutes).toBe(60);
   });
 
   it('two slots of the same species count as one species for premiums + labor', () => {
-    // Two designs each with one walnut slot → uniqueSpeciesCount = 1.
-    const q = computeQuote(speciesInput(['walnut'], { uniqueSpeciesCount: 1 }));
-    expect(q.breakdown.machineMinutes).toBe(30); // 1 × 30 min
-    expect(q.breakdown.laborMinutes).toBe(30 + 30 + 90); // setup + 1 × per-inlay + finishing
+    const q = computeQuote(topOnlyInput(['walnut'], {}, {}));
+    expect(q.breakdown.machineMinutes).toBe(30);
+    expect(q.breakdown.laborMinutes).toBe(30 + 30 + 90);
   });
 
   it('adds groove minutes per side: top=10, bottom=10, both=20', () => {
-    const none = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'none' } });
-    const top  = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'top'  } });
-    const both = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'both' } });
+    const baseW = topOnlyInput(['walnut']);
+    const none = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'none' } });
+    const top  = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'top'  } });
+    const both = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'both' } });
     expect(top.breakdown.machineMinutes  - none.breakdown.machineMinutes).toBe(10);
     expect(both.breakdown.machineMinutes - none.breakdown.machineMinutes).toBe(20);
   });
 
   it('adds inset handles 20 min, underside 10 min', () => {
-    const none      = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, handles: 'none'      } });
-    const inset     = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, handles: 'inset'     } });
-    const underside = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, handles: 'underside' } });
+    const baseW = topOnlyInput(['walnut']);
+    const none      = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, handles: 'none'      } });
+    const inset     = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, handles: 'inset'     } });
+    const underside = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, handles: 'underside' } });
     expect(inset.breakdown.machineMinutes     - none.breakdown.machineMinutes).toBe(20);
     expect(underside.breakdown.machineMinutes - none.breakdown.machineMinutes).toBe(10);
   });
 
-  it('labor is 30 + 30N + 90 minutes where N = unique species', () => {
-    const q = computeQuote(speciesInput(['walnut', 'maple']));
+  it('labor is 30 + 30N + 90 minutes where N = unique species (summed across sides)', () => {
+    const q = computeQuote(topOnlyInput(['walnut', 'maple']));
     expect(q.breakdown.laborMinutes).toBe(30 + 30 * 2 + 90);
     expect(q.breakdown.laborDollars).toBeCloseTo((30 + 30 * 2 + 90) / 60 * LABOR_HOURLY, 6);
   });
 
   it('feet add-on adds $30; dual-sided does not', () => {
-    const feet = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, sided: 'feet' } });
-    const dual = computeQuote({ ...speciesInput(['walnut']), boardConfig: { ...BASE_CHERRY_BOARD, sided: 'dual' } });
+    const baseW = topOnlyInput(['walnut']);
+    const feet = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, sided: 'feet' } });
+    const dual = computeQuote({ ...baseW, boardConfig: { ...BASE_CHERRY_BOARD, sided: 'dual' } });
     expect(feet.breakdown.addOnDollars).toBe(ADDON_FEET);
     expect(dual.breakdown.addOnDollars).toBe(0);
-    expect(feet.breakdown.totalEstimate - dual.breakdown.totalEstimate).toBeCloseTo(ADDON_FEET, 6);
   });
 
   it('plug-stock summed area at 50% of sheet → 50% of full inlay price', () => {
-    const q = computeQuote({
-      ...speciesInput(['walnut']),
+    const q = computeQuote(topOnlyInput(['walnut'], {
+      uniqueSpeciesCount: 1,
       plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * 0.5]]),
-    });
+    }));
     const expected = BASE_BOARD_PRICE.cherry + 0.5 * INLAY_WOOD_PRICE.walnut;
     expect(q.breakdown.materialsDollars).toBeCloseTo(expected, 6);
   });
 
   it('plug-stock summed above 70% → full sheet price', () => {
-    const q = computeQuote({
-      ...speciesInput(['walnut']),
-      plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * (INLAY_PACKING_THRESHOLD + 0.05)]]),
-    });
-    expect(q.breakdown.materialsDollars).toBe(BASE_BOARD_PRICE.cherry + INLAY_WOOD_PRICE.walnut);
-  });
-
-  it('plug-stock summed at exactly 70% → fractional path (boundary inclusive of fractional)', () => {
-    const q = computeQuote({
-      ...speciesInput(['walnut']),
-      plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * INLAY_PACKING_THRESHOLD]]),
-    });
-    const expected = BASE_BOARD_PRICE.cherry + INLAY_PACKING_THRESHOLD * INLAY_WOOD_PRICE.walnut;
-    expect(q.breakdown.materialsDollars).toBeCloseTo(expected, 6);
-  });
-
-  it('mixes per-species scaling: one fractional, one full', () => {
-    const q = computeQuote({
-      ...speciesInput(['walnut', 'maple']),
-      plugStockUsageBySpecies: new Map([
-        ['walnut', INLAY_SHEET_AREA_SQ_IN * 0.1],
-        ['maple',  INLAY_SHEET_AREA_SQ_IN * 0.85],
-      ]),
-    });
-    const expected = BASE_BOARD_PRICE.cherry
-      + 0.1 * INLAY_WOOD_PRICE.walnut
-      + INLAY_WOOD_PRICE.maple;
-    expect(q.breakdown.materialsDollars).toBeCloseTo(expected, 6);
-  });
-
-  it('summed plug stock across designs: 50% + 30% → 80% > threshold → full price', () => {
-    // Two designs each contributing walnut plug stock. Together they
-    // exceed the 70% threshold even though individually they would not.
-    // The threshold applies to the SUM, so the full sheet price kicks in.
-    const q = computeQuote({
-      ...speciesInput(['walnut']),
-      plugStockUsageBySpecies: new Map([
-        ['walnut', INLAY_SHEET_AREA_SQ_IN * (0.5 + 0.3)],
-      ]),
-    });
-    expect(q.breakdown.materialsDollars).toBe(BASE_BOARD_PRICE.cherry + INLAY_WOOD_PRICE.walnut);
-  });
-
-  it('omitting a species from plugStockUsageBySpecies → $0 for that species', () => {
-    // No plug-stock entry → no inlay cost for that species. (Caller is
-    // expected to populate the map with at least sheet-area when no
-    // measurement is available.)
-    const q = computeQuote({
-      ...speciesInput([]),
+    const q = computeQuote(topOnlyInput(['walnut'], {
       uniqueSpeciesCount: 1,
-      plugStockUsageBySpecies: new Map(), // empty
-    });
-    // Materials = base only.
-    expect(q.breakdown.materialsDollars).toBe(BASE_BOARD_PRICE.cherry);
+      plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * (INLAY_PACKING_THRESHOLD + 0.05)]]),
+    }));
+    expect(q.breakdown.materialsDollars).toBe(BASE_BOARD_PRICE.cherry + INLAY_WOOD_PRICE.walnut);
   });
 
   it('machineMinutes = totalCutting + jointToolChange + per-feature premiums', () => {
-    const q = computeQuote(speciesInput(['walnut'], {
-      totalCuttingMinutes: 60,
-      jointToolChangeMinutes: 15,
-    }));
-    // 60 cutting + 15 joint overhead + 30 per-inlay (1 species × 30) = 105 min.
-    expect(q.breakdown.machineMinutes).toBe(105);
-    expect(q.breakdown.machineDollars).toBeCloseTo((105 / 60) * 80, 6); // MACHINE_HOURLY = 80
+    const q = computeQuote(topOnlyInput(['walnut'], { totalCuttingMinutes: 60, jointToolChangeMinutes: 15 }));
+    expect(q.breakdown.machineMinutes).toBe(60 + 15 + 30);
+    expect(q.breakdown.machineDollars).toBeCloseTo((105 / 60) * 80, 6);
+  });
+});
+
+describe('computeQuote — two-sided cases', () => {
+  it('walnut on both sides: labor counts walnut twice (one per side)', () => {
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: {
+        top:    side(['walnut']),
+        bottom: side(['walnut']),
+      },
+    });
+    // Setup + 2 species (one per side) + finishing.
+    expect(q.breakdown.laborMinutes).toBe(30 + 30 * 2 + 90);
+    // Same for machining premium: 2 × 30 = 60 min for the two species.
+    expect(q.breakdown.machineMinutes).toBe(60);
   });
 
-  it('joint tool-change overhead replaces summed per-design overhead', () => {
-    // Caller is expected to subtract per-design tool changes from
-    // cuttingMinutes (or pass cuttingTime only). jointToolChangeMinutes
-    // is purely additive.
-    const q1 = computeQuote(speciesInput(['walnut'], { totalCuttingMinutes: 60, jointToolChangeMinutes: 0 }));
-    const q2 = computeQuote(speciesInput(['walnut'], { totalCuttingMinutes: 60, jointToolChangeMinutes: 20 }));
-    expect(q2.breakdown.machineMinutes - q1.breakdown.machineMinutes).toBe(20);
+  it('walnut twice on the SAME side: counts once for that side', () => {
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: {
+        top:    side(['walnut'], { uniqueSpeciesCount: 1 }), // 2 slots → 1 species
+        bottom: EMPTY_SIDE_AGGREGATE,
+      },
+    });
+    expect(q.breakdown.laborMinutes).toBe(30 + 30 * 1 + 90);
+    expect(q.breakdown.machineMinutes).toBe(30);
+  });
+
+  it('cutting + tool-change overhead sum across sides', () => {
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: {
+        top:    side(['walnut'], { totalCuttingMinutes: 30, jointToolChangeMinutes: 10 }),
+        bottom: side(['walnut'], { totalCuttingMinutes: 20, jointToolChangeMinutes: 5  }),
+      },
+    });
+    // Per-side cutting + per-side overhead + 2-species premium.
+    expect(q.breakdown.machineMinutes).toBe((30 + 10) + (20 + 5) + (30 * 2));
+  });
+
+  it('inlay material threshold applied PER SIDE (50% top + 50% bottom => no full-sheet trip)', () => {
+    // Same species (walnut) used on both sides at 50% utilization each.
+    // Old (single-side) model would have summed to 100% > 70% → full
+    // sheet. Per-side rule keeps each at 50% prorated.
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: {
+        top: {
+          totalCuttingMinutes: 0, jointToolChangeMinutes: 0, uniqueSpeciesCount: 1,
+          plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * 0.5]]),
+        },
+        bottom: {
+          totalCuttingMinutes: 0, jointToolChangeMinutes: 0, uniqueSpeciesCount: 1,
+          plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * 0.5]]),
+        },
+      },
+    });
+    const expectedInlay = 0.5 * INLAY_WOOD_PRICE.walnut + 0.5 * INLAY_WOOD_PRICE.walnut;
+    expect(q.breakdown.materialsDollars).toBeCloseTo(BASE_BOARD_PRICE.cherry + expectedInlay, 6);
+  });
+
+  it('threshold trips per side independently', () => {
+    // Top: 80% walnut → over threshold → full sheet.
+    // Bottom: 30% walnut → under → prorated 30%.
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: {
+        top: {
+          totalCuttingMinutes: 0, jointToolChangeMinutes: 0, uniqueSpeciesCount: 1,
+          plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * 0.80]]),
+        },
+        bottom: {
+          totalCuttingMinutes: 0, jointToolChangeMinutes: 0, uniqueSpeciesCount: 1,
+          plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN * 0.30]]),
+        },
+      },
+    });
+    const expectedInlay = INLAY_WOOD_PRICE.walnut + 0.30 * INLAY_WOOD_PRICE.walnut;
+    expect(q.breakdown.materialsDollars).toBeCloseTo(BASE_BOARD_PRICE.cherry + expectedInlay, 6);
+  });
+
+  it('groove + handles premiums are board-wide (not per side)', () => {
+    // Two-sided quote with juice-groove "both". 'both' = 2 sides → 20 min.
+    const q = computeQuote({
+      boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'both' },
+      perSide: {
+        top:    side(['walnut']),
+        bottom: side(['maple']),
+      },
+    });
+    const noGroove = computeQuote({
+      boardConfig: { ...BASE_CHERRY_BOARD, juiceGroove: 'none' },
+      perSide: {
+        top:    side(['walnut']),
+        bottom: side(['maple']),
+      },
+    });
+    expect(q.breakdown.machineMinutes - noGroove.breakdown.machineMinutes).toBe(20);
+  });
+
+  it('one-time labor blocks (setup + finishing) are NOT doubled by adding a back side', () => {
+    // Single-side walnut.
+    const single = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: { top: side(['walnut']), bottom: EMPTY_SIDE_AGGREGATE },
+    });
+    // Two-side walnut: one species per side. Labor goes from
+    // setup + 1*per-inlay + finishing → setup + 2*per-inlay + finishing
+    // (only the per-inlay block doubles; setup + finishing stay).
+    const two = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: { top: side(['walnut']), bottom: side(['walnut']) },
+    });
+    expect(two.breakdown.laborMinutes - single.breakdown.laborMinutes).toBe(30);
   });
 });

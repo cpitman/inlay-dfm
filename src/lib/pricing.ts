@@ -65,38 +65,42 @@ export const INLAY_SHEET_AREA_SQ_IN = 18 * 12;
  */
 export const INLAY_PACKING_THRESHOLD = 0.70;
 
+/**
+ * Per-side aggregate the cost computation needs. The carving order
+ * within one side is decided by the optimizer; the aggregate flattens
+ * everything down to "what costs to charge for this side."
+ */
+export interface SideAggregate {
+  /** Sum of per-design cutting time (machining minutes) for designs
+   *  on THIS side. Excludes tool-change overhead. */
+  totalCuttingMinutes: number;
+  /** Tool-change overhead for the union of bits used on THIS side. */
+  jointToolChangeMinutes: number;
+  /** Distinct wood species across this side's designs. */
+  uniqueSpeciesCount: number;
+  /** Per-species plug-stock OBB area (in²), summed across this
+   *  side's designs + slots. The 70%-of-sheet packing threshold is
+   *  applied per species per side — same species used on the OTHER
+   *  side has its OWN sheet. */
+  plugStockUsageBySpecies: Map<string, number>;
+}
+
+/** Empty side aggregate — used when one face has no designs. */
+export const EMPTY_SIDE_AGGREGATE: SideAggregate = {
+  totalCuttingMinutes: 0,
+  jointToolChangeMinutes: 0,
+  uniqueSpeciesCount: 0,
+  plugStockUsageBySpecies: new Map(),
+};
+
 export interface QuoteInput {
   boardConfig: BoardConfig;
   /**
-   * Sum of per-design cutting time (machining minutes) across every
-   * design on the board. Excludes tool-change overhead — that's
-   * tracked separately so the caller can deduplicate bits across
-   * designs.
+   * Per-side cost aggregates. The board cost itself is one-time
+   * (not split by side); inlay material + per-inlay machining + per-
+   * inlay labor are summed across both sides per the rules below.
    */
-  totalCuttingMinutes: number;
-  /**
-   * Tool-change overhead minutes after deduplicating clearance bits
-   * and v-bit angles across all designs. See
-   * `jointToolChangeOverhead` in `machiningTime.ts`.
-   */
-  jointToolChangeMinutes: number;
-  /**
-   * Distinct wood species across every design's `woodConfigs`. Drives
-   * both the per-inlay machining premium and the per-inlay labor
-   * minutes — both are charged once per species, not once per color
-   * slot. Two slots both mapped to walnut count once.
-   */
-  uniqueSpeciesCount: number;
-  /**
-   * Per-species plug-stock OBB area, in square inches, summed across
-   * every design + color slot that uses that species. The 70%-of-
-   * sheet packing threshold is applied to this **sum** per species:
-   *   - Sum > 70% → charged the full per-species sheet price.
-   *   - Sum ≤ 70% → charged a fraction of the sheet price.
-   * Species absent from the map contribute $0 (e.g. when the optimizer
-   * couldn't measure plug stock for that species).
-   */
-  plugStockUsageBySpecies: Map<string, number>;
+  perSide: { top: SideAggregate; bottom: SideAggregate };
 }
 
 export interface QuoteBreakdown {
@@ -136,32 +140,36 @@ export interface QuoteResult {
  * those aggregates.
  */
 export function computeQuote(input: QuoteInput): QuoteResult {
-  const {
-    boardConfig,
-    totalCuttingMinutes,
-    jointToolChangeMinutes,
-    uniqueSpeciesCount,
-    plugStockUsageBySpecies,
-  } = input;
+  const { boardConfig, perSide } = input;
+  const { top, bottom } = perSide;
 
-  // Materials. Per-species inlay cost with packing-aware scaling: a
-  // species' plug-stock OBB area is summed across every slot in every
-  // design that uses it. If the sum is ≤ 70% of a 12×18" sheet, the
-  // customer is charged the fraction (the remainder is reusable for
-  // other orders). Above 70% → full sheet price.
+  // Per-side species totals (used for labor + machining premiums).
+  const sumPerSide = top.uniqueSpeciesCount + bottom.uniqueSpeciesCount;
+  const totalCuttingMinutes = top.totalCuttingMinutes + bottom.totalCuttingMinutes;
+  const totalToolChangeMinutes = top.jointToolChangeMinutes + bottom.jointToolChangeMinutes;
+
+  // Materials. Per-species inlay cost with packing-aware scaling
+  // applied PER SIDE: a species' plug-stock OBB area on the top is
+  // summed only against the top sheet; same on the bottom. Same
+  // species used on both sides => two separate sheets (each can hit
+  // its own 70% threshold or be prorated).
   const baseDollars = BASE_BOARD_PRICE[boardConfig.wood];
-  let inlayDollars = 0;
-  for (const [species, usage] of plugStockUsageBySpecies) {
-    const fullPrice = INLAY_WOOD_PRICE[species] ?? 0;
-    const utilization = usage / INLAY_SHEET_AREA_SQ_IN;
-    if (utilization > INLAY_PACKING_THRESHOLD) inlayDollars += fullPrice;
-    else                                       inlayDollars += utilization * fullPrice;
-  }
+  const inlayDollarsForSide = (s: SideAggregate): number => {
+    let total = 0;
+    for (const [species, usage] of s.plugStockUsageBySpecies) {
+      const fullPrice = INLAY_WOOD_PRICE[species] ?? 0;
+      const utilization = usage / INLAY_SHEET_AREA_SQ_IN;
+      if (utilization > INLAY_PACKING_THRESHOLD) total += fullPrice;
+      else                                        total += utilization * fullPrice;
+    }
+    return total;
+  };
+  const inlayDollars = inlayDollarsForSide(top) + inlayDollarsForSide(bottom);
   const materialsDollars = baseDollars + inlayDollars;
 
-  // Machine time premiums. Per-inlay charge is per UNIQUE SPECIES,
-  // not per color slot — two slots mapped to walnut share one bit
-  // load, one alignment pass, one stock setup.
+  // Machine time premiums. Per-inlay charge is per UNIQUE SPECIES
+  // PER SIDE, summed across sides — each side is a separate carving
+  // session with its own bit-load + alignment overhead.
   const grooveSides =
     boardConfig.juiceGroove === 'both' ? 2 :
     boardConfig.juiceGroove === 'none' ? 0 : 1;
@@ -170,17 +178,19 @@ export function computeQuote(input: QuoteInput): QuoteResult {
     boardConfig.handles === 'underside' ? MACHINE_MIN_UNDERSIDE_HANDLES :
     0;
   const machineMinutes = totalCuttingMinutes
-    + jointToolChangeMinutes
-    + MACHINE_MIN_PER_INLAY        * uniqueSpeciesCount
+    + totalToolChangeMinutes
+    + MACHINE_MIN_PER_INLAY        * sumPerSide
     + MACHINE_MIN_PER_GROOVE_SIDE  * grooveSides
     + handlesMinutes;
   const machineDollars = (machineMinutes / 60) * MACHINE_HOURLY;
 
-  // Labor: setup + per-species + finishing. Same per-species rule:
-  // multiple slots of the same species can be cut, glued, and
-  // sanded in one batch — one labor block.
+  // Labor: setup + per-species-per-side + finishing. Setup and
+  // finishing are one-time board-wide blocks; the per-species labor
+  // counts each side's species independently and sums across sides
+  // (same species on both sides → two labor blocks, since they're
+  // physically separate carvings).
   const laborMinutes = LABOR_MIN_SETUP
-    + LABOR_MIN_PER_INLAY * uniqueSpeciesCount
+    + LABOR_MIN_PER_INLAY * sumPerSide
     + LABOR_MIN_FINISHING;
   const laborDollars = (laborMinutes / 60) * LABOR_HOURLY;
 

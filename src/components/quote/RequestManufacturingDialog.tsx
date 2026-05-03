@@ -198,7 +198,9 @@ function OrderSummary({
           {optimization.perDesign.map(d => (
             <li key={d.designId} className="truncate">
               · {d.vector.fileName}
-              <span className="text-slate-500"> — {d.placement.designWidthInches.toFixed(2)}" wide</span>
+              <span className="text-slate-500">
+                {' '}— {d.side === 'top' ? 'front' : 'back'} · {d.placement.designWidthInches.toFixed(2)}" wide
+              </span>
             </li>
           ))}
         </ul>

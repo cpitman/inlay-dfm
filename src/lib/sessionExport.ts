@@ -41,6 +41,9 @@ export interface SerializedDesign {
    *  existed (still v2 if `designs` is present); the loader falls back
    *  to a sensible default. */
   placement?: Placement;
+  /** Which face the design lives on. Optional — older v2 files written
+   *  before two-sided support default to `'top'` on load. */
+  side?: 'top' | 'bottom';
 }
 
 export interface SessionFile {
@@ -111,6 +114,8 @@ export function saveSessionToFile(input: SaveSessionInput): void {
       historyIndex: d.historyIndex,
       woodConfigs: d.woodConfigs,
       placement: d.placement,
+      // ExpertDesignLike doesn't carry a `side`; the guided flow's
+      // future save would. Default to 'top' is applied on load.
     })),
     activeDesignId: input.activeDesignId,
     settings: input.settings,

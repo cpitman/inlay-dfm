@@ -1,25 +1,34 @@
 import type { BoardConfig, BoardWoodKey, EdgeTreatment } from '@/types/board';
-import { hasTopGroove } from '@/types/board';
+import {
+  hasTopGroove, hasBottomGroove,
+  feetAabbs, undersideHandleAabbs,
+  FOOT_DIAMETER_INCHES,
+} from '@/types/board';
 import { WOOD_SPECIES } from './woodSpecies';
 import { applyGrain } from './woodGrain';
 
 /**
- * Render a board surface (top view) with optional cutting-board features
- * baked in: wood grain background, beveled edge (chamfer or roundover),
- * and a top-side juice groove path.
+ * Render a board surface (top OR bottom view) with the
+ * cutting-board features baked in: wood grain background, beveled
+ * edge (chamfer or roundover), and side-specific features:
  *
- * Features that aren't visible from the top view are tracked in
- * BoardConfig but NOT drawn here:
- *   - Bottom-side juice groove (only visible when flipped over)
- *   - Inset handles — recessed into the sides of the board
- *   - Underside-pocket handles — recessed into the bottom face
- *   - Feet — protrude from the underside
+ *   - Top side: top-side juice groove if selected.
+ *   - Bottom side: bottom-side juice groove (if selected), feet
+ *     (`sided === 'feet'`) drawn as 1" bronze circles inset 1/4"
+ *     from each corner, and underside-handle pockets
+ *     (`handles === 'underside'`) drawn as 1"-deep × 5"-long dark
+ *     recesses flush with each 12"-tall short edge.
+ *
+ * Inlay-collision metadata for the back-side fixed features lives in
+ * `feetAabbs` / `undersideHandleAabbs` (in `types/board.ts`); this
+ * function just paints them.
  *
  * Returns a PNG data URL sized at `widthInches × heightInches × ppi`.
  */
 export async function renderBoardWithFeatures(
   config: BoardConfig,
   pixelsPerInch: number = 100,
+  side: 'top' | 'bottom' = 'top',
 ): Promise<string> {
   const w = Math.max(1, Math.round(config.widthInches  * pixelsPerInch));
   const h = Math.max(1, Math.round(config.heightInches * pixelsPerInch));
@@ -38,6 +47,33 @@ export async function renderBoardWithFeatures(
   const grooveOuterPx = Math.round(0.25 * pixelsPerInch);
   const grooveInnerPx = Math.round(1.00 * pixelsPerInch);
 
+  // Pre-compute bottom-side feature geometry in pixels (only used when
+  // `side === 'bottom'` — cheap to compute either way).
+  const showFeet    = side === 'bottom' && config.sided === 'feet';
+  const showHandles = side === 'bottom' && config.handles === 'underside';
+  const showGroove  =
+    side === 'top'    ? hasTopGroove(config.juiceGroove)
+    : /* bottom */     hasBottomGroove(config.juiceGroove);
+
+  // Foot centers + radii in pixels.
+  const footRadiusPx = (FOOT_DIAMETER_INCHES * pixelsPerInch) / 2;
+  const feetCentersPx = showFeet
+    ? feetAabbs(config).map(a => ({
+        cx: (a.x + a.w / 2) * pixelsPerInch,
+        cy: (a.y + a.h / 2) * pixelsPerInch,
+      }))
+    : [];
+
+  // Handle pockets in pixel rect coords.
+  const handleRectsPx = showHandles
+    ? undersideHandleAabbs(config).map(a => ({
+        x0: a.x * pixelsPerInch,
+        y0: a.y * pixelsPerInch,
+        x1: (a.x + a.w) * pixelsPerInch,
+        y1: (a.y + a.h) * pixelsPerInch,
+      }))
+    : [];
+
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const [r0, g0, b0] = applyGrain(sp.baseHex, sp.grainHex, x, y);
@@ -49,30 +85,67 @@ export async function renderBoardWithFeatures(
 
       // Edge bevel: darkening ramp from outermost edge inward over bevelWidthPx.
       if (distFromEdge < bevelWidthPx) {
-        const t = distFromEdge / bevelWidthPx; // 0 at edge, 1 at inner side of bevel
+        const t = distFromEdge / bevelWidthPx;
         const factor = bevelDarkening(config.edge, t);
         r = Math.round(r * factor);
         g = Math.round(g * factor);
         b = Math.round(b * factor);
       }
 
-      // Top juice groove: a recessed 3/4" band around the perimeter.
-      // Outer edge of the band is at distFromEdge = grooveOuterPx;
-      // inner edge at distFromEdge = grooveInnerPx.
+      // Juice groove (top OR bottom, same band geometry — just selected
+      // by side). Reads as a recessed channel via a "valley" gradient.
       if (
-        hasTopGroove(config.juiceGroove)
+        showGroove
         && distFromEdge >= grooveOuterPx
         && distFromEdge <= grooveInnerPx
       ) {
-        // Soft "valley" gradient: darkest at the band centerline, lighter
-        // near the edges of the band. Reads as a recessed channel.
         const center = (grooveOuterPx + grooveInnerPx) / 2;
         const halfWidth = (grooveInnerPx - grooveOuterPx) / 2;
-        const tg = Math.abs(distFromEdge - center) / halfWidth; // 0 at center, 1 at edges
+        const tg = Math.abs(distFromEdge - center) / halfWidth;
         const factor = 0.45 + 0.30 * tg;
         r = Math.round(r * factor);
         g = Math.round(g * factor);
         b = Math.round(b * factor);
+      }
+
+      // Underside-handle pockets (back side only): rectangular dark
+      // recess flush with the short edge. Soft tapered gradient inward
+      // so it reads as a routed pocket rather than a flat rectangle.
+      if (showHandles) {
+        for (const rect of handleRectsPx) {
+          if (x >= rect.x0 && x <= rect.x1 && y >= rect.y0 && y <= rect.y1) {
+            // Distance from the deepest edge of the pocket — pockets are
+            // flush with one of the board's short edges, so the deepest
+            // point is the inner edge (the one INSIDE the board). Use
+            // the smallest of (x − rect.x0) and (rect.x1 − x) but only
+            // for the deepening — a flat dark wash works fine for v1.
+            const factor = 0.40;
+            r = Math.round(r * factor);
+            g = Math.round(g * factor);
+            b = Math.round(b * factor);
+            break;
+          }
+        }
+      }
+
+      // Feet (back side only): bronze circles. Center brighter, edge
+      // slightly darker → reads as a slightly domed metal pad.
+      if (showFeet) {
+        for (const c of feetCentersPx) {
+          const dx = x - c.cx;
+          const dy = y - c.cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= footRadiusPx) {
+            // Bronze base color, with radial darkening near the edge for
+            // shading. Bronze ≈ rgb(170, 110, 60).
+            const t = dist / footRadiusPx; // 0 at center, 1 at edge
+            const shade = 1.0 - 0.35 * t;
+            r = Math.round(170 * shade);
+            g = Math.round(110 * shade);
+            b = Math.round(60  * shade);
+            break;
+          }
+        }
       }
 
       const i = (y * w + x) * 4;

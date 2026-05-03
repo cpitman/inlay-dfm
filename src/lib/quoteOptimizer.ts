@@ -5,6 +5,7 @@ import { fillEnclosedHoles } from './fillEnclosedHoles';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
 import { pickPerLayerBitPlan, jointToolChangeOverhead, type PerLayerBitPlan } from './machiningTime';
+import { EMPTY_SIDE_AGGREGATE, type SideAggregate } from './pricing';
 
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
@@ -22,6 +23,8 @@ const GUIDED_PIXELS_PER_INCH = 240;
 export interface DesignOptimizationResult {
   /** Stable id from the input `Design`. */
   designId: string;
+  /** Side of the board this design lives on, passed through from input. */
+  side: 'top' | 'bottom';
   /** Final vector after fill + extend modifications applied. */
   vector: VectorData;
   /** WoodConfigs sorted by overlap-aware topo order (smallest carved first). */
@@ -45,26 +48,16 @@ export interface DesignOptimizationResult {
 }
 
 /**
- * Aggregated cost inputs across all designs, ready to feed straight
- * into `computeQuote`. The optimizer builds these so the caller
- * (QuoteApp) doesn't have to repeat the per-species / cross-design
- * deduplication logic.
+ * Aggregated cost inputs across all designs, partitioned by side.
+ * `computeQuote` consumes these directly: each side's costs (inlay
+ * material, per-inlay machining + labor) are computed independently
+ * and summed; one-time costs (base board, setup + finishing labor,
+ * groove/handle premiums) stay board-wide.
  */
 export interface AggregatedQuoteInputs {
-  /** Sum of per-design `bitPlan.cuttingTimeMinutes`. Excludes tool
-   *  changes — those are tracked separately so we can deduplicate
-   *  bits across designs. NaN if any design's bitPlan was null. */
-  totalCuttingMinutes: number;
-  /** Tool-change minutes after deduplicating clearance + v-bits across
-   *  every design's bitPlan. See `jointToolChangeOverhead`. */
-  jointToolChangeMinutes: number;
-  /** Distinct wood species across all designs' woodConfigs. */
-  uniqueSpeciesCount: number;
-  /** Per-species plug-stock OBB usage summed across designs + slots. */
-  plugStockUsageBySpecies: Map<string, number>;
-  /** True iff any design has `bitPlan === null` (the quote is
-   *  approximate when this is true — at least one design has features
-   *  no v-bit can carve). */
+  perSide: { top: SideAggregate; bottom: SideAggregate };
+  /** True iff any design (on any side) has `bitPlan === null` — the
+   *  quote is approximate when this is true. */
   noFeasibleAngle: boolean;
 }
 
@@ -199,6 +192,7 @@ async function runSingleDesignOptimization(
 
   return {
     designId: design.id,
+    side: design.side,
     vector: workingVector,
     woodConfigs: sortedWoodConfigs,
     placement: design.placement,
@@ -210,22 +204,35 @@ async function runSingleDesignOptimization(
 }
 
 /**
- * Roll per-design results into the cross-design aggregates that
- * `computeQuote` consumes. Pure function — no I/O.
+ * Roll per-design results into per-side aggregates that `computeQuote`
+ * consumes. Each side runs independently — same species used on both
+ * sides counts twice, the 70%-of-sheet packing threshold applies to
+ * each side's sum separately, and tool changes union within a side
+ * but not across sides (sides are physically flipped so bits are
+ * re-loaded at the swap regardless).
+ *
+ * Pure function — no I/O.
  */
 function aggregate(perDesign: DesignOptimizationResult[]): AggregatedQuoteInputs {
+  const top    = aggregateSide(perDesign.filter(d => d.side === 'top'));
+  const bottom = aggregateSide(perDesign.filter(d => d.side === 'bottom'));
+  const noFeasibleAngle = perDesign.some(d => d.bitPlan === null);
+  return { perSide: { top, bottom }, noFeasibleAngle };
+}
+
+/** Build a `SideAggregate` from the designs that live on one side. */
+function aggregateSide(designs: DesignOptimizationResult[]): SideAggregate {
+  if (designs.length === 0) return EMPTY_SIDE_AGGREGATE;
+
   let totalCuttingMinutes = 0;
+  let anyInfeasible = false;
   const speciesSet = new Set<string>();
   const plugStockUsageBySpecies = new Map<string, number>();
-  let noFeasibleAngle = false;
 
-  for (const d of perDesign) {
-    if (d.bitPlan === null) noFeasibleAngle = true;
+  for (const d of designs) {
+    if (d.bitPlan === null) anyInfeasible = true;
     else                    totalCuttingMinutes += d.bitPlan.cuttingTimeMinutes;
 
-    // Species union + per-species plug-stock sum. The result.woods
-    // array is in carve order (matches sortedWoodConfigs), and each
-    // wood carries its own plugStockUsageSqIn measurement.
     for (let i = 0; i < d.woodConfigs.length; i++) {
       const wc = d.woodConfigs[i];
       speciesSet.add(wc.species);
@@ -241,16 +248,15 @@ function aggregate(perDesign: DesignOptimizationResult[]): AggregatedQuoteInputs
   }
 
   const jointToolChangeMinutes = jointToolChangeOverhead(
-    perDesign.map(d => d.bitPlan),
+    designs.map(d => d.bitPlan),
     TOOL_CHANGE_MINUTES_MANUAL,
   );
 
   return {
-    totalCuttingMinutes: noFeasibleAngle ? NaN : totalCuttingMinutes,
+    totalCuttingMinutes: anyInfeasible ? NaN : totalCuttingMinutes,
     jointToolChangeMinutes,
     uniqueSpeciesCount: speciesSet.size,
     plugStockUsageBySpecies,
-    noFeasibleAngle,
   };
 }
 
