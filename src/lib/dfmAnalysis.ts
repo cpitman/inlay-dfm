@@ -1274,3 +1274,185 @@ async function canvasToDataUrl(canvas: OffscreenCanvas): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
+
+// ---------------------------------------------------------------------------
+// LITE analysis path
+//
+// The guided optimizer needs only `fillableHoleCount` and
+// `alignmentIssues` per layer to enumerate fill / extend targets.
+// Running the full `runDfmAnalysis` (per-preset overlays + machining
+// matrix + depth maps + suggestion overlays) just to read those two
+// fields is wasteful — those alone account for ~36 PNG encodes per
+// design.
+//
+// `runDfmAnalysisLite` mirrors Phase 0/1/2 of the full pipeline plus a
+// minimal fillable-hole enumeration, and stops there. It returns the
+// per-layer pocket masks too so the optimizer can re-rasterize ONLY
+// the layers `applyFillAll` modified, then call `redetectAlignmentRisks`
+// on the patched mask set without re-rasterizing the entire design.
+// ---------------------------------------------------------------------------
+
+export interface LiteWoodAnalysis {
+  colorHex: string;
+  alignmentIssues: AlignmentIssue[];
+  fillableHoleCount: number;
+}
+
+export interface LiteAnalysisResult {
+  woods: LiteWoodAnalysis[];
+  /** Per-color rasterized pocket masks at the lite canvas resolution.
+   *  Reused by the optimizer for the post-fill alignment redetect. */
+  pocketMasks: Map<string, Uint8Array>;
+  canvasW: number;
+  canvasH: number;
+  pixelsPerInch: number;
+  alignThresholdPx: number;
+}
+
+/**
+ * Rasterize one layer's standalone SVG to a pocket mask at the given
+ * canvas dimensions. Uses the same brightness-threshold convention
+ * (luma < 220) as Phase 1 of the full analysis. Returns an empty
+ * mask if the layer isn't found in `vector.layers`.
+ */
+export async function rasterizeLayerMask(
+  vector: VectorData,
+  colorHex: string,
+  canvasW: number,
+  canvasH: number,
+): Promise<Uint8Array> {
+  const layer = vector.layers.find(l => l.colorHex === colorHex);
+  const n = canvasW * canvasH;
+  if (!layer) return new Uint8Array(n);
+  const layerSvg = layerToStandaloneSvg(
+    layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
+  );
+  const oc = await renderSvgToCanvas(layerSvg, canvasW, canvasH);
+  const ctx = oc.getContext('2d')!;
+  const data = ctx.getImageData(0, 0, canvasW, canvasH).data;
+  const mask = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+    if (0.299 * r + 0.587 * g + 0.114 * b < 220) mask[i] = 1;
+  }
+  return mask;
+}
+
+/**
+ * Re-run pairwise alignment-risk detection from a pre-rasterized mask
+ * set. Pure function — no SVG rendering, no canvas allocation. Used
+ * after fill modifies a layer to figure out which alignment issues
+ * the modification eliminated, so extend doesn't fire on already-
+ * resolved cases.
+ *
+ * Returns a map keyed by colorHex, whose value is the list of
+ * alignment issues with later layers. Mirrors the orchestration in
+ * Phase 2 of `runDfmAnalysis` but skips the dilation / clipping that
+ * Phase 2 does for visual rendering (we don't render here).
+ */
+export function redetectAlignmentRisks(
+  pocketMasksByColor: Map<string, Uint8Array>,
+  colorOrder: readonly string[],
+  canvasW: number,
+  canvasH: number,
+  alignThresholdPx: number,
+): Map<string, AlignmentIssue[]> {
+  const out = new Map<string, AlignmentIssue[]>();
+  for (const c of colorOrder) out.set(c, []);
+  for (let i = 0; i < colorOrder.length; i++) {
+    const a = pocketMasksByColor.get(colorOrder[i]);
+    if (!a) continue;
+    for (let j = i + 1; j < colorOrder.length; j++) {
+      const b = pocketMasksByColor.get(colorOrder[j]);
+      if (!b) continue;
+      const { affectedCount, totalBoundaryCount } = detectAlignmentRisk(
+        a, b, canvasW, canvasH, alignThresholdPx,
+      );
+      if (affectedCount > 0) {
+        out.get(colorOrder[i])!.push({
+          otherColorHex: colorOrder[j],
+          affectedPercent: totalBoundaryCount > 0 ? (affectedCount / totalBoundaryCount) * 100 : 0,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Lightweight first pass of the guided pipeline. Identifies fill
+ * targets (enclosed holes covered by later layers) and alignment
+ * targets (boundary-to-boundary proximity to other layers) at lower
+ * resolution than the final analysis. Skips per-preset analysis,
+ * overlay PNGs, depth maps, and the machining matrix — those run
+ * once at full resolution after fill + extend have committed.
+ */
+export async function runDfmAnalysisLite(
+  vector: VectorData,
+  settings: DFMSettings,
+  colorOrder: readonly string[],
+  canvasWidth: number,
+): Promise<LiteAnalysisResult> {
+  const aspect = vector.naturalHeight / vector.naturalWidth;
+  const canvasW = canvasWidth;
+  const canvasH = Math.max(1, Math.round(canvasWidth * aspect));
+  const pixelsPerInch = canvasW / settings.designWidthInches;
+  const alignThresholdPx = ALIGNMENT_THRESHOLD_INCHES * pixelsPerInch;
+  const n = canvasW * canvasH;
+
+  // Phase 1: per-layer rasterization, mirroring runDfmAnalysis Phase 1.
+  // Each layer renders independently so we capture extended-for-
+  // registration regions even when later layers cover them.
+  const pocketMasks = new Map<string, Uint8Array>();
+  for (const colorHex of colorOrder) {
+    pocketMasks.set(colorHex, await rasterizeLayerMask(vector, colorHex, canvasW, canvasH));
+  }
+
+  // Phase 2: alignment-risk detection (no dilation — we don't render).
+  const issuesByColor = redetectAlignmentRisks(
+    pocketMasks, colorOrder, canvasW, canvasH, alignThresholdPx,
+  );
+
+  // Fillable-hole enumeration: same predicate as Phase 4 of the full
+  // pipeline — a hole counts when every pixel of it is covered by the
+  // union of later layers, since filling it then changes nothing
+  // visible but saves V-bit perimeter time.
+  const orderedMasks = colorOrder.map(c => pocketMasks.get(c) ?? new Uint8Array(n));
+  const laterUnions: Uint8Array[] = colorOrder.map(() => new Uint8Array(n));
+  for (let i = colorOrder.length - 2; i >= 0; i--) {
+    const next = orderedMasks[i + 1];
+    const acc = laterUnions[i];
+    const accNext = laterUnions[i + 1];
+    for (let k = 0; k < n; k++) if (next[k] || accNext[k]) acc[k] = 1;
+  }
+
+  const woods: LiteWoodAnalysis[] = colorOrder.map((colorHex, idx) => {
+    const mask = orderedMasks[idx];
+    let fillableHoleCount = 0;
+    if (idx < colorOrder.length - 1) {
+      const holes = findEnclosedHoles(mask, canvasW, canvasH);
+      const laterUnion = laterUnions[idx];
+      for (const hole of holes) {
+        let covered = true;
+        for (const k of hole.pixels) {
+          if (!laterUnion[k]) { covered = false; break; }
+        }
+        if (covered) fillableHoleCount++;
+      }
+    }
+    return {
+      colorHex,
+      alignmentIssues: issuesByColor.get(colorHex) ?? [],
+      fillableHoleCount,
+    };
+  });
+
+  return {
+    woods,
+    pocketMasks,
+    canvasW,
+    canvasH,
+    pixelsPerInch,
+    alignThresholdPx,
+  };
+}

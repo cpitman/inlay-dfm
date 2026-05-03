@@ -1,5 +1,10 @@
-import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Placement } from '@/types';
-import { runDfmAnalysis } from './dfmAnalysis';
+import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Placement, AlignmentIssue } from '@/types';
+import {
+  runDfmAnalysis,
+  runDfmAnalysisLite,
+  rasterizeLayerMask,
+  redetectAlignmentRisks,
+} from './dfmAnalysis';
 import { extendForRegistration } from './extendForRegistration';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
 import { combineLayers } from './svgLayers';
@@ -10,14 +15,21 @@ import { EMPTY_SIDE_AGGREGATE, type SideAggregate } from './pricing';
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
 /**
- * Analysis canvas resolution for the guided flow, in pixels per inch.
- * 240 ppi resolves features down to ~0.0042" — slightly finer than the
- * ±0.005" X/Y accuracy of a typical CNC router, so the analysis catches
- * everything the machine could realistically miscarve. The expert flow
- * keeps its own user-controlled `analysisResolution` setting and is
- * unaffected.
+ * Analysis canvas resolution for the FINAL DFM analysis in the guided
+ * flow, in pixels per inch. 240 ppi resolves features down to
+ * ~0.0042" — slightly finer than the ±0.005" X/Y accuracy of a
+ * typical CNC router. The expert flow keeps its own user-controlled
+ * `analysisResolution` setting and is unaffected.
  */
 const GUIDED_PIXELS_PER_INCH = 240;
+/**
+ * Resolution used by the lite-pass + fill/extend modifications. Half
+ * of `GUIDED_PIXELS_PER_INCH` — the 0.01" alignment threshold is still
+ * suprapixel (1.2 px) and connectivity-based fill detection is
+ * resolution-insensitive at this scale, but the per-layer rasterization
+ * and per-pixel work drops to ~25% of the full-pass cost.
+ */
+const LITE_PIXELS_PER_INCH = 120;
 
 /** Per-design optimization output. One entry per `Design` in the input. */
 export interface DesignOptimizationResult {
@@ -107,9 +119,21 @@ export async function runQuoteOptimization(
 }
 
 /**
- * Pipeline for one design, in isolation. Mirrors the previous
- * single-design `runQuoteOptimization` body — extracted so the new
- * top-level orchestrator can run it per design.
+ * Pipeline for one design, in isolation. Five phases:
+ *
+ *   1. Layer-order pre-pass at 60 ppi (`preAnalyzeLayerOrder`) +
+ *      overlap-aware topo sort.
+ *   2. Lite DFM analysis at 120 ppi — produces only fillableHoleCount
+ *      and alignmentIssues per layer, plus the cached pocket masks.
+ *   3. If any fillable holes → applyFillAll at 120 ppi → re-rasterize
+ *      modified layers → redetectAlignmentRisks on the patched mask
+ *      set so extend doesn't fire on issues fill already resolved.
+ *   4. If any remaining alignment risks → applyExtendAll at 120 ppi.
+ *   5. ONE full DFM analysis at 240 ppi — drives cost + bit plan.
+ *   6. pickPerLayerBitPlan.
+ *
+ * Net analyses per design: 1 lite + 1 full, regardless of which
+ * modifications applied (was 1-3 full in the previous design).
  */
 async function runSingleDesignOptimization(
   design: Design,
@@ -121,7 +145,8 @@ async function runSingleDesignOptimization(
   // Scale the analysis canvas with the design — bigger designs need
   // more pixels to keep the same physical resolution. No upper cap;
   // very large designs trade some optimizer wall-time for fidelity.
-  const canvasWidth = Math.max(1, Math.ceil(designWidthInches * GUIDED_PIXELS_PER_INCH));
+  const canvasWidth     = Math.max(1, Math.ceil(designWidthInches * GUIDED_PIXELS_PER_INCH));
+  const liteCanvasWidth = Math.max(1, Math.ceil(designWidthInches * LITE_PIXELS_PER_INCH));
 
   const settings: DFMSettings = {
     designWidthInches,
@@ -155,33 +180,62 @@ async function runSingleDesignOptimization(
     design.woodConfigs.find(wc => wc.colorHex === c)!
   );
 
-  // Phase 1: full DFM analysis at the chosen order.
-  onProgress?.(`Analyzing your design${suffix}…`);
-  let result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
+  // Phase 1 (lite): cheap target enumeration. Identifies fillable
+  // holes + alignment risks at 120 ppi (vs the 240 ppi final pass).
+  // Skips per-preset overlay encoding, depth maps, and the machining
+  // matrix — those run once at the end after fill + extend commit.
+  onProgress?.(`Inspecting your design${suffix}…`);
+  const lite = await runDfmAnalysisLite(workingVector, settings, order, liteCanvasWidth);
 
-  // Phase 2: fill enclosed holes where possible.
+  // Phase 2: fill enclosed holes where possible. Modifications run at
+  // the lite resolution — the resulting SVG geometry is rasterization-
+  // independent in shape; coarser polygons are fine since fill is
+  // already an overapproximation (any pixel inside the hole works).
   let appliedFill = false;
-  const fillTargets = result.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
+  const fillTargets = lite.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
+  let alignmentByColor: Map<string, AlignmentIssue[]> = new Map(
+    lite.woods.map(w => [w.colorHex, w.alignmentIssues] as const),
+  );
   if (fillTargets.length > 0) {
     onProgress?.(`Filling enclosed holes${suffix}…`);
-    workingVector = await applyFillAll(workingVector, fillTargets, designWidthInches, order, canvasWidth);
+    workingVector = await applyFillAll(workingVector, fillTargets, designWidthInches, order, liteCanvasWidth);
     appliedFill = true;
-    onProgress?.(`Re-analyzing after fill${suffix}…`);
-    result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
+
+    // Re-rasterize ONLY the modified layers — unmodified layers'
+    // masks are still valid from the lite pass. Then re-run alignment
+    // detection on the patched mask set so an alignment issue that
+    // fill resolved (by removing an interior boundary) doesn't trip
+    // extend on the next phase.
+    const updatedMasks = new Map(lite.pocketMasks);
+    for (const colorHex of fillTargets) {
+      updatedMasks.set(
+        colorHex,
+        await rasterizeLayerMask(workingVector, colorHex, lite.canvasW, lite.canvasH),
+      );
+    }
+    alignmentByColor = redetectAlignmentRisks(
+      updatedMasks, order, lite.canvasW, lite.canvasH, lite.alignThresholdPx,
+    );
   }
 
-  // Phase 3: extend regions for registration.
+  // Phase 3: extend regions for registration. Targets come from the
+  // post-fill alignment map.
   let appliedExtend = false;
-  const extendTargets = result.woods.filter(w => w.alignmentIssues.length > 0).map(w => w.colorHex);
+  const extendTargets = order.filter(c => (alignmentByColor.get(c)?.length ?? 0) > 0);
   if (extendTargets.length > 0) {
     onProgress?.(`Extending registration borders${suffix}…`);
-    workingVector = await applyExtendAll(workingVector, extendTargets, designWidthInches, order, canvasWidth);
+    workingVector = await applyExtendAll(workingVector, extendTargets, designWidthInches, order, liteCanvasWidth);
     appliedExtend = true;
-    onProgress?.(`Re-analyzing after extend${suffix}…`);
-    result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
   }
 
-  // Phase 4: pick the per-layer bit plan.
+  // Phase 4: ONE full DFM analysis at the production resolution. This
+  // is the only run whose output reaches the cost model + bit-plan
+  // picker. Replaces the previous "re-analyze after every modification"
+  // pattern — net wall-time roughly halves on common modification paths.
+  onProgress?.(`Analyzing your design${suffix}…`);
+  const result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
+
+  // Phase 5: pick the per-layer bit plan.
   onProgress?.(`Picking optimal cutting bits${suffix}…`);
   const perLayerPresetAnalysis = result.woods.map(w => w.perPresetAnalysis);
   const bitPlan = pickPerLayerBitPlan(
