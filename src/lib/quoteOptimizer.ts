@@ -3,6 +3,7 @@ import { runDfmAnalysis } from './dfmAnalysis';
 import { extendForRegistration } from './extendForRegistration';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
 import { combineLayers } from './svgLayers';
+import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
 import { pickPerLayerBitPlan, type PerLayerBitPlan } from './machiningTime';
 
 /** Manual tool change overhead used by the guided experience. */
@@ -51,19 +52,21 @@ export interface QuoteOptimizationInput {
 }
 
 /**
- * The guided quote pipeline. Six phases, each conditionally executed
- * to skip redundant work:
+ * The guided quote pipeline. Conditionally executes each phase to
+ * skip redundant work:
  *
- *   1. Analysis at the user's upload order — needed only to learn each
- *      layer's surface area for the sort.
- *   2. Sort woodConfigs by ascending surface area; re-analyze in the new
- *      order if it changed.
- *   3. Fill enclosed holes for any layer reporting fillableHoleCount > 0.
- *   4. Re-analyze if a fill was applied.
- *   5. Extend for registration on any layer with alignment risks.
- *   6. Re-analyze if an extend was applied.
- *   7. Pick the fastest feasible (strategy × v-bit) cell from the final
- *      matrix, assuming manual tool change (5 min/swap).
+ *   Pre-pass. Cheap low-resolution rasterization to learn per-layer
+ *     surface area and which layer pairs actually overlap. The
+ *     overlap result becomes a topological constraint on carving
+ *     order — overlapping layers MUST keep their user-stack order
+ *     since the later one cuts through the earlier one's territory.
+ *   Order. Topo-sort smallest-area-first within those constraints.
+ *   Phase 1. One full DFM analysis at the chosen order.
+ *   Phase 2. Fill enclosed holes for any layer reporting
+ *     fillableHoleCount > 0; re-analyze if applied.
+ *   Phase 3. Extend for registration on any layer with alignment
+ *     risks; re-analyze if applied.
+ *   Phase 4. Pick the fastest feasible per-layer bit plan.
  *
  * Returns the final vector, sorted woodConfigs, the final analysis
  * result, and the optimal cell.
@@ -98,31 +101,26 @@ export async function runQuoteOptimization(
 
   let workingVector = initialVector;
 
-  // Phase 1: initial analysis at the user's upload order.
+  // Pre-pass: pick the carving order at low resolution. Cheap
+  // (~16× less compute than the full 240-ppi analysis) but sufficient
+  // for area + overlap topology. Replaces the previous "run full
+  // analysis just to learn areas, then re-run if the order changed"
+  // pattern — saves one full analysis pass.
+  onProgress?.('Checking layer overlaps and sizes…');
+  const initialOrder = initialWoodConfigs.map(wc => wc.colorHex);
+  const { areaSqInByColor, overlapConstraints } = await preAnalyzeLayerOrder(
+    workingVector, designWidthInches, initialOrder,
+  );
+  const order = topoSortByArea(initialOrder, areaSqInByColor, overlapConstraints);
+  const sortedWoodConfigs = order.map(c =>
+    initialWoodConfigs.find(wc => wc.colorHex === c)!
+  );
+
+  // Phase 1: full DFM analysis at the chosen order.
   onProgress?.('Analyzing your design…');
-  let order = initialWoodConfigs.map(wc => wc.colorHex);
   let result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
 
-  // Phase 2: sort woodConfigs by ascending surface area (smallest first).
-  // Use the pocket-side carve area (clearance + v-bit) as the proxy.
-  const areaByColor = new Map(result.woods.map(w => [
-    w.colorHex,
-    w.clearanceAreaSqIn + w.vbitAreaSqIn,
-  ]));
-  const sortedWoodConfigs = [...initialWoodConfigs].sort(
-    (a, b) => (areaByColor.get(a.colorHex) ?? 0) - (areaByColor.get(b.colorHex) ?? 0),
-  );
-  const sortedOrder = sortedWoodConfigs.map(wc => wc.colorHex);
-  const orderChanged =
-    order.length !== sortedOrder.length ||
-    order.some((c, i) => sortedOrder[i] !== c);
-  if (orderChanged) {
-    onProgress?.('Re-analyzing with optimized layer order…');
-    order = sortedOrder;
-    result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
-  }
-
-  // Phase 3: fill enclosed holes where possible.
+  // Phase 2: fill enclosed holes where possible.
   let appliedFill = false;
   const fillTargets = result.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
   if (fillTargets.length > 0) {
@@ -133,7 +131,7 @@ export async function runQuoteOptimization(
     result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
   }
 
-  // Phase 4: extend regions for registration.
+  // Phase 3: extend regions for registration.
   let appliedExtend = false;
   const extendTargets = result.woods.filter(w => w.alignmentIssues.length > 0).map(w => w.colorHex);
   if (extendTargets.length > 0) {
@@ -144,7 +142,7 @@ export async function runQuoteOptimization(
     result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
   }
 
-  // Phase 5: pick the per-layer bit plan. Each layer chooses the widest
+  // Phase 4: pick the per-layer bit plan. Each layer chooses the widest
   // v-bit angle that's still feasible for its own pocket+plug; the
   // optimizer minimizes total time across (clearance strategy × distinct
   // v-bits used). The clearance bit + distinct v-bit count drives the

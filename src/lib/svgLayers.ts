@@ -24,6 +24,39 @@ ${layer.svgFragment}
 }
 
 /**
+ * Rasterize an SVG document string to an `OffscreenCanvas`. Used by
+ * the DFM analyzer and the layer-order pre-pass to extract per-layer
+ * pixel masks at any chosen resolution.
+ *
+ * The canvas is filled white before draw so non-painted regions
+ * threshold to "background" (luma ≥ 220) consistently across SVGs
+ * with or without an explicit fill.
+ */
+export async function renderSvgToCanvas(
+  svgString: string,
+  canvasW: number,
+  canvasH: number,
+): Promise<OffscreenCanvas> {
+  const oc = new OffscreenCanvas(canvasW, canvasH);
+  const ctx = oc.getContext('2d')!;
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+  const blob = new Blob([svgString], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0, canvasW, canvasH); resolve(); };
+      img.onerror = reject;
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  return oc;
+}
+
+/**
  * Combine per-layer SVG fragments into a single rendered SVG. Layers are emitted
  * in the order given — later layers stack on top of earlier ones (matches the
  * staged-inlay z-order: earlier inlay extensions are covered by later inlays).

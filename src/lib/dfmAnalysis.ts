@@ -1,6 +1,6 @@
 import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, MachiningTimeMatrix } from '@/types';
 import { distanceTransform } from './distanceTransform';
-import { layerToStandaloneSvg } from './svgLayers';
+import { layerToStandaloneSvg, renderSvgToCanvas } from './svgLayers';
 import { detectAlignmentRisk } from './alignmentRisk';
 import { CLEARANCE_BIT_MRR, CLEARANCE_BIT_OPTIONS, getVbitRates, VBIT_PRESET_ANGLES, VBIT_RATES } from './machiningRates';
 import { buildMachiningTimeMatrix, machiningTimeForMask } from './machiningTime';
@@ -1263,30 +1263,6 @@ ${plugStockOutlineSvg}
     vbitFeed: vbitRates?.feed ?? NaN,
     machiningTimeTable,
   };
-}
-
-async function renderSvgToCanvas(
-  svgString: string,
-  canvasW: number,
-  canvasH: number,
-): Promise<OffscreenCanvas> {
-  const oc = new OffscreenCanvas(canvasW, canvasH);
-  const ctx = oc.getContext('2d')!;
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvasW, canvasH);
-  const blob = new Blob([svgString], { type: 'image/svg+xml' });
-  const url = URL.createObjectURL(blob);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => { ctx.drawImage(img, 0, 0, canvasW, canvasH); resolve(); };
-      img.onerror = reject;
-      img.src = url;
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-  return oc;
 }
 
 async function canvasToDataUrl(canvas: OffscreenCanvas): Promise<string> {
