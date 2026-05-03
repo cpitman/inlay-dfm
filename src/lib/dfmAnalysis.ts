@@ -9,6 +9,8 @@ import { computeBoundary, findEnclosedHoles } from './morphology';
 import { maskToSvgPath } from './maskToPath';
 import { parseViewBox } from './svgLayers';
 import { computePlugStockUsageSqIn } from './plugStockPacking';
+import { findMaskComponentCentroids } from './maskComponents';
+import { dilateMask } from './maskOps';
 
 const DEFAULT_CANVAS_WIDTH = 1200;
 const THIN_WALL_THRESHOLD_INCHES = 0.05;
@@ -654,6 +656,7 @@ export async function runDfmAnalysis(
     overlayDataUrl:  await buildOverlay(layerBase, canvasW, canvasH, maskData.isProblem, maskData.isThinWall, alignPixels),
     // Populated in Phase 5.5 once the largest-feasible angle is known.
     suggestionOverlayDataUrl: '',
+    problemComponents: findMaskComponentCentroids(maskData.isProblem, canvasW, canvasH),
     depthMapDataUrl: await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx, plugFit),
   });
 
@@ -722,14 +725,13 @@ export async function runDfmAnalysis(
   // Dilate alignment pixels within the inlay mask for visual clarity.
   const alignVisualPerInlay: Uint8Array[] = alignPixelsPerInlay.map((raw, i) => {
     if (!raw.some(v => v)) return raw; // no issues → skip
-    const seeds = new Uint8Array(n);
-    for (let k = 0; k < n; k++) seeds[k] = raw[k] ? 0 : 1;
-    const distToRaw = distanceTransform(seeds, canvasW, canvasH);
-    const dilated = new Uint8Array(n);
-    for (let k = 0; k < n; k++) {
-      if (pocketMasks[i][k] && distToRaw[k] < alignVisualPx) dilated[k] = 1;
-    }
-    return dilated;
+    const dilated = dilateMask(raw, canvasW, canvasH, alignVisualPx);
+    // Clip to the inlay mask so the dilated band doesn't bleed into the
+    // base-board area on the rendered overlay.
+    const clipped = new Uint8Array(n);
+    const pocket = pocketMasks[i];
+    for (let k = 0; k < n; k++) if (dilated[k] && pocket[k]) clipped[k] = 1;
+    return clipped;
   });
 
   // -----------------------------------------------------------------------
@@ -970,6 +972,7 @@ ${plugStockOutlineSvg}
       plug:   await toSingle(plugMaskForDfm, plugAnalysis, plugBase, undefined, plugDepthMapFit),
       perPresetAnalysis: [], // populated in Phase 5 below
       widerBitInfeasibleMask: null, // populated in Phase 5.5 below if applicable
+      irreducibleProblemMask: null, // populated in Phase 5.5 only when no preset is feasible
       alignmentIssues: alignIssues[idx],
       clearanceAreaSqIn,
       vbitAreaSqIn,
@@ -1072,6 +1075,7 @@ ${plugStockOutlineSvg}
           hasIsolatedUnreachableComponent: pocketStats.hasIsolatedComponent,
           vbitAngleWarning: angleVbitWarning,
           overlayDataUrl: pocketOverlay,
+          problemComponents: findMaskComponentCentroids(pocketStats.problemMask!, canvasW, canvasH),
           depthMapDataUrl: pocketDepth,
         },
         plug: {
@@ -1082,6 +1086,7 @@ ${plugStockOutlineSvg}
           hasIsolatedUnreachableComponent: plugStats.hasIsolatedComponent,
           vbitAngleWarning: angleVbitWarning,
           overlayDataUrl: plugOverlay,
+          problemComponents: findMaskComponentCentroids(plugStats.problemMask!, canvasW, canvasH),
           depthMapDataUrl: plugDepth,
         },
       });
@@ -1230,6 +1235,13 @@ ${plugStockOutlineSvg}
         plugStats.problemMask!, inp.plugIsThinWall, undefined,
         undefined,
       );
+      // Stash the smallest-preset problem masks so the guided flow can
+      // render them in red (over the board composite) and place locator
+      // badges on each connected component.
+      woods[i].irreducibleProblemMask = {
+        pocket: pocketStats.problemMask!,
+        plug:   plugStats.problemMask!,
+      };
     }
   }
 

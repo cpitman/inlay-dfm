@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AnalysisResult, VectorData, WoodConfig } from '@/types';
 import type { BoardConfig } from '@/types/board';
 import type { QuoteResult } from '@/lib/pricing';
@@ -14,7 +14,10 @@ import {
   MACHINE_MIN_UNDERSIDE_HANDLES,
 } from '@/lib/pricing';
 import { renderBoardWithFeatures } from '@/lib/boardFeatures';
-import { renderWiderBitOverlay } from '@/lib/widerBitOverlay';
+import { OVERLAY_COLORS, renderIrreducibleProblemOverlay, renderWiderBitOverlay, rgbaCss } from '@/lib/widerBitOverlay';
+import { findMaskComponentCentroids } from '@/lib/maskComponents';
+import HoverMagnifier from '../HoverMagnifier';
+import IssueLocatorBadges, { type IssueVariant } from '../IssueLocatorBadges';
 import { StepNav } from '../StepperBar';
 import type { Placement } from './Step2ArtPlacement';
 
@@ -53,18 +56,28 @@ export default function Step3QuoteDisplay({
   const canvasW = result.machiningTimeTable.vbits.length > 0 ? 1200 : 1200;
   const canvasH = Math.max(1, Math.round(canvasW * aspect));
 
-  // Render the wider-bit-infeasible overlay PNG when applicable.
-  const [widerBitUrl, setWiderBitUrl] = useState<string | null>(null);
+  // Render the highlight overlay PNG that sits over the design composite.
+  // Two flavors:
+  //   - Feasible design with a wider-bit upgrade path → teal "widen these
+  //     to enable a faster bit" hints (renderWiderBitOverlay).
+  //   - No-feasible-angle design → red "these regions can't be carved by
+  //     any preset, widen or remove them" (renderIrreducibleProblemOverlay).
+  // The renderer is selected by `noFeasibleAngle`; the unused field on
+  // each WoodAnalysis is null and would otherwise produce a blank PNG.
+  const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    renderWiderBitOverlay(result, canvasW, canvasH).then(url => {
-      if (!cancelled) setWiderBitUrl(url);
+    const render = noFeasibleAngle
+      ? renderIrreducibleProblemOverlay
+      : renderWiderBitOverlay;
+    render(result, canvasW, canvasH).then(url => {
+      if (!cancelled) setOverlayUrl(url);
     }).catch(() => {
       if (cancelled) return;
-      setWiderBitUrl(null);
+      setOverlayUrl(null);
     });
     return () => { cancelled = true; };
-  }, [result, canvasW, canvasH]);
+  }, [result, canvasW, canvasH, noFeasibleAngle]);
 
   // Render the board PNG and fit-to-container.
   const [boardUrl, setBoardUrl] = useState<string | null>(null);
@@ -100,6 +113,39 @@ export default function Step3QuoteDisplay({
   const pctY = (inches: number) => `${(inches / boardConfig.heightInches) * 100}%`;
   const designHeight = placement.designWidthInches * aspect;
 
+  // Centroids of every flagged region across all woods, tagged with
+  // pocket vs plug so the badges can color-code "feature too narrow"
+  // (red) vs "gap between inlays too narrow" (yellow). Source switches
+  // with the overlay flavor: irreducible problem regions when no v-bit
+  // can carve the design, otherwise wider-bit upgrade hints (teal/cyan).
+  const { overlayComponents, hasPocketIssues, hasPlugIssues } = useMemo(() => {
+    const pick = noFeasibleAngle
+      ? (w: AnalysisResult['woods'][number]) => w.irreducibleProblemMask
+      : (w: AnalysisResult['woods'][number]) => w.widerBitInfeasibleMask;
+    const pocketUnion = new Uint8Array(canvasW * canvasH);
+    const plugUnion   = new Uint8Array(canvasW * canvasH);
+    let anyPocket = false, anyPlug = false;
+    for (const wood of result.woods) {
+      const m = pick(wood);
+      if (!m) continue;
+      if (m.pocket.length === canvasW * canvasH) {
+        for (let k = 0; k < pocketUnion.length; k++) if (m.pocket[k]) { pocketUnion[k] = 1; anyPocket = true; }
+      }
+      if (m.plug.length === canvasW * canvasH) {
+        for (let k = 0; k < plugUnion.length; k++) if (m.plug[k]) { plugUnion[k] = 1; anyPlug = true; }
+      }
+    }
+    const pocketVariant: IssueVariant = noFeasibleAngle ? 'pocketIrreducible' : 'pocketSuggestion';
+    const plugVariant:   IssueVariant = noFeasibleAngle ? 'plugIrreducible'   : 'plugSuggestion';
+    const pocketCentroids = anyPocket ? findMaskComponentCentroids(pocketUnion, canvasW, canvasH) : [];
+    const plugCentroids   = anyPlug   ? findMaskComponentCentroids(plugUnion,   canvasW, canvasH) : [];
+    const tagged = [
+      ...pocketCentroids.map(c => ({ ...c, variant: pocketVariant })),
+      ...plugCentroids  .map(c => ({ ...c, variant: plugVariant   })),
+    ];
+    return { overlayComponents: tagged, hasPocketIssues: anyPocket, hasPlugIssues: anyPlug };
+  }, [result, canvasW, canvasH, noFeasibleAngle]);
+
   // Build tips list. Only show items that genuinely apply.
   const tips = buildTips({ boardConfig, woodConfigs, noFeasibleAngle, suggestionAngleDegrees: result.step2SuggestionAngleDegrees });
 
@@ -134,47 +180,63 @@ export default function Step3QuoteDisplay({
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_22rem] gap-6 flex-1 min-h-0">
-        {/* Composite preview */}
-        <div ref={wrapRef} className="min-h-0 flex items-center justify-center bg-slate-950 rounded-lg">
+        {/* Composite preview + legend */}
+        <div className="min-h-0 flex flex-col gap-2">
+        <div ref={wrapRef} className="min-h-0 flex-1 flex items-center justify-center bg-slate-950 rounded-lg">
           {boardUrl && (
-            <div
-              className="relative shadow-xl"
-              style={{ width: boardPx.width, height: boardPx.height }}
-            >
-              <img
-                src={boardUrl}
-                alt={`${boardConfig.wood} board preview`}
-                className="absolute inset-0 w-full h-full object-cover rounded select-none pointer-events-none"
-                draggable={false}
-              />
-              {designCompositeUrl && (
-                <div
-                  className="absolute"
-                  style={{
-                    left:   pctX(placement.offsetXInches),
-                    top:    pctY(placement.offsetYInches),
-                    width:  pctX(placement.designWidthInches),
-                    height: pctY(designHeight),
-                  }}
-                >
-                  <img
-                    src={designCompositeUrl}
-                    alt="Design"
-                    className="absolute inset-0 w-full h-full select-none pointer-events-none"
-                    draggable={false}
-                  />
-                  {widerBitUrl && (
+            <HoverMagnifier zoom={3} lensSize={180}>
+              <div
+                className="relative shadow-xl"
+                style={{ width: boardPx.width, height: boardPx.height }}
+              >
+                <img
+                  src={boardUrl}
+                  alt={`${boardConfig.wood} board preview`}
+                  className="absolute inset-0 w-full h-full object-cover rounded select-none pointer-events-none"
+                  draggable={false}
+                />
+                {designCompositeUrl && (
+                  <div
+                    className="absolute"
+                    style={{
+                      left:   pctX(placement.offsetXInches),
+                      top:    pctY(placement.offsetYInches),
+                      width:  pctX(placement.designWidthInches),
+                      height: pctY(designHeight),
+                    }}
+                  >
                     <img
-                      src={widerBitUrl}
-                      alt="Suggested widening regions"
+                      src={designCompositeUrl}
+                      alt="Design"
                       className="absolute inset-0 w-full h-full select-none pointer-events-none"
                       draggable={false}
                     />
-                  )}
-                </div>
-              )}
-            </div>
+                    {overlayUrl && (
+                      <img
+                        src={overlayUrl}
+                        alt={noFeasibleAngle ? 'Unmanufacturable regions' : 'Suggested widening regions'}
+                        className="absolute inset-0 w-full h-full select-none pointer-events-none"
+                        draggable={false}
+                      />
+                    )}
+                    {overlayComponents.length > 0 && (
+                      <IssueLocatorBadges
+                        components={overlayComponents}
+                        sourceWidth={canvasW}
+                        sourceHeight={canvasH}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            </HoverMagnifier>
           )}
+        </div>
+          <OverlayLegend
+            noFeasibleAngle={noFeasibleAngle}
+            hasPocketIssues={hasPocketIssues}
+            hasPlugIssues={hasPlugIssues}
+          />
         </div>
 
         {/* Tips + actions column */}
@@ -217,6 +279,45 @@ export default function Step3QuoteDisplay({
         totalSteps={3}
         onBack={onBack}
       />
+    </div>
+  );
+}
+
+/**
+ * One-line caption under the composite preview, naming the colors
+ * that are actually showing on the overlay. Skipped when nothing is
+ * highlighted.
+ */
+function OverlayLegend({
+  noFeasibleAngle, hasPocketIssues, hasPlugIssues,
+}: {
+  noFeasibleAngle: boolean;
+  hasPocketIssues: boolean;
+  hasPlugIssues:   boolean;
+}) {
+  if (!hasPocketIssues && !hasPlugIssues) return null;
+  const pocketColor = noFeasibleAngle ? OVERLAY_COLORS.pocketRed : OVERLAY_COLORS.pocketTeal;
+  const plugColor   = noFeasibleAngle ? OVERLAY_COLORS.plugYellow : OVERLAY_COLORS.plugCyan;
+  const pocketLabel = noFeasibleAngle
+    ? 'Feature too narrow for any v-bit'
+    : 'Widen for a faster v-bit';
+  const plugLabel = noFeasibleAngle
+    ? 'Gap between inlays too narrow'
+    : 'Widening this gap enables a faster v-bit';
+  return (
+    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-400 px-1 shrink-0">
+      {hasPocketIssues && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm" style={{ background: rgbaCss(pocketColor) }} aria-hidden="true" />
+          {pocketLabel}
+        </span>
+      )}
+      {hasPlugIssues && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block w-3 h-3 rounded-sm" style={{ background: rgbaCss(plugColor) }} aria-hidden="true" />
+          {plugLabel}
+        </span>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
-import { distanceTransform } from './distanceTransform';
+import { findMaskComponents } from './maskComponents';
+import { dilateMask } from './maskOps';
 
 /**
  * Estimate the total plug-stock material area required to carve every
@@ -28,26 +29,17 @@ export function computePlugStockUsageSqIn(
   pixelsPerInch: number,
   growthInches: number = 0.51,
 ): number {
-  const n = canvasW * canvasH;
   const growthPx = growthInches * pixelsPerInch;
   const ppiSq = pixelsPerInch * pixelsPerInch;
 
-  // Step 1: dilate pocketMask by growthPx.
-  // distanceTransform: seeds[k] = 0 means "this is a seed" → output is
-  // distance from each pixel to the nearest seed. We seed the pocket
-  // pixels and find the dilated set as (dist ≤ growthPx).
-  const seeds = new Uint8Array(n);
-  for (let k = 0; k < n; k++) seeds[k] = pocketMask[k] ? 0 : 1;
-  const distToMask = distanceTransform(seeds, canvasW, canvasH);
-  const dilated = new Uint8Array(n);
+  // Step 1: dilate pocketMask by growthPx (Minkowski sum with a disc).
+  const dilated = dilateMask(pocketMask, canvasW, canvasH, growthPx);
   let any = false;
-  for (let k = 0; k < n; k++) {
-    if (distToMask[k] <= growthPx) { dilated[k] = 1; any = true; }
-  }
+  for (let k = 0; k < dilated.length; k++) if (dilated[k]) { any = true; break; }
   if (!any) return 0;
 
   // Step 2: connected components (4-connected).
-  const components = findConnectedComponents(dilated, canvasW, canvasH);
+  const components = findMaskComponents(dilated, canvasW, canvasH);
 
   // Steps 3 + 4: per-component OBB area, summed.
   let totalAreaPx = 0;
@@ -70,40 +62,6 @@ export function computePlugStockUsageSqIn(
 }
 
 interface Point { x: number; y: number }
-
-/** 4-connected flood fill returning every connected component's pixel indices. */
-function findConnectedComponents(
-  mask: Uint8Array,
-  w: number,
-  h: number,
-): { pixels: number[] }[] {
-  const visited = new Uint8Array(w * h);
-  const out: { pixels: number[] }[] = [];
-  for (let start = 0; start < w * h; start++) {
-    if (!mask[start] || visited[start]) continue;
-    const pixels: number[] = [];
-    const queue: number[] = [start];
-    visited[start] = 1;
-    let head = 0;
-    while (head < queue.length) {
-      const k = queue[head++];
-      pixels.push(k);
-      const x = k % w;
-      const y = (k - x) / w;
-      const nb = [
-        x > 0     ? k - 1 : -1,
-        x < w - 1 ? k + 1 : -1,
-        y > 0     ? k - w : -1,
-        y < h - 1 ? k + w : -1,
-      ];
-      for (const nk of nb) {
-        if (nk >= 0 && mask[nk] && !visited[nk]) { visited[nk] = 1; queue.push(nk); }
-      }
-    }
-    out.push({ pixels });
-  }
-  return out;
-}
 
 /**
  * Boundary pixels of a component — pixels with at least one non-mask

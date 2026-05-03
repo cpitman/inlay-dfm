@@ -18,6 +18,7 @@ function feasibleSide(): PerPresetSingleSide {
     vbitAngleWarning: false,
     overlayDataUrl: '',
     depthMapDataUrl: '',
+    problemComponents: [],
   };
 }
 
@@ -32,6 +33,7 @@ function infeasibleSide(): PerPresetSingleSide {
     vbitAngleWarning: false,
     overlayDataUrl: '',
     depthMapDataUrl: '',
+    problemComponents: [],
   };
 }
 

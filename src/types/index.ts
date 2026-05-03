@@ -133,6 +133,14 @@ export interface SingleAnalysis {
   /** Threshold-overlay PNG built at the user's currently-selected v-bit angle. Used by Step 3 (V-bit) where the user is consciously evaluating one angle. */
   overlayDataUrl: string;
   /**
+   * Centroid + size of each connected problem-area component shown on
+   * `overlayDataUrl`. Used by the issue-locator badge layer to point a
+   * tiny, easy-to-miss flagged region out to the user. Coordinates are
+   * in canvas pixel space (same as the overlay PNG dimensions). Empty
+   * when there are no problem regions.
+   */
+  problemComponents: { cx: number; cy: number; areaPx: number }[];
+  /**
    * Suggestions overlay PNG built at the *largest feasible* v-bit angle for
    * the whole design, with regions that block the next wider preset shown
    * in teal. Used by Step 2 (DFM) so the user — who hasn't yet picked an
@@ -179,6 +187,7 @@ export type PerPresetSingleSide = Pick<
   | 'vbitAngleWarning'
   | 'overlayDataUrl'
   | 'depthMapDataUrl'
+  | 'problemComponents'
 >;
 
 export interface PerPresetAngleResult {
@@ -203,6 +212,15 @@ export interface WoodAnalysis {
    * these regions lets the design upgrade to a wider, faster bit.
    */
   widerBitInfeasibleMask: WiderBitInfeasibleMask | null;
+  /**
+   * When NO v-bit preset is feasible for the design, this carries the
+   * pocket/plug problem masks at the *sharpest* preset (the closest the
+   * design can get to manufacturable). The guided quote view uses these
+   * as the data source for the red "widen these or it can't be carved"
+   * overlay PNG and the locator badges. Null when at least one preset
+   * is feasible — the wider-bit suggestion data takes over instead.
+   */
+  irreducibleProblemMask: { pocket: Uint8Array; plug: Uint8Array } | null;
   /** Non-empty when this inlay's edge is too close to a later inlay (staged alignment risk). */
   alignmentIssues: AlignmentIssue[];
   /** Pocket area the clearance bit can reach (square inches). */

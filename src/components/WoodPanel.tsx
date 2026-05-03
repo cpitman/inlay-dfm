@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { WoodAnalysis, AnalysisResult, DFMSettings, VectorData, WoodSpeciesKey } from '@/types';
 import { WOOD_SPECIES, WOOD_SPECIES_ORDER } from '@/lib/woodSpecies';
 import { layerToStandaloneSvg } from '@/lib/svgLayers';
 import { formatMinutes } from '@/lib/machiningTime';
 import DesignCanvas from './DesignCanvas';
+import HoverMagnifier from './HoverMagnifier';
+import IssueLocatorBadges, { type IssueVariant } from './IssueLocatorBadges';
 import ResultsPanel from './ResultsPanel';
 
 interface WoodPanelProps {
@@ -53,6 +55,26 @@ export default function WoodPanel({
     if (overlayMode === 'depthmap')    return analysis[side].depthMapDataUrl;
     return null;
   };
+
+  // Badges point at small problem regions on the threshold overlay.
+  // Other overlay modes don't carry per-component centroids today. The
+  // variant tags each badge so the disc color matches the overlay
+  // beneath (red for pocket "feature too narrow", yellow for plug
+  // "gap between inlays too narrow").
+  const badgeComponents = (side: 'pocket' | 'plug') => {
+    if (!analysis || overlayMode !== 'threshold') return [];
+    const variant: IssueVariant = side === 'pocket' ? 'pocketIrreducible' : 'plugIrreducible';
+    return analysis[side].problemComponents.map(c => ({ ...c, variant }));
+  };
+
+  // Refs for the hover-magnifier loupe to sample full-resolution pixels.
+  const pocketCanvasRef = useRef<HTMLCanvasElement>(null);
+  const plugCanvasRef   = useRef<HTMLCanvasElement>(null);
+  const [pocketPin, setPocketPin] = useState<{ x: number; y: number } | null>(null);
+  const [plugPin,   setPlugPin]   = useState<{ x: number; y: number } | null>(null);
+
+  const sourceW = vector?.naturalWidth  ?? 0;
+  const sourceH = vector?.naturalHeight ?? 0;
 
   // Render only this wood's layer in the no-overlay base view.
   const layerSvg = useMemo(() => {
@@ -148,7 +170,22 @@ ${outline}
             <h3 className="text-sm font-semibold text-slate-300">Pocket</h3>
             <p className="text-xs text-slate-500">Carved from base board</p>
           </div>
-          <DesignCanvas vector={vector} overlayDataUrl={overlay('pocket')} svgOverride={layerSvg} />
+          <HoverMagnifier sourceCanvasRef={pocketCanvasRef} pinPosition={pocketPin}>
+            <DesignCanvas
+              vector={vector}
+              overlayDataUrl={overlay('pocket')}
+              svgOverride={layerSvg}
+              canvasRef={pocketCanvasRef}
+            />
+            {sourceW > 0 && (
+              <IssueLocatorBadges
+                components={badgeComponents('pocket')}
+                sourceWidth={sourceW}
+                sourceHeight={sourceH}
+                onPin={setPocketPin}
+              />
+            )}
+          </HoverMagnifier>
           {analysis && common && (
             <ResultsPanel analysis={analysis.pocket} common={common} settings={settings} label="Pocket" hideDepthCheck={step2Mode} />
           )}
@@ -159,7 +196,22 @@ ${outline}
             <h3 className="text-sm font-semibold text-slate-300">Plug</h3>
             <p className="text-xs text-slate-500">Raised piece cut from {label || 'this'} stock</p>
           </div>
-          <DesignCanvas vector={vector} overlayDataUrl={overlay('plug')} svgOverride={plugLayerSvg} />
+          <HoverMagnifier sourceCanvasRef={plugCanvasRef} pinPosition={plugPin}>
+            <DesignCanvas
+              vector={vector}
+              overlayDataUrl={overlay('plug')}
+              svgOverride={plugLayerSvg}
+              canvasRef={plugCanvasRef}
+            />
+            {sourceW > 0 && (
+              <IssueLocatorBadges
+                components={badgeComponents('plug')}
+                sourceWidth={sourceW}
+                sourceHeight={sourceH}
+                onPin={setPlugPin}
+              />
+            )}
+          </HoverMagnifier>
           {analysis && common && (
             <ResultsPanel analysis={analysis.plug} common={common} settings={settings} label="Plug" hideDepthCheck={step2Mode} />
           )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { VectorData } from '@/types';
 
 interface DesignCanvasProps {
@@ -9,10 +9,17 @@ interface DesignCanvasProps {
   overlayDataUrl: string | null;
   /** Optional standalone SVG string to render instead of vector.svgString (for per-layer views). */
   svgOverride?: string;
+  /**
+   * Optional ref the parent can provide to read the rendered canvas at
+   * full natural resolution — used by `HoverMagnifier` to sample pixels
+   * for the hover loupe regardless of the CSS-scaled display size.
+   */
+  canvasRef?: RefObject<HTMLCanvasElement | null>;
 }
 
-export default function DesignCanvas({ vector, overlayDataUrl, svgOverride }: DesignCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export default function DesignCanvas({ vector, overlayDataUrl, svgOverride, canvasRef: externalCanvasRef }: DesignCanvasProps) {
+  const internalCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = externalCanvasRef ?? internalCanvasRef;
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -48,7 +55,7 @@ export default function DesignCanvas({ vector, overlayDataUrl, svgOverride }: De
     };
     img.onerror = () => { if (objectUrl) URL.revokeObjectURL(objectUrl); setLoading(false); };
     img.src = src;
-  }, [vector, overlayDataUrl, svgOverride]);
+  }, [vector, overlayDataUrl, svgOverride, canvasRef]);
 
   if (!vector) {
     return (
