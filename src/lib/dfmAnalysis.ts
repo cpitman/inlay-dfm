@@ -1,4 +1,4 @@
-import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, MachiningTimeMatrix } from '@/types';
+import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, PerPresetSingleSide, MachiningTimeMatrix } from '@/types';
 import { distanceTransform } from './distanceTransform';
 import { layerToStandaloneSvg, renderSvgToCanvas } from './svgLayers';
 import { detectAlignmentRisk } from './alignmentRisk';
@@ -234,6 +234,34 @@ function problemStatsForAngle(
 
 /** Problem-area cutoff above which a V-bit angle is considered infeasible for the design. */
 const FEASIBILITY_PROBLEM_PCT = 10;
+
+/**
+ * Binary-search a monotonically-descending boolean predicate over
+ * [0, length) for the largest index where it returns `true`.
+ * Returns `-1` when the predicate is false everywhere.
+ *
+ * Used by Phase 5 to find the largest-feasible v-bit preset without
+ * computing per-preset stats at every angle. Sound because v-bit
+ * design-wide feasibility is monotonic: full-depth footprint is
+ * `depth × tan(angle/2)`, so problem-area ascends with angle and
+ * `feasible` flips at most once across the preset list.
+ *
+ * Probes at most `⌈log₂(length)⌉ + 1` indices.
+ *
+ * Exported for testing.
+ */
+export function binarySearchLargestFeasibleIdx(
+  length: number,
+  isFeasible: (idx: number) => boolean,
+): number {
+  let lo = 0, hi = length - 1, largest = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (isFeasible(mid)) { largest = mid; lo = mid + 1; }
+    else                  { hi = mid - 1; }
+  }
+  return largest;
+}
 
 // ---------------------------------------------------------------------------
 // Component feasibility check.
@@ -603,6 +631,26 @@ export interface RunDfmAnalysisOptions {
    * ~150 PNG encodes per design (≈80% of the full-pass wall-time).
    */
   produceOverlays?: boolean;
+  /**
+   * When `true`, Phase 5 binary-searches the v-bit preset list for the
+   * largest-feasible preset instead of computing per-preset stats for
+   * all 6 angles. Per-wood per-preset stats are populated only at
+   * tested presets; untested presets are filled in with monotonic
+   * extrapolation (sentinel `feasible` flags + stub
+   * `PerPresetAngleResult` entries).
+   *
+   * Sound because design-wide feasibility is monotonic in v-bit angle:
+   * the v-bit's full-depth footprint is `depth × tan(angle/2)`, which
+   * ascends with angle, so problem-area ascends and `feasible` flips
+   * at most once across the preset list.
+   *
+   * Only safe when downstream consumers don't read the synthesized
+   * sentinel fields — currently true for the guided flow, which uses
+   * the raw masks the analysis still computes. The expert flow leaves
+   * this `false` (default) since its VbitSelector renders all 6
+   * presets' real data.
+   */
+  useBinarySearchFeasibility?: boolean;
 }
 
 export async function runDfmAnalysis(
@@ -612,7 +660,7 @@ export async function runDfmAnalysis(
   canvasWidth: number = DEFAULT_CANVAS_WIDTH,
   options: RunDfmAnalysisOptions = {},
 ): Promise<AnalysisResult> {
-  const { produceOverlays = true } = options;
+  const { produceOverlays = true, useBinarySearchFeasibility = false } = options;
   const { designWidthInches, vbitAngleDegrees, inlayDepthInches, grainDirection } = settings;
 
   const halfAngleRad = (vbitAngleDegrees / 2) * (Math.PI / 180);
@@ -1028,38 +1076,36 @@ ${plugStockOutlineSvg}
   }
 
   // -----------------------------------------------------------------------
-  // Phase 5: Per-preset analysis — overlays, depth maps, stats, AND matrix
-  // feasibility flags in one pass.
+  // Phase 5: Per-preset analysis — feasibility flags, overlays, depth maps.
   //
-  // For every preset V-bit angle × every wood × pocket/plug, we compute
-  // problemStatsForAngle (with the mask retained) and immediately build the
-  // overlay + depth-map PNGs at that angle. Step 3 then reads from
-  // WoodAnalysis.perPresetAnalysis to swap displayed overlays instantly when
-  // the user picks an angle — no re-analysis required.
+  // Two modes, switched by `useBinarySearchFeasibility`:
   //
-  // The matrix's per-angle `maxProblemAreaPercent` and `feasible` are
-  // accumulated as a byproduct of this same pass. We deliberately don't
-  // early-break (unlike the previous design): all sides need to be visited
-  // anyway to populate per-wood per-side overlays.
+  //   • Linear (expert flow / default): compute `problemStatsForAngle`
+  //     for every preset × every wood × pocket/plug, and PNG-encode the
+  //     overlay + depth-map at each angle. Step 3's VbitSelector reads
+  //     all 6 entries to render thumbnails and instant-swap the picked
+  //     angle's overlays — every preset must be populated.
   //
-  // Cost: ~36 PNG encodes (6 angles × 2 sides × ~3 woods) and as many
-  // problemStatsForAngle calls. Memory: just the encoded PNG strings —
-  // the masks are dropped immediately after each overlay build.
+  //   • Binary search (guided flow): design-wide feasibility is
+  //     monotonic in v-bit angle (full-depth footprint is
+  //     `depth × tan(angle/2)`, ascending), so `feasible` flips at most
+  //     once across the preset list. Binary search locates the largest
+  //     feasible index in ⌈log₂(6)⌉ = 3 stats passes. Untested presets
+  //     are filled in with synthetic feasibility flags + stub
+  //     `PerPresetAngleResult` entries.
+  //
+  // Cache structure: `presetCache` keyed by aIdx, populated lazily by
+  // `computeAtPreset`. Both modes feed it; Phase 5.5 reads from it
+  // (avoiding redundant `problemStatsForAngle` calls in linear mode too).
   // -----------------------------------------------------------------------
-  const perPresetByWood: PerPresetAngleResult[][] = woods.map(() => []);
-  const matrixVbits: MachiningTimeMatrix['vbits'] = [];
-
-  // Pass 1: sequential. Walk every (angle, wood, side) computing
-  // problemStatsForAngle + accumulating per-angle feasibility totals.
-  // We need this to be sequential because matrixVbits[i].feasible
-  // closes over `maxProblem` and `anyIsolatedComponent` which are
-  // accumulated across woods within an angle. Stash everything the
-  // PNG encodes will need (problem masks + computed centroids) into
-  // an inputs array consumed by Pass 2.
-  interface PerPresetEncodeInputs {
+  interface PresetData {
     angleDegrees: number;
     angleVbitWarning: boolean;
     angleFdrPx: number;
+    /** Worst per-side problem-area percent across all woods. */
+    maxProblem: number;
+    /** OR of `hasIsolatedComponent` across all woods × pocket/plug. */
+    anyIsolatedComponent: boolean;
     perWood: Array<{
       pocketStats: ReturnType<typeof problemStatsForAngle>;
       plugStats:   ReturnType<typeof problemStatsForAngle>;
@@ -1067,9 +1113,11 @@ ${plugStockOutlineSvg}
       plugComponents:   ReturnType<typeof findMaskComponentCentroids>;
     }>;
   }
-  const presetInputs: PerPresetEncodeInputs[] = [];
+  const presetCache = new Map<number, PresetData>();
 
-  for (let aIdx = 0; aIdx < VBIT_PRESET_ANGLES.length; aIdx++) {
+  const computeAtPreset = (aIdx: number): PresetData => {
+    const cached = presetCache.get(aIdx);
+    if (cached) return cached;
     const angleDeg = VBIT_PRESET_ANGLES[aIdx];
     const half = (angleDeg / 2) * (Math.PI / 180);
     const angleFdrPx = inlayDepthInches * Math.tan(half) * pixelsPerInch;
@@ -1077,7 +1125,7 @@ ${plugStockOutlineSvg}
 
     let maxProblem = 0;
     let anyIsolatedComponent = false;
-    const perWood: PerPresetEncodeInputs['perWood'] = [];
+    const perWood: PresetData['perWood'] = [];
 
     for (let wIdx = 0; wIdx < woods.length; wIdx++) {
       const inp = overlayRebuildInputs[wIdx];
@@ -1087,13 +1135,11 @@ ${plugStockOutlineSvg}
       const plugStats = problemStatsForAngle(
         inp.plugMask, inp.plugDist1, angleFdrPx, canvasW, canvasH, true,
       );
-
       if (pocketStats.percent > maxProblem) maxProblem = pocketStats.percent;
       if (plugStats.percent   > maxProblem) maxProblem = plugStats.percent;
       if (pocketStats.hasIsolatedComponent || plugStats.hasIsolatedComponent) {
         anyIsolatedComponent = true;
       }
-
       perWood.push({
         pocketStats, plugStats,
         pocketComponents: findMaskComponentCentroids(pocketStats.problemMask!, canvasW, canvasH),
@@ -1101,21 +1147,46 @@ ${plugStockOutlineSvg}
       });
     }
 
-    presetInputs.push({ angleDegrees: angleDeg, angleVbitWarning, angleFdrPx, perWood });
-    matrixVbits.push({
+    const data: PresetData = {
       angleDegrees: angleDeg,
-      ...VBIT_RATES[angleDeg],
-      feasible: maxProblem <= FEASIBILITY_PROBLEM_PCT && !anyIsolatedComponent,
-      maxProblemAreaPercent: maxProblem,
-      hasIsolatedComponent: anyIsolatedComponent,
-    });
+      angleVbitWarning,
+      angleFdrPx,
+      maxProblem,
+      anyIsolatedComponent,
+      perWood,
+    };
+    presetCache.set(aIdx, data);
+    return data;
+  };
+
+  const isFeasibleAt = (aIdx: number): boolean => {
+    const r = computeAtPreset(aIdx);
+    return r.maxProblem <= FEASIBILITY_PROBLEM_PCT && !r.anyIsolatedComponent;
+  };
+
+  let largestFeasibleIdx = -1;
+
+  if (useBinarySearchFeasibility) {
+    // Binary search the preset list (ascending angle, descending
+    // feasibility) for the largest index where `feasible` holds.
+    largestFeasibleIdx = binarySearchLargestFeasibleIdx(
+      VBIT_PRESET_ANGLES.length,
+      isFeasibleAt,
+    );
+  } else {
+    // Linear: compute every preset, then locate largest feasible.
+    for (let aIdx = 0; aIdx < VBIT_PRESET_ANGLES.length; aIdx++) {
+      computeAtPreset(aIdx);
+    }
+    for (let i = VBIT_PRESET_ANGLES.length - 1; i >= 0; i--) {
+      if (isFeasibleAt(i)) { largestFeasibleIdx = i; break; }
+    }
   }
 
-  // Pass 2: PNG encodes for the per-preset overlays + depth maps.
-  // Each (angle, wood, side, kind) encode is independent — fire the
-  // whole batch in parallel and assemble the result objects from the
-  // resolved values. When `produceOverlays === false` (guided flow),
-  // the batch is empty and every URL field is `''`.
+  // PNG encode batch — independent across (aIdx, wIdx, kind), so fire
+  // them in parallel and assemble URLs from the resolved values. Only
+  // tested presets contribute; in binary-search mode `produceOverlays`
+  // is also `false` so the batch is empty anyway.
   type EncodeKind = 'pocketOverlay' | 'plugOverlay' | 'pocketDepth' | 'plugDepth';
   interface EncodeJob {
     aIdx: number;
@@ -1126,11 +1197,10 @@ ${plugStockOutlineSvg}
   const encodeJobs: EncodeJob[] = [];
 
   if (produceOverlays) {
-    for (let aIdx = 0; aIdx < presetInputs.length; aIdx++) {
-      const { angleFdrPx } = presetInputs[aIdx];
+    for (const [aIdx, data] of presetCache) {
       for (let wIdx = 0; wIdx < woods.length; wIdx++) {
         const inp = overlayRebuildInputs[wIdx];
-        const w = presetInputs[aIdx].perWood[wIdx];
+        const w = data.perWood[wIdx];
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketOverlay',
           promise: buildOverlay(inp.pocketBase, canvasW, canvasH,
@@ -1144,63 +1214,109 @@ ${plugStockOutlineSvg}
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketDepth',
           promise: buildDepthMap(inp.pocketBase, canvasW, canvasH,
-            inp.pocketMask, inp.pocketDist1, angleFdrPx),
+            inp.pocketMask, inp.pocketDist1, data.angleFdrPx),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'plugDepth',
           promise: buildDepthMap(inp.plugBase, canvasW, canvasH,
-            inp.plugMask, inp.plugDist1, angleFdrPx, plugDepthMapFit),
+            inp.plugMask, inp.plugDist1, data.angleFdrPx, plugDepthMapFit),
         });
       }
     }
   }
-  // Fire in parallel — each encode writes its own OffscreenCanvas so
-  // there's no shared state across jobs. Browser may serialize at the
-  // canvas API level, but cycles spent waiting on encoding are
-  // reclaimable by other queued encodes.
   const encodeResults = await Promise.all(encodeJobs.map(j => j.promise));
-  // Index the results back into a per-(aIdx, wIdx) bucket.
-  const urlsByAW: Record<EncodeKind, string>[][] = presetInputs.map(() =>
-    woods.map(() => ({
-      pocketOverlay: '', plugOverlay: '', pocketDepth: '', plugDepth: '',
-    })),
-  );
+  // Index resolved URLs by (aIdx → per-wood Record<EncodeKind, string>).
+  const urlsByAW = new Map<number, Record<EncodeKind, string>[]>();
   for (let i = 0; i < encodeJobs.length; i++) {
     const j = encodeJobs[i];
-    urlsByAW[j.aIdx][j.wIdx][j.kind] = encodeResults[i];
+    let perWoodArr = urlsByAW.get(j.aIdx);
+    if (!perWoodArr) {
+      perWoodArr = woods.map(() => ({
+        pocketOverlay: '', plugOverlay: '', pocketDepth: '', plugDepth: '',
+      }));
+      urlsByAW.set(j.aIdx, perWoodArr);
+    }
+    perWoodArr[j.wIdx][j.kind] = encodeResults[i];
   }
 
-  // Pass 3: assemble PerPresetAngleResult from the collected stats + URLs.
-  for (let aIdx = 0; aIdx < presetInputs.length; aIdx++) {
-    const p = presetInputs[aIdx];
-    for (let wIdx = 0; wIdx < woods.length; wIdx++) {
-      const w = p.perWood[wIdx];
-      const u = urlsByAW[aIdx][wIdx];
-      perPresetByWood[wIdx].push({
-        angleDegrees: p.angleDegrees,
-        pocket: {
-          fullDepthPercent: w.pocketStats.fullDepthPercent,
-          problemAreaPercent: w.pocketStats.percent,
-          passed: w.pocketStats.passed,
-          hasAnyFullDepth: w.pocketStats.hasAnyFullDepth,
-          hasIsolatedUnreachableComponent: w.pocketStats.hasIsolatedComponent,
-          vbitAngleWarning: p.angleVbitWarning,
-          overlayDataUrl: u.pocketOverlay,
-          problemComponents: w.pocketComponents,
-          depthMapDataUrl: u.pocketDepth,
-        },
-        plug: {
-          fullDepthPercent: w.plugStats.fullDepthPercent,
-          problemAreaPercent: w.plugStats.percent,
-          passed: w.plugStats.passed,
-          hasAnyFullDepth: w.plugStats.hasAnyFullDepth,
-          hasIsolatedUnreachableComponent: w.plugStats.hasIsolatedComponent,
-          vbitAngleWarning: p.angleVbitWarning,
-          overlayDataUrl: u.plugOverlay,
-          problemComponents: w.plugComponents,
-          depthMapDataUrl: u.plugDepth,
-        },
+  // Synthesize matrix.vbits + perPresetAnalysis for ALL 6 presets.
+  // Tested presets: real values from cache. Untested presets (binary-
+  // search mode only): monotonic extrapolation. Sentinel stub fields
+  // line up with the synthesized `feasible` flag so any future picker
+  // logic that descends through `isLayerFeasibleAtVbit` sees a
+  // consistent picture.
+  const matrixVbits: MachiningTimeMatrix['vbits'] = [];
+  const perPresetByWood: PerPresetAngleResult[][] = woods.map(() => []);
+
+  for (let aIdx = 0; aIdx < VBIT_PRESET_ANGLES.length; aIdx++) {
+    const angleDeg = VBIT_PRESET_ANGLES[aIdx];
+    const angleVbitWarning = grainDirection !== 'end' && angleDeg < MIN_VBIT_ANGLE_SIDE_GRAIN;
+    const data = presetCache.get(aIdx);
+
+    if (data) {
+      const feasible = data.maxProblem <= FEASIBILITY_PROBLEM_PCT && !data.anyIsolatedComponent;
+      matrixVbits.push({
+        angleDegrees: angleDeg,
+        ...VBIT_RATES[angleDeg],
+        feasible,
+        maxProblemAreaPercent: data.maxProblem,
+        hasIsolatedComponent: data.anyIsolatedComponent,
       });
+      const u = urlsByAW.get(aIdx);
+      for (let wIdx = 0; wIdx < woods.length; wIdx++) {
+        const w = data.perWood[wIdx];
+        const woodUrls = u?.[wIdx];
+        perPresetByWood[wIdx].push({
+          angleDegrees: angleDeg,
+          pocket: {
+            fullDepthPercent: w.pocketStats.fullDepthPercent,
+            problemAreaPercent: w.pocketStats.percent,
+            passed: w.pocketStats.passed,
+            hasAnyFullDepth: w.pocketStats.hasAnyFullDepth,
+            hasIsolatedUnreachableComponent: w.pocketStats.hasIsolatedComponent,
+            vbitAngleWarning: angleVbitWarning,
+            overlayDataUrl: woodUrls?.pocketOverlay ?? '',
+            problemComponents: w.pocketComponents,
+            depthMapDataUrl: woodUrls?.pocketDepth ?? '',
+          },
+          plug: {
+            fullDepthPercent: w.plugStats.fullDepthPercent,
+            problemAreaPercent: w.plugStats.percent,
+            passed: w.plugStats.passed,
+            hasAnyFullDepth: w.plugStats.hasAnyFullDepth,
+            hasIsolatedUnreachableComponent: w.plugStats.hasIsolatedComponent,
+            vbitAngleWarning: angleVbitWarning,
+            overlayDataUrl: woodUrls?.plugOverlay ?? '',
+            problemComponents: w.plugComponents,
+            depthMapDataUrl: woodUrls?.plugDepth ?? '',
+          },
+        });
+      }
+    } else {
+      // Untested preset (binary-search mode only). Extrapolate from
+      // monotonicity: `feasible` iff aIdx ≤ largestFeasibleIdx.
+      const feasible = aIdx <= largestFeasibleIdx;
+      matrixVbits.push({
+        angleDegrees: angleDeg,
+        ...VBIT_RATES[angleDeg],
+        feasible,
+        maxProblemAreaPercent: feasible ? 0 : 100,
+        hasIsolatedComponent: !feasible,
+      });
+      const stubSide: PerPresetSingleSide = {
+        fullDepthPercent: feasible ? 100 : 0,
+        problemAreaPercent: feasible ? 0 : 100,
+        passed: feasible,
+        hasAnyFullDepth: feasible,
+        hasIsolatedUnreachableComponent: !feasible,
+        vbitAngleWarning: angleVbitWarning,
+        overlayDataUrl: '',
+        problemComponents: [],
+        depthMapDataUrl: '',
+      };
+      for (let wIdx = 0; wIdx < woods.length; wIdx++) {
+        perPresetByWood[wIdx].push({ angleDegrees: angleDeg, pocket: stubSide, plug: stubSide });
+      }
     }
   }
 
@@ -1232,59 +1348,42 @@ ${plugStockOutlineSvg}
   // those unlocks a wider, faster bit, which is typically a significant
   // machining-time win.
   //
-  // We compute one suggestion-overlay PNG per side. The user-angle overlay
-  // attached to each SingleAnalysis (overlayDataUrl) is left untouched for
-  // Step 3 to consume. Cost: two extra problemStatsForAngle calls per side
-  // (one at displayAngle, one at suggestionAngle) plus two PNG encodes —
-  // only when there's a feasible angle.
+  // Reads display + suggestion stats from `presetCache` (always
+  // populated for `largestFeasibleIdx` after Phase 5; binary-search
+  // mode also caches the next-wider preset along the search path,
+  // and the no-feasible fallback's preset 0 is on the search path too).
+  // The single fallback `computeAtPreset(suggestionIdx)` covers the
+  // rare case where the search didn't probe largest+1 directly.
   // -----------------------------------------------------------------------
-  let largestFeasibleIdx = -1;
-  for (let i = matrixVbits.length - 1; i >= 0; i--) {
-    if (matrixVbits[i].feasible) { largestFeasibleIdx = i; break; }
-  }
   let step2DisplayAngleDegrees: number | null = null;
   let step2SuggestionAngleDegrees: number | null = null;
 
   if (largestFeasibleIdx >= 0) {
     // Feasible case: display at the largest feasible preset; suggestions
     // (teal) at the next wider preset if one exists.
-    const displayAngle = VBIT_PRESET_ANGLES[largestFeasibleIdx];
-    step2DisplayAngleDegrees = displayAngle;
-    const dHalf = (displayAngle / 2) * (Math.PI / 180);
-    const dFdrPx = inlayDepthInches * Math.tan(dHalf) * pixelsPerInch;
+    const displayData = computeAtPreset(largestFeasibleIdx);
+    step2DisplayAngleDegrees = displayData.angleDegrees;
 
     const suggestionIdx = largestFeasibleIdx + 1;
     const hasSuggestion = suggestionIdx < VBIT_PRESET_ANGLES.length;
-    let sFdrPx = 0;
+    let suggestionData: PresetData | undefined;
     if (hasSuggestion) {
-      step2SuggestionAngleDegrees = VBIT_PRESET_ANGLES[suggestionIdx];
-      const sHalf = (step2SuggestionAngleDegrees / 2) * (Math.PI / 180);
-      sFdrPx = inlayDepthInches * Math.tan(sHalf) * pixelsPerInch;
+      suggestionData = computeAtPreset(suggestionIdx);
+      step2SuggestionAngleDegrees = suggestionData.angleDegrees;
     }
 
     for (let i = 0; i < woods.length; i++) {
       const inp = overlayRebuildInputs[i];
-
-      const pocketDisplayStats = problemStatsForAngle(
-        inp.pocketMask, inp.pocketDist1, dFdrPx, canvasW, canvasH, true,
-      );
-      const plugDisplayStats = problemStatsForAngle(
-        inp.plugMask, inp.plugDist1, dFdrPx, canvasW, canvasH, true,
-      );
-      const pocketDisplayProblem = pocketDisplayStats.problemMask!;
-      const plugDisplayProblem   = plugDisplayStats.problemMask!;
+      const dw = displayData.perWood[i];
+      const pocketDisplayProblem = dw.pocketStats.problemMask!;
+      const plugDisplayProblem   = dw.plugStats.problemMask!;
 
       let pocketSuggestion: Uint8Array | undefined;
       let plugSuggestion: Uint8Array | undefined;
-      if (hasSuggestion) {
-        const pocketSugStats = problemStatsForAngle(
-          inp.pocketMask, inp.pocketDist1, sFdrPx, canvasW, canvasH, true,
-        );
-        const plugSugStats = problemStatsForAngle(
-          inp.plugMask, inp.plugDist1, sFdrPx, canvasW, canvasH, true,
-        );
-        const pocketWider = pocketSugStats.problemMask!;
-        const plugWider   = plugSugStats.problemMask!;
+      if (suggestionData) {
+        const sw = suggestionData.perWood[i];
+        const pocketWider = sw.pocketStats.problemMask!;
+        const plugWider   = sw.plugStats.problemMask!;
 
         pocketSuggestion = new Uint8Array(canvasW * canvasH);
         plugSuggestion   = new Uint8Array(canvasW * canvasH);
@@ -1321,27 +1420,22 @@ ${plugStockOutlineSvg}
     // smallest preset (15°) with its problem mask in RED. These are
     // irreducible regions: no preset can carve them. The artist needs to
     // widen or remove these features for the design to be manufacturable.
-    const fallbackAngle = VBIT_PRESET_ANGLES[0];
-    const fHalf = (fallbackAngle / 2) * (Math.PI / 180);
-    const fFdrPx = inlayDepthInches * Math.tan(fHalf) * pixelsPerInch;
+    const fallbackData = computeAtPreset(0);
 
     for (let i = 0; i < woods.length; i++) {
       const inp = overlayRebuildInputs[i];
-      const pocketStats = problemStatsForAngle(
-        inp.pocketMask, inp.pocketDist1, fFdrPx, canvasW, canvasH, true,
-      );
-      const plugStats = problemStatsForAngle(
-        inp.plugMask, inp.plugDist1, fFdrPx, canvasW, canvasH, true,
-      );
+      const fw = fallbackData.perWood[i];
+      const pocketProblem = fw.pocketStats.problemMask!;
+      const plugProblem   = fw.plugStats.problemMask!;
       if (produceOverlays) {
         woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
           inp.pocketBase, canvasW, canvasH,
-          pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign,
+          pocketProblem, inp.pocketIsThinWall, inp.pocketAlign,
           undefined, // no teal suggestion — there's no upgrade path
         );
         woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
           inp.plugBase, canvasW, canvasH,
-          plugStats.problemMask!, inp.plugIsThinWall, undefined,
+          plugProblem, inp.plugIsThinWall, undefined,
           undefined,
         );
       }
@@ -1351,8 +1445,8 @@ ${plugStockOutlineSvg}
       // `produceOverlays` since the guided flow consumes these masks
       // in the React layer to render its own overlays.
       woods[i].irreducibleProblemMask = {
-        pocket: pocketStats.problemMask!,
-        plug:   plugStats.problemMask!,
+        pocket: pocketProblem,
+        plug:   plugProblem,
       };
     }
   }

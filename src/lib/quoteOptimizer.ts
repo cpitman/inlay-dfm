@@ -230,16 +230,24 @@ async function runSingleDesignOptimization(
 
   // Phase 4: ONE full DFM analysis at the production resolution. This
   // is the only run whose output reaches the cost model + bit-plan
-  // picker. Skip the per-side / per-preset / suggestion PNG encodes —
-  // the guided UI renders its own overlays in the React layer from
-  // the raw `widerBitInfeasibleMask` / `irreducibleProblemMask` masks
-  // that this analysis still produces. The encoded URLs are consumed
-  // only by the expert flow and ignored here, so encoding ~150 PNGs
-  // we'll discard is pure overhead.
+  // picker. Two `runDfmAnalysis` shortcuts apply here, both saving
+  // wall-time the guided flow can't observe:
+  //
+  //   `produceOverlays: false` skips the per-side / per-preset /
+  //   suggestion PNG encodes. The guided UI renders its own overlays
+  //   in the React layer from the raw masks the analysis still
+  //   computes (`widerBitInfeasibleMask` / `irreducibleProblemMask`).
+  //
+  //   `useBinarySearchFeasibility: true` replaces the linear 6-preset
+  //   stats sweep with a binary search for the largest-feasible v-bit
+  //   preset (3–4 stats passes instead of 6). Sound because design-
+  //   wide feasibility is monotonic in v-bit angle. The guided picker
+  //   only ever uses the largest-feasible preset, so the sentinel
+  //   per-preset entries at untested indices are never read.
   onProgress?.(`Analyzing your design${suffix}…`);
   const result = await runDfmAnalysis(
     workingVector, settings, order, canvasWidth,
-    { produceOverlays: false },
+    { produceOverlays: false, useBinarySearchFeasibility: true },
   );
 
   // Phase 5: pick the per-layer bit plan.
