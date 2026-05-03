@@ -23,7 +23,7 @@ interface WoodPanelProps {
   analysis: WoodAnalysis | null;
   vector: VectorData | null;
   overlayMode: 'none' | 'threshold' | 'suggestions' | 'depthmap';
-  common: Pick<AnalysisResult, 'thinWallThresholdInches' | 'alignmentThresholdInches'> | null;
+  common: Pick<AnalysisResult, 'thinWallThresholdInches' | 'alignmentThresholdInches' | 'canvasW' | 'canvasH'> | null;
   settings: DFMSettings;
   /** colorHex → label map for all woods (used in alignment warning messages). */
   otherWoodLabels: Record<string, string>;
@@ -73,8 +73,14 @@ export default function WoodPanel({
   const [pocketPin, setPocketPin] = useState<{ x: number; y: number } | null>(null);
   const [plugPin,   setPlugPin]   = useState<{ x: number; y: number } | null>(null);
 
-  const sourceW = vector?.naturalWidth  ?? 0;
-  const sourceH = vector?.naturalHeight ?? 0;
+  // Badge centroids live in analysis-canvas coordinates (cx ∈ [0, result.canvasW]),
+  // not SVG-natural-pixel coordinates. The two only happen to match when the
+  // analysis canvas size happens to equal the SVG's natural width — for any
+  // other resolution choice they're off by a constant factor and the badges
+  // land in the wrong spot. Use the analysis canvas dims from `common`,
+  // falling back to vector natural dims when no analysis has run yet.
+  const sourceW = common?.canvasW ?? vector?.naturalWidth  ?? 0;
+  const sourceH = common?.canvasH ?? vector?.naturalHeight ?? 0;
 
   // Render only this wood's layer in the no-overlay base view.
   const layerSvg = useMemo(() => {

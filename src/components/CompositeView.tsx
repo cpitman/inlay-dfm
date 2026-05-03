@@ -1,9 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
+import type { Placement, VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
 import { WOOD_SPECIES } from '@/lib/woodSpecies';
 import { renderBoardSurface } from '@/lib/woodGrain';
+
+/** A read-only ghost of another design painted under the active one. */
+export interface OtherDesign {
+  id: string;
+  vector: VectorData;
+  compositeUrl: string | null;
+  placement: Placement;
+}
 
 interface CompositeViewProps {
   dataUrl: string | null;
@@ -25,6 +33,15 @@ interface CompositeViewProps {
    * frame.
    */
   onCommitPlacement: (offsetX: number, offsetY: number, designWidth: number) => void;
+
+  /**
+   * Optional: other designs on the same board, rendered read-only at
+   * their committed placements so the user can see the whole layout
+   * while editing one design at a time. Active design is drawn on top
+   * (last), gets the dashed outline + drag handles. Empty / undefined
+   * is the single-design case.
+   */
+  otherDesigns?: OtherDesign[];
 }
 
 const MIN_DESIGN_WIDTH_INCHES = 0.25;
@@ -64,6 +81,7 @@ export default function CompositeView({
   boardWidthInches, boardHeightInches, designWidthInches,
   designOffsetXInches, designOffsetYInches,
   onCommitPlacement,
+  otherDesigns = [],
 }: CompositeViewProps) {
   const bg = WOOD_SPECIES[backgroundSpecies];
   const containerRef = useRef<HTMLDivElement>(null);
@@ -272,6 +290,36 @@ export default function CompositeView({
               draggable={false}
             />
           )}
+
+          {/* Other (non-active) designs — read-only ghosts beneath the active one */}
+          {otherDesigns.map(o => {
+            if (!o.compositeUrl) return null;
+            const aspectO = o.vector.naturalHeight / o.vector.naturalWidth;
+            const designH = o.placement.designWidthInches * aspectO;
+            return (
+              <div
+                key={o.id}
+                className="absolute pointer-events-none"
+                style={{
+                  left:   pctX(o.placement.offsetXInches),
+                  top:    pctY(o.placement.offsetYInches),
+                  width:  pctX(o.placement.designWidthInches),
+                  height: pctY(designH),
+                  opacity: 0.55,
+                }}
+                title={o.vector.fileName}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={o.compositeUrl}
+                  alt=""
+                  className="absolute inset-0 w-full h-full select-none"
+                  style={{ outline: '1px dotted rgba(148, 163, 184, 0.4)' }}
+                  draggable={false}
+                />
+              </div>
+            );
+          })}
 
           {/* Design composite — positioned and scaled */}
           {dataUrl && vector && (

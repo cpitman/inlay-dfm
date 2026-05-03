@@ -1,25 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import StepperBar, { type StepDef } from '../StepperBar';
 import { DEFAULT_BOARD_CONFIG, hasTopGroove, TOP_GROOVE_INLAY_MARGIN_INCHES, type BoardConfig } from '@/types/board';
-import type { AnalysisResult, VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
+import type { Design, Placement, WoodConfig, WoodSpeciesKey } from '@/types';
 import { parseVectorFile } from '@/lib/vectorParser';
 import { generateComposite } from '@/lib/compositeRenderer';
 import { guessSpecies, WOOD_SPECIES } from '@/lib/woodSpecies';
 import { INLAY_WOOD_OPTIONS, computeQuote, type QuoteResult } from '@/lib/pricing';
-import { runQuoteOptimization } from '@/lib/quoteOptimizer';
-import type { PerLayerBitPlan } from '@/lib/machiningTime';
+import { runQuoteOptimization, type MultiDesignOptimizationResult } from '@/lib/quoteOptimizer';
+import { boxesOverlap, findFreeSpot, type AABB } from '@/lib/aabb';
 import Step1BoardForm from './Step1BoardForm';
-import Step2ArtPlacement, { type Placement } from './Step2ArtPlacement';
+import Step2ArtPlacement from './Step2ArtPlacement';
 import Step3QuoteDisplay from './Step3QuoteDisplay';
 import OptimizingOverlay from './OptimizingOverlay';
 import RequestManufacturingDialog from './RequestManufacturingDialog';
 
 const QUOTE_STEPS: StepDef[] = [
   { n: 1, label: 'Board',      subtitle: 'Pick your cutting board' },
-  { n: 2, label: 'Art',        subtitle: 'Upload and place your design' },
+  { n: 2, label: 'Art',        subtitle: 'Upload and place your designs' },
   { n: 3, label: 'Quote',      subtitle: 'See your estimate' },
 ];
 
@@ -33,12 +33,48 @@ function pickPricedSpecies(hex: string): WoodSpeciesKey {
   return INLAY_WOOD_OPTIONS.includes(guess) ? guess : FALLBACK_INLAY_SPECIES;
 }
 
+/** AABB of a design on the board, in inches. */
+export function designAabb(d: Design): AABB {
+  const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
+  return {
+    x: d.placement.offsetXInches,
+    y: d.placement.offsetYInches,
+    w: d.placement.designWidthInches,
+    h: d.placement.designWidthInches * aspect,
+  };
+}
+
+/** True iff any pair of designs overlaps. */
+function anyOverlap(designs: readonly Design[]): boolean {
+  for (let i = 0; i < designs.length; i++) {
+    for (let j = i + 1; j < designs.length; j++) {
+      if (boxesOverlap(designAabb(designs[i]), designAabb(designs[j]))) return true;
+    }
+  }
+  return false;
+}
+
+/** Inset rectangle on the board where designs are allowed. */
+function placeableRect(boardConfig: BoardConfig): AABB {
+  const margin = hasTopGroove(boardConfig.juiceGroove) ? TOP_GROOVE_INLAY_MARGIN_INCHES : 0;
+  return {
+    x: margin, y: margin,
+    w: boardConfig.widthInches  - 2 * margin,
+    h: boardConfig.heightInches - 2 * margin,
+  };
+}
+
 /**
  * Top-level container for the guided "Get a quote" experience.
  *
- * Step 1 (Board) → Step 2 (Art + woods + placement) → optimizer pipeline
- * (background, with progress overlay) → Step 3 (Quote display + tips +
- * Request Manufacturing).
+ * Step 1 (Board) → Step 2 (Designs + woods + placement) → optimizer
+ * pipeline (background, with progress overlay) → Step 3 (Quote display
+ * + tips + Request Manufacturing).
+ *
+ * Multi-design: the user can upload several designs, each with its own
+ * placement and color→wood mapping. Designs cannot AABB-overlap on the
+ * board (touching is allowed). Cost is aggregated per species across
+ * all designs.
  */
 export default function QuoteApp() {
   const [currentStep, setCurrentStep] = useState<QuoteStep>(1);
@@ -46,36 +82,36 @@ export default function QuoteApp() {
 
   const [boardConfig, setBoardConfig] = useState<BoardConfig>(DEFAULT_BOARD_CONFIG);
 
-  const [vector, setVector] = useState<VectorData | null>(null);
+  const [designs, setDesigns] = useState<Design[]>([]);
   const [parsing, setParsing] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [woodConfigs, setWoodConfigs] = useState<WoodConfig[]>([]);
-  const [placement, setPlacement] = useState<Placement>({
-    offsetXInches: 0, offsetYInches: 0, designWidthInches: boardConfig.widthInches,
-  });
 
-  const [designCompositeUrl, setDesignCompositeUrl] = useState<string | null>(null);
-  const compositeAbort = useRef<{ cancelled: boolean }>({ cancelled: false });
+  /** Per-design composite PNG dataURL, keyed by design id. */
+  const [compositeUrls, setCompositeUrls] = useState<Map<string, string>>(new Map());
 
   // Optimization + quote state.
   const [optimizingLabel, setOptimizingLabel] = useState<string | null>(null);
-  const [optimizedVector, setOptimizedVector] = useState<VectorData | null>(null);
-  const [optimizedWoodConfigs, setOptimizedWoodConfigs] = useState<WoodConfig[]>([]);
-  const [optimizedResult, setOptimizedResult] = useState<AnalysisResult | null>(null);
-  const [bitPlan, setBitPlan] = useState<PerLayerBitPlan | null>(null);
+  const [optimization, setOptimization] = useState<MultiDesignOptimizationResult | null>(null);
   const [quote, setQuote] = useState<QuoteResult | null>(null);
-  const [noFeasibleAngle, setNoFeasibleAngle] = useState(false);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+
+  /** Invalidate any cached optimizer/quote output. Call when design or board changes. */
+  const invalidateQuote = useCallback(() => {
+    setOptimization(null);
+    setQuote(null);
+  }, []);
 
   // ---------------------------------------------------------------
   // File upload → parse → init woodConfigs → auto-fit placement.
+  // Append a new Design to the list. Auto-position to a free spot;
+  // fall back to placing at origin if nothing fits (the user gets a
+  // visible overlap they can fix).
   // ---------------------------------------------------------------
   const handleFile = useCallback(async (file: File) => {
     setParsing(true);
     setErrorMsg('');
     try {
       const parsed = await parseVectorFile(file);
-      setVector(parsed);
 
       const initialConfigs: WoodConfig[] = parsed.detectedColors.map((hex, i) => {
         const species = pickPricedSpecies(hex);
@@ -85,106 +121,139 @@ export default function QuoteApp() {
           species,
         };
       });
-      setWoodConfigs(initialConfigs);
 
       const aspect = parsed.naturalHeight / parsed.naturalWidth;
-      const margin = hasTopGroove(boardConfig.juiceGroove) ? TOP_GROOVE_INLAY_MARGIN_INCHES : 0;
-      const placeableW = boardConfig.widthInches  - 2 * margin;
-      const placeableH = boardConfig.heightInches - 2 * margin;
-      const designWidthInches = Math.min(placeableW, placeableH / aspect);
-      const designHeightInches = designWidthInches * aspect;
-      setPlacement({
-        offsetXInches: margin + (placeableW - designWidthInches)  / 2,
-        offsetYInches: margin + (placeableH - designHeightInches) / 2,
-        designWidthInches,
-      });
+      const bounds = placeableRect(boardConfig);
 
-      // Loading new art invalidates any previously-computed quote.
-      setOptimizedVector(null);
-      setOptimizedResult(null);
-      setBitPlan(null);
-      setQuote(null);
-      setNoFeasibleAngle(false);
+      // Default size: a quarter of the placeable area (capped to fit
+      // both dimensions). Centered if first design; otherwise slotted
+      // into a free spot.
+      const defaultW = Math.min(bounds.w * 0.5, bounds.h / aspect * 0.5);
+      const defaultH = defaultW * aspect;
+
+      let offsetX: number;
+      let offsetY: number;
+      if (designs.length === 0) {
+        // Center a solo design; sized to fill placeable area like before.
+        const designWidthInches = Math.min(bounds.w, bounds.h / aspect);
+        const designHeightInches = designWidthInches * aspect;
+        offsetX = bounds.x + (bounds.w - designWidthInches)  / 2;
+        offsetY = bounds.y + (bounds.h - designHeightInches) / 2;
+        const newDesign: Design = {
+          id: crypto.randomUUID(),
+          vector: parsed,
+          woodConfigs: initialConfigs,
+          placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches },
+        };
+        setDesigns(prev => [...prev, newDesign]);
+        invalidateQuote();
+        return;
+      }
+
+      // Multi-design: pick a non-overlapping spot.
+      const existingAabbs = designs.map(designAabb);
+      const spot = findFreeSpot(defaultW, defaultH, bounds, existingAabbs);
+      offsetX = spot?.x ?? bounds.x;
+      offsetY = spot?.y ?? bounds.y;
+
+      const newDesign: Design = {
+        id: crypto.randomUUID(),
+        vector: parsed,
+        woodConfigs: initialConfigs,
+        placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches: defaultW },
+      };
+      setDesigns(prev => [...prev, newDesign]);
+      invalidateQuote();
     } catch (e) {
       setErrorMsg((e as Error).message);
     } finally {
       setParsing(false);
     }
-  }, [boardConfig.juiceGroove, boardConfig.widthInches, boardConfig.heightInches]);
+  }, [boardConfig, designs, invalidateQuote]);
 
-  // ---------------------------------------------------------------
-  // Composite regeneration whenever vector / wood assignments / board
-  // wood change. Used as the design overlay on Steps 2 and 3.
-  // ---------------------------------------------------------------
-  useEffect(() => {
-    if (!vector || woodConfigs.length === 0) {
-      setDesignCompositeUrl(null);
-      return;
-    }
-    const token = { cancelled: false };
-    compositeAbort.current = token;
-    generateComposite(vector, woodConfigs, boardConfig.wood)
-      .then(url => { if (!token.cancelled) setDesignCompositeUrl(url); })
-      .catch(err => {
-        if (token.cancelled) return;
-        // eslint-disable-next-line no-console
-        console.error('Composite render failed:', err);
-        setDesignCompositeUrl(null);
-      });
-    return () => { token.cancelled = true; };
-  }, [vector, woodConfigs, boardConfig.wood]);
+  const removeDesign = useCallback((id: string) => {
+    setDesigns(prev => prev.filter(d => d.id !== id));
+    setCompositeUrls(prev => {
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    invalidateQuote();
+  }, [invalidateQuote]);
 
-  const updateWoodConfig = useCallback((colorHex: string, patch: Partial<WoodConfig>) => {
-    setWoodConfigs(prev => prev.map(wc => wc.colorHex === colorHex ? { ...wc, ...patch } : wc));
-    // Wood-color change invalidates the cached quote (different material cost).
-    setQuote(null);
-    setOptimizedResult(null);
-    setBitPlan(null);
-  }, []);
+  const updateDesignPlacement = useCallback((id: string, placement: Placement) => {
+    setDesigns(prev => prev.map(d => d.id === id ? { ...d, placement } : d));
+    invalidateQuote();
+  }, [invalidateQuote]);
+
+  const updateDesignWoodConfig = useCallback((
+    designId: string, colorHex: string, patch: Partial<WoodConfig>,
+  ) => {
+    setDesigns(prev => prev.map(d => {
+      if (d.id !== designId) return d;
+      return {
+        ...d,
+        woodConfigs: d.woodConfigs.map(wc => wc.colorHex === colorHex ? { ...wc, ...patch } : wc),
+      };
+    }));
+    invalidateQuote();
+  }, [invalidateQuote]);
 
   // Board changes invalidate the quote too — every cost lever depends on it.
   const updateBoardConfig = useCallback((next: BoardConfig) => {
     setBoardConfig(next);
-    setQuote(null);
-    setOptimizedResult(null);
-    setBitPlan(null);
-  }, []);
+    invalidateQuote();
+  }, [invalidateQuote]);
 
   // ---------------------------------------------------------------
-  // Step 2 → Quote: run the optimizer, then compute the quote and
-  // advance to Step 3. Failures bubble up as a banner on Step 2.
+  // Composite regeneration whenever any design's vector / wood
+  // assignments / board wood change. One PNG per design.
+  // ---------------------------------------------------------------
+  useEffect(() => {
+    if (designs.length === 0) {
+      setCompositeUrls(new Map());
+      return;
+    }
+    const cancel = { cancelled: false };
+    Promise.all(designs.map(async d => {
+      const url = await generateComposite(d.vector, d.woodConfigs, boardConfig.wood);
+      return [d.id, url] as const;
+    })).then(entries => {
+      if (cancel.cancelled) return;
+      setCompositeUrls(new Map(entries));
+    }).catch(err => {
+      if (cancel.cancelled) return;
+      // eslint-disable-next-line no-console
+      console.error('Composite render failed:', err);
+    });
+    return () => { cancel.cancelled = true; };
+  }, [designs, boardConfig.wood]);
+
+  // ---------------------------------------------------------------
+  // Step 2 → Quote: run the optimizer (per design), aggregate, compute
+  // the quote, and advance to Step 3. Failures bubble up as a banner.
   // ---------------------------------------------------------------
   const runOptimizationAndQuote = useCallback(async () => {
-    if (!vector || woodConfigs.length === 0) return;
+    if (designs.length === 0) return;
     setOptimizingLabel('Starting…');
     setErrorMsg('');
     try {
       const opt = await runQuoteOptimization({
-        vector,
-        woodConfigs,
-        designWidthInches: placement.designWidthInches,
+        designs,
         onProgress: setOptimizingLabel,
       });
-      const totalMachineMinutes = isFinite(opt.totalMachineMinutes) ? opt.totalMachineMinutes : 0;
-      // Per-inlay plug-stock area, aligned with the OPTIMIZED woodConfig order.
-      // dfmAnalysis stores this on each WoodAnalysis after the final analysis pass.
-      const plugStockUsageSqIn = opt.woodConfigs.map(wc => {
-        const w = opt.result.woods.find(x => x.colorHex === wc.colorHex);
-        return w?.plugStockUsageSqIn;
-      });
+      const totalCutting = isFinite(opt.aggregated.totalCuttingMinutes)
+        ? opt.aggregated.totalCuttingMinutes
+        : 0;
       const q = computeQuote({
         boardConfig,
-        woodConfigs: opt.woodConfigs,
-        totalMachineMinutes,
-        plugStockUsageSqIn,
+        totalCuttingMinutes: totalCutting,
+        jointToolChangeMinutes: opt.aggregated.jointToolChangeMinutes,
+        uniqueSpeciesCount: opt.aggregated.uniqueSpeciesCount,
+        plugStockUsageBySpecies: opt.aggregated.plugStockUsageBySpecies,
       });
-      setOptimizedVector(opt.vector);
-      setOptimizedWoodConfigs(opt.woodConfigs);
-      setOptimizedResult(opt.result);
-      setBitPlan(opt.bitPlan);
+      setOptimization(opt);
       setQuote(q);
-      setNoFeasibleAngle(opt.bitPlan === null);
-      // Advance.
       setCurrentStep(3);
       setMaxReachedStep(prev => prev < 3 ? 3 : prev);
     } catch (e) {
@@ -192,11 +261,15 @@ export default function QuoteApp() {
     } finally {
       setOptimizingLabel(null);
     }
-  }, [vector, woodConfigs, placement.designWidthInches, boardConfig]);
+  }, [designs, boardConfig]);
 
-  // Validity
+  // ---------------------------------------------------------------
+  // Validity gates.
+  // Step 2 valid iff at least one design AND no overlaps.
+  // ---------------------------------------------------------------
+  const overlapping = useMemo(() => anyOverlap(designs), [designs]);
   const step1Valid = true;
-  const step2Valid = vector !== null && woodConfigs.length > 0;
+  const step2Valid = designs.length > 0 && !overlapping;
   const step3Valid = quote !== null;
   const validity: Record<number, boolean> = { 1: step1Valid, 2: step2Valid, 3: step3Valid };
 
@@ -233,31 +306,26 @@ export default function QuoteApp() {
         {currentStep === 2 && (
           <Step2ArtPlacement
             boardConfig={boardConfig}
-            vector={vector}
+            designs={designs}
+            compositeUrls={compositeUrls}
             parsing={parsing}
             errorMsg={errorMsg}
-            onFile={handleFile}
-            woodConfigs={woodConfigs}
-            onUpdateWoodConfig={updateWoodConfig}
-            placement={placement}
-            onPlacementChange={setPlacement}
-            designCompositeUrl={designCompositeUrl}
+            overlapping={overlapping}
+            onAddDesign={handleFile}
+            onRemoveDesign={removeDesign}
+            onUpdateDesignPlacement={updateDesignPlacement}
+            onUpdateDesignWoodConfig={updateDesignWoodConfig}
             onBack={() => goToStep(1)}
             onNext={runOptimizationAndQuote}
             canAdvance={step2Valid}
           />
         )}
-        {currentStep === 3 && optimizedVector && optimizedResult && quote && (
+        {currentStep === 3 && optimization && quote && (
           <Step3QuoteDisplay
             boardConfig={boardConfig}
-            vector={optimizedVector}
-            woodConfigs={optimizedWoodConfigs}
-            result={optimizedResult}
+            optimization={optimization}
             quote={quote}
-            bitPlan={bitPlan}
-            noFeasibleAngle={noFeasibleAngle}
-            designCompositeUrl={designCompositeUrl}
-            placement={placement}
+            compositeUrls={compositeUrls}
             onBack={() => goToStep(2)}
             onRequestManufacturing={() => setRequestDialogOpen(true)}
           />
@@ -266,12 +334,12 @@ export default function QuoteApp() {
 
       {optimizingLabel !== null && <OptimizingOverlay label={optimizingLabel} />}
 
-      {quote && (
+      {quote && optimization && (
         <RequestManufacturingDialog
           open={requestDialogOpen}
           onClose={() => setRequestDialogOpen(false)}
           boardConfig={boardConfig}
-          woodConfigs={optimizedWoodConfigs}
+          optimization={optimization}
           quote={quote}
         />
       )}

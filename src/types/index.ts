@@ -106,6 +106,32 @@ export interface VectorData {
   detectedColors: string[];
 }
 
+/**
+ * Where a design sits on the board, in board-coordinate inches.
+ * `offsetX/Y` is the top-left corner of the design's bounding box;
+ * the height is derived from `designWidthInches` × design aspect.
+ */
+export interface Placement {
+  offsetXInches: number;
+  offsetYInches: number;
+  designWidthInches: number;
+}
+
+/**
+ * One design on a multi-design board. The user can upload several;
+ * each gets its own SVG vector, color→wood mapping, and placement.
+ * Two designs cannot overlap on the board (AABB-disjoint, edge-touch
+ * allowed). Colors aren't deduplicated across designs — the user
+ * picks species per design.
+ */
+export interface Design {
+  /** Stable client-side UUID — used for React keys, drag tracking, and save/load. */
+  id: string;
+  vector: VectorData;
+  woodConfigs: WoodConfig[];
+  placement: Placement;
+}
+
 /** A snapshot of all layers at one point in history. */
 export interface LayerSnapshot {
   layers: Layer[];

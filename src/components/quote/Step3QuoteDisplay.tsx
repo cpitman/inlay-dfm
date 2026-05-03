@@ -1,11 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisResult, VectorData, WoodConfig } from '@/types';
+import type { AnalysisResult } from '@/types';
 import type { BoardConfig } from '@/types/board';
 import type { QuoteResult } from '@/lib/pricing';
-import type { PerLayerBitPlan } from '@/lib/machiningTime';
-import { clearanceBitLabel } from '@/lib/machiningTime';
 import {
   ADDON_FEET,
   MACHINE_HOURLY,
@@ -16,71 +14,39 @@ import {
 import { renderBoardWithFeatures } from '@/lib/boardFeatures';
 import { OVERLAY_COLORS, renderIrreducibleProblemOverlay, renderWiderBitOverlay, rgbaCss } from '@/lib/widerBitOverlay';
 import { findMaskComponentCentroids } from '@/lib/maskComponents';
+import { clearanceBitLabel } from '@/lib/machiningTime';
+import type { DesignOptimizationResult, MultiDesignOptimizationResult } from '@/lib/quoteOptimizer';
 import HoverMagnifier from '../HoverMagnifier';
 import IssueLocatorBadges, { type IssueVariant } from '../IssueLocatorBadges';
 import { StepNav } from '../StepperBar';
-import type { Placement } from './Step2ArtPlacement';
 
 interface Step3QuoteDisplayProps {
   boardConfig: BoardConfig;
-  vector: VectorData;
-  woodConfigs: WoodConfig[];
-  result: AnalysisResult;
+  optimization: MultiDesignOptimizationResult;
   quote: QuoteResult;
-  /** Per-layer bit plan from the optimizer. Drives the tooling summary. */
-  bitPlan: PerLayerBitPlan | null;
-  /** True when the optimizer found NO feasible v-bit at any preset. */
-  noFeasibleAngle: boolean;
-  designCompositeUrl: string | null;
-  placement: Placement;
+  /** Per-design composite PNG dataURL, keyed by design id. */
+  compositeUrls: Map<string, string>;
   onBack: () => void;
   onRequestManufacturing: () => void;
 }
 
 /**
  * Final step of the guided quote experience. Headline is the price
- * range; below it the composite preview with an optional teal overlay
- * highlighting "make these larger" regions; alongside, a tips list.
+ * range; below it the multi-design composite preview with per-design
+ * overlays + locator badges; alongside, a tips list.
  *
- * When `noFeasibleAngle` is true the wider-bit overlay is replaced by
- * the smallest-preset's irreducible-problem signal (still rendered by
- * `renderWiderBitOverlay`'s data — but framed as "these features are
- * unmanufacturable as-is").
+ * The "no feasible angle" flag is the union across designs (any one
+ * design with no feasible v-bit makes the whole quote approximate);
+ * each design renders its own overlay flavor independently — so a
+ * board with one infeasible and one suggestion-only design shows red
+ * splashes on the first and teal on the second.
  */
 export default function Step3QuoteDisplay({
-  boardConfig, vector, woodConfigs, result, quote, bitPlan, noFeasibleAngle,
-  designCompositeUrl, placement,
+  boardConfig, optimization, quote, compositeUrls,
   onBack, onRequestManufacturing,
 }: Step3QuoteDisplayProps) {
-  const aspect = vector.naturalHeight / vector.naturalWidth;
-  // Mask coordinates exposed by the analysis. Scales with the design's
-  // physical size in the guided pipeline (240 ppi); the overlay
-  // renderer + badge math need these to match the masks exactly.
-  const canvasW = result.canvasW;
-  const canvasH = result.canvasH;
-
-  // Render the highlight overlay PNG that sits over the design composite.
-  // Two flavors:
-  //   - Feasible design with a wider-bit upgrade path → teal "widen these
-  //     to enable a faster bit" hints (renderWiderBitOverlay).
-  //   - No-feasible-angle design → red "these regions can't be carved by
-  //     any preset, widen or remove them" (renderIrreducibleProblemOverlay).
-  // The renderer is selected by `noFeasibleAngle`; the unused field on
-  // each WoodAnalysis is null and would otherwise produce a blank PNG.
-  const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const render = noFeasibleAngle
-      ? renderIrreducibleProblemOverlay
-      : renderWiderBitOverlay;
-    render(result, canvasW, canvasH).then(url => {
-      if (!cancelled) setOverlayUrl(url);
-    }).catch(() => {
-      if (cancelled) return;
-      setOverlayUrl(null);
-    });
-    return () => { cancelled = true; };
-  }, [result, canvasW, canvasH, noFeasibleAngle]);
+  const { perDesign, aggregated } = optimization;
+  const noFeasibleAngle = aggregated.noFeasibleAngle;
 
   // Render the board PNG and fit-to-container.
   const [boardUrl, setBoardUrl] = useState<string | null>(null);
@@ -114,43 +80,24 @@ export default function Step3QuoteDisplay({
 
   const pctX = (inches: number) => `${(inches / boardConfig.widthInches)  * 100}%`;
   const pctY = (inches: number) => `${(inches / boardConfig.heightInches) * 100}%`;
-  const designHeight = placement.designWidthInches * aspect;
 
-  // Centroids of every flagged region across all woods, tagged with
-  // pocket vs plug so the badges can color-code "feature too narrow"
-  // (red) vs "gap between inlays too narrow" (yellow). Source switches
-  // with the overlay flavor: irreducible problem regions when no v-bit
-  // can carve the design, otherwise wider-bit upgrade hints (teal/cyan).
-  const { overlayComponents, hasPocketIssues, hasPlugIssues } = useMemo(() => {
-    const pick = noFeasibleAngle
-      ? (w: AnalysisResult['woods'][number]) => w.irreducibleProblemMask
-      : (w: AnalysisResult['woods'][number]) => w.widerBitInfeasibleMask;
-    const pocketUnion = new Uint8Array(canvasW * canvasH);
-    const plugUnion   = new Uint8Array(canvasW * canvasH);
-    let anyPocket = false, anyPlug = false;
-    for (const wood of result.woods) {
-      const m = pick(wood);
-      if (!m) continue;
-      if (m.pocket.length === canvasW * canvasH) {
-        for (let k = 0; k < pocketUnion.length; k++) if (m.pocket[k]) { pocketUnion[k] = 1; anyPocket = true; }
-      }
-      if (m.plug.length === canvasW * canvasH) {
-        for (let k = 0; k < plugUnion.length; k++) if (m.plug[k]) { plugUnion[k] = 1; anyPlug = true; }
-      }
-    }
-    const pocketVariant: IssueVariant = noFeasibleAngle ? 'pocketIrreducible' : 'pocketSuggestion';
-    const plugVariant:   IssueVariant = noFeasibleAngle ? 'plugIrreducible'   : 'plugSuggestion';
-    const pocketCentroids = anyPocket ? findMaskComponentCentroids(pocketUnion, canvasW, canvasH) : [];
-    const plugCentroids   = anyPlug   ? findMaskComponentCentroids(plugUnion,   canvasW, canvasH) : [];
-    const tagged = [
-      ...pocketCentroids.map(c => ({ ...c, variant: pocketVariant })),
-      ...plugCentroids  .map(c => ({ ...c, variant: plugVariant   })),
-    ];
-    return { overlayComponents: tagged, hasPocketIssues: anyPocket, hasPlugIssues: anyPlug };
-  }, [result, canvasW, canvasH, noFeasibleAngle]);
+  // Tips against the aggregated inputs.
+  const widestSuggestion = perDesign.reduce<number | null>((m, d) => {
+    const a = d.result.step2SuggestionAngleDegrees;
+    if (a === null) return m;
+    return m === null ? a : Math.max(m, a);
+  }, null);
 
-  // Build tips list. Only show items that genuinely apply.
-  const tips = buildTips({ boardConfig, woodConfigs, noFeasibleAngle, suggestionAngleDegrees: result.step2SuggestionAngleDegrees });
+  const tips = buildTips({
+    boardConfig,
+    uniqueSpeciesCount: aggregated.uniqueSpeciesCount,
+    noFeasibleAngle,
+    suggestionAngleDegrees: widestSuggestion,
+  });
+
+  // Track whether ANY design has pocket / plug issues for the legend.
+  const hasAnyPocketIssue = perDesign.some(d => hasIssuesOn(d, noFeasibleAngle, 'pocket'));
+  const hasAnyPlugIssue   = perDesign.some(d => hasIssuesOn(d, noFeasibleAngle, 'plug'));
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -177,7 +124,7 @@ export default function Step3QuoteDisplay({
         </div>
         {noFeasibleAngle && (
           <p className="text-sm text-red-100 mt-2">
-            Some details in your design are too narrow for any standard v-bit. The price above is approximate; widening the highlighted regions below would give a more reliable quote.
+            Some details in your design{perDesign.length > 1 ? 's' : ''} are too narrow for any standard v-bit. The price above is approximate; widening the highlighted regions below would give a more reliable quote.
           </p>
         )}
       </section>
@@ -185,68 +132,43 @@ export default function Step3QuoteDisplay({
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_22rem] gap-6 flex-1 min-h-0">
         {/* Composite preview + legend */}
         <div className="min-h-0 flex flex-col gap-2">
-        <div ref={wrapRef} className="min-h-0 flex-1 flex items-center justify-center bg-slate-950 rounded-lg">
-          {boardUrl && (
-            <HoverMagnifier zoom={3} lensSize={180}>
-              <div
-                className="relative shadow-xl"
-                style={{ width: boardPx.width, height: boardPx.height }}
-              >
-                <img
-                  src={boardUrl}
-                  alt={`${boardConfig.wood} board preview`}
-                  className="absolute inset-0 w-full h-full object-cover rounded select-none pointer-events-none"
-                  draggable={false}
-                />
-                {designCompositeUrl && (
-                  <div
-                    className="absolute"
-                    style={{
-                      left:   pctX(placement.offsetXInches),
-                      top:    pctY(placement.offsetYInches),
-                      width:  pctX(placement.designWidthInches),
-                      height: pctY(designHeight),
-                    }}
-                  >
-                    <img
-                      src={designCompositeUrl}
-                      alt="Design"
-                      className="absolute inset-0 w-full h-full select-none pointer-events-none"
-                      draggable={false}
+          <div ref={wrapRef} className="min-h-0 flex-1 flex items-center justify-center bg-slate-950 rounded-lg">
+            {boardUrl && (
+              <HoverMagnifier zoom={3} lensSize={180}>
+                <div
+                  className="relative shadow-xl"
+                  style={{ width: boardPx.width, height: boardPx.height }}
+                >
+                  <img
+                    src={boardUrl}
+                    alt={`${boardConfig.wood} board preview`}
+                    className="absolute inset-0 w-full h-full object-cover rounded select-none pointer-events-none"
+                    draggable={false}
+                  />
+                  {perDesign.map(d => (
+                    <DesignOverlay
+                      key={d.designId}
+                      design={d}
+                      compositeUrl={compositeUrls.get(d.designId)}
+                      noFeasibleAngle={noFeasibleAngle}
+                      pctX={pctX}
+                      pctY={pctY}
                     />
-                    {overlayUrl && (
-                      <img
-                        src={overlayUrl}
-                        alt={noFeasibleAngle ? 'Unmanufacturable regions' : 'Suggested widening regions'}
-                        className="absolute inset-0 w-full h-full select-none pointer-events-none"
-                        draggable={false}
-                      />
-                    )}
-                    {overlayComponents.length > 0 && (
-                      <IssueLocatorBadges
-                        components={overlayComponents}
-                        sourceWidth={canvasW}
-                        sourceHeight={canvasH}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            </HoverMagnifier>
-          )}
-        </div>
+                  ))}
+                </div>
+              </HoverMagnifier>
+            )}
+          </div>
           <OverlayLegend
             noFeasibleAngle={noFeasibleAngle}
-            hasPocketIssues={hasPocketIssues}
-            hasPlugIssues={hasPlugIssues}
+            hasPocketIssues={hasAnyPocketIssue}
+            hasPlugIssues={hasAnyPlugIssue}
           />
         </div>
 
         {/* Tips + actions column */}
         <div className="space-y-4 overflow-y-auto pr-1 min-h-0">
-          {bitPlan && (
-            <ToolingSummary bitPlan={bitPlan} woodConfigs={woodConfigs} />
-          )}
+          <ToolingSummary perDesign={perDesign} />
 
           {tips.length > 0 && (
             <section className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-3">
@@ -286,9 +208,154 @@ export default function Step3QuoteDisplay({
   );
 }
 
+/** True iff this design has any pocket-side OR plug-side issues for the
+ *  current overlay flavor (irreducible vs wider-bit-suggestion). */
+function hasIssuesOn(d: DesignOptimizationResult, noFeasible: boolean, side: 'pocket' | 'plug'): boolean {
+  const woods = d.result.woods;
+  const pick = noFeasible
+    ? (w: AnalysisResult['woods'][number]) => w.irreducibleProblemMask
+    : (w: AnalysisResult['woods'][number]) => w.widerBitInfeasibleMask;
+  for (const w of woods) {
+    const m = pick(w);
+    if (!m) continue;
+    const arr = side === 'pocket' ? m.pocket : m.plug;
+    for (let i = 0; i < arr.length; i++) if (arr[i]) return true;
+  }
+  return false;
+}
+
+/**
+ * Renders one design's composite PNG + overlay PNG + locator badges
+ * at its placement on the board. Each design gets its own overlay
+ * (and its own canvas dimensions, since each is analyzed at the design's
+ * own physical size).
+ */
+function DesignOverlay({
+  design, compositeUrl, noFeasibleAngle, pctX, pctY,
+}: {
+  design: DesignOptimizationResult;
+  compositeUrl: string | undefined;
+  noFeasibleAngle: boolean;
+  pctX: (inches: number) => string;
+  pctY: (inches: number) => string;
+}) {
+  const aspect = design.vector.naturalHeight / design.vector.naturalWidth;
+  const placement = design.placement;
+  const designH = placement.designWidthInches * aspect;
+  const canvasW = design.result.canvasW;
+  const canvasH = design.result.canvasH;
+
+  // The renderer per-design — pick irreducible (red/yellow) or wider-bit (teal/cyan).
+  const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const render = noFeasibleAngle ? renderIrreducibleProblemOverlay : renderWiderBitOverlay;
+    render(design.result, canvasW, canvasH).then(url => {
+      if (!cancelled) setOverlayUrl(url);
+    }).catch(() => {
+      if (cancelled) return;
+      setOverlayUrl(null);
+    });
+    return () => { cancelled = true; };
+  }, [design.result, canvasW, canvasH, noFeasibleAngle]);
+
+  const overlayComponents = useMemo(() => {
+    const pick = noFeasibleAngle
+      ? (w: AnalysisResult['woods'][number]) => w.irreducibleProblemMask
+      : (w: AnalysisResult['woods'][number]) => w.widerBitInfeasibleMask;
+    const pocketUnion = new Uint8Array(canvasW * canvasH);
+    const plugUnion   = new Uint8Array(canvasW * canvasH);
+    let anyPocket = false, anyPlug = false;
+    for (const wood of design.result.woods) {
+      const m = pick(wood);
+      if (!m) continue;
+      if (m.pocket.length === canvasW * canvasH) {
+        for (let k = 0; k < pocketUnion.length; k++) if (m.pocket[k]) { pocketUnion[k] = 1; anyPocket = true; }
+      }
+      if (m.plug.length === canvasW * canvasH) {
+        for (let k = 0; k < plugUnion.length; k++) if (m.plug[k]) { plugUnion[k] = 1; anyPlug = true; }
+      }
+    }
+    const pocketVariant: IssueVariant = noFeasibleAngle ? 'pocketIrreducible' : 'pocketSuggestion';
+    const plugVariant:   IssueVariant = noFeasibleAngle ? 'plugIrreducible'   : 'plugSuggestion';
+    const pocketCentroids = anyPocket ? findMaskComponentCentroids(pocketUnion, canvasW, canvasH) : [];
+    const plugCentroids   = anyPlug   ? findMaskComponentCentroids(plugUnion,   canvasW, canvasH) : [];
+    return [
+      ...pocketCentroids.map(c => ({ ...c, variant: pocketVariant })),
+      ...plugCentroids  .map(c => ({ ...c, variant: plugVariant   })),
+    ];
+  }, [design.result, canvasW, canvasH, noFeasibleAngle]);
+
+  if (!compositeUrl) return null;
+  return (
+    <div
+      className="absolute"
+      style={{
+        left:   pctX(placement.offsetXInches),
+        top:    pctY(placement.offsetYInches),
+        width:  pctX(placement.designWidthInches),
+        height: pctY(designH),
+      }}
+    >
+      <img
+        src={compositeUrl}
+        alt={`Design ${design.vector.fileName}`}
+        className="absolute inset-0 w-full h-full select-none pointer-events-none"
+        draggable={false}
+      />
+      {overlayUrl && (
+        <img
+          src={overlayUrl}
+          alt={noFeasibleAngle ? 'Unmanufacturable regions' : 'Suggested widening regions'}
+          className="absolute inset-0 w-full h-full select-none pointer-events-none"
+          draggable={false}
+        />
+      )}
+      {overlayComponents.length > 0 && (
+        <IssueLocatorBadges
+          components={overlayComponents}
+          sourceWidth={canvasW}
+          sourceHeight={canvasH}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Tooling summary across all designs — union of clearance + v-bit angles. */
+function ToolingSummary({ perDesign }: { perDesign: DesignOptimizationResult[] }) {
+  const clearance = new Set<number>();
+  const vbits = new Set<number>();
+  for (const d of perDesign) {
+    if (!d.bitPlan) continue;
+    for (const x of d.bitPlan.strategyDiameters) clearance.add(x);
+    for (const a of d.bitPlan.perLayerVbitAngles) vbits.add(a);
+  }
+  if (clearance.size === 0 && vbits.size === 0) return null;
+  const clearanceLabel = clearance.size === 0
+    ? 'V-bit only (no clearance pass)'
+    : `${[...clearance].sort((a, b) => b - a).map(clearanceBitLabel).join(' + ')} clearance`;
+  const vbitLabel = [...vbits].sort((a, b) => a - b).map(a => `${a}°`).join(' + ');
+
+  return (
+    <section className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-2">
+      <p className="text-sm font-semibold text-slate-200">Tooling</p>
+      <p className="text-xs text-slate-400">{clearanceLabel}</p>
+      {vbitLabel && (
+        <p className="text-xs text-slate-400">V-bits: <span className="font-medium text-slate-300">{vbitLabel}</span></p>
+      )}
+      {perDesign.length > 1 && (
+        <p className="text-[11px] text-slate-500 pt-1">
+          Bits are loaded once and shared across designs — counted in the time estimate.
+        </p>
+      )}
+    </section>
+  );
+}
+
 /**
  * One-line caption under the composite preview, naming the colors
- * that are actually showing on the overlay. Skipped when nothing is
+ * that are actually showing on any overlay. Skipped when nothing is
  * highlighted.
  */
 function OverlayLegend({
@@ -325,53 +392,15 @@ function OverlayLegend({
   );
 }
 
-function ToolingSummary({ bitPlan, woodConfigs }: { bitPlan: PerLayerBitPlan; woodConfigs: WoodConfig[] }) {
-  // Group layers by chosen v-bit angle so the summary reads e.g.
-  // "60° v-bit: Cherry · Walnut" + "30° v-bit: Padauk".
-  const byAngle = new Map<number, string[]>();
-  for (let i = 0; i < bitPlan.perLayerVbitAngles.length; i++) {
-    const angle = bitPlan.perLayerVbitAngles[i];
-    const wc = woodConfigs[i];
-    if (!byAngle.has(angle)) byAngle.set(angle, []);
-    byAngle.get(angle)!.push(wc?.label ?? `Layer ${i + 1}`);
-  }
-  // Sort angles ascending so the summary reads sharpest-first.
-  const entries = [...byAngle.entries()].sort((a, b) => a[0] - b[0]);
-
-  const clearanceLabel = bitPlan.strategyDiameters.length === 0
-    ? 'V-bit only (no clearance pass)'
-    : `${bitPlan.strategyDiameters.map(clearanceBitLabel).join(' → ')} clearance`;
-
-  return (
-    <section className="bg-slate-800 border border-slate-700 rounded-lg p-4 space-y-2">
-      <p className="text-sm font-semibold text-slate-200">Tooling</p>
-      <p className="text-xs text-slate-400">{clearanceLabel}</p>
-      <ul className="space-y-1.5">
-        {entries.map(([angle, labels]) => (
-          <li key={angle} className="text-xs">
-            <span className="font-medium text-slate-200">{angle}° v-bit</span>
-            <span className="text-slate-500"> · {labels.join(', ')}</span>
-          </li>
-        ))}
-      </ul>
-      {entries.length > 1 && (
-        <p className="text-[11px] text-slate-500 pt-1">
-          Using a different v-bit per layer saves machining time vs. forcing every layer to the sharpest angle.
-        </p>
-      )}
-    </section>
-  );
-}
-
 interface Tip { title: string; body?: string }
 
 function buildTips(input: {
   boardConfig: BoardConfig;
-  woodConfigs: WoodConfig[];
+  uniqueSpeciesCount: number;
   noFeasibleAngle: boolean;
   suggestionAngleDegrees: number | null;
 }): Tip[] {
-  const { boardConfig, woodConfigs, noFeasibleAngle, suggestionAngleDegrees } = input;
+  const { boardConfig, uniqueSpeciesCount, noFeasibleAngle, suggestionAngleDegrees } = input;
   const tips: Tip[] = [];
 
   if (noFeasibleAngle) {
@@ -386,10 +415,10 @@ function buildTips(input: {
     });
   }
 
-  if (woodConfigs.length > 1) {
+  if (uniqueSpeciesCount > 1) {
     tips.push({
-      title: 'Use fewer inlay colors',
-      body: `Each color adds material cost and ~30 min of setup. Going from ${woodConfigs.length} colors to 1 could save $${perInlayApproxSavings(woodConfigs.length)}+.`,
+      title: 'Use fewer inlay species',
+      body: `Each species adds material cost and ~30 min of setup. Going from ${uniqueSpeciesCount} species to 1 could save $${perInlayApproxSavings(uniqueSpeciesCount)}+.`,
     });
   }
 
@@ -420,11 +449,11 @@ function buildTips(input: {
   return tips;
 }
 
-/** Rough per-inlay savings to surface in the "fewer colors" tip. */
+/** Rough per-species savings to surface in the "fewer species" tip. */
 function perInlayApproxSavings(currentCount: number): number {
   // Assumes ~$30 of inlay-stock + ~30 min of machine + 30 min of labor
-  // per inlay we drop. (Conservative; real savings depend on which color
-  // is dropped.) Round to $10.
+  // per species we drop. (Conservative; real savings depend on which
+  // species is dropped.) Round to $10.
   const perInlayDollars = 30 + (30/60) * MACHINE_HOURLY + (30/60) * 40;
   return Math.round(((currentCount - 1) * perInlayDollars) / 10) * 10;
 }

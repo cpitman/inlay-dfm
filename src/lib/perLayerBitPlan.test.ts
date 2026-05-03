@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   enumerateClearanceStrategies,
+  jointToolChangeOverhead,
   pickPerLayerBitPlan,
+  type PerLayerBitPlan,
 } from './machiningTime';
 import type { MachiningTimeMatrix, PerPresetAngleResult, PerPresetSingleSide } from '../types';
 
@@ -173,5 +175,50 @@ describe('pickPerLayerBitPlan', () => {
     const matrix = makeMatrix({ numLayers: 0 });
     const plan = pickPerLayerBitPlan(matrix, [], 5);
     expect(plan).toBeNull();
+  });
+});
+
+describe('jointToolChangeOverhead', () => {
+  function makePlan(diameters: number[], angles: number[]): PerLayerBitPlan {
+    return {
+      strategyIdx: 0,
+      strategyDiameters: diameters,
+      perLayerVbitIdxs: angles.map((_, i) => i),
+      perLayerVbitAngles: angles,
+      distinctVbitCount: new Set(angles).size,
+      cuttingTimeMinutes: 0,
+      toolChangeOverheadMinutes: 0,
+      totalTimeMinutes: 0,
+    };
+  }
+
+  it('returns 0 for an empty list', () => {
+    expect(jointToolChangeOverhead([], 5)).toBe(0);
+  });
+
+  it('counts only the union of clearance + v-bits across designs', () => {
+    // Design A: 1/4" clearance, 30° + 60° v-bits
+    // Design B: 1/4" clearance (shared), 60° + 90° v-bits
+    // Union: {1/4"} clearance + {30°, 60°, 90°} v-bits = 4 bits
+    const a = makePlan([0.25],       [30, 60]);
+    const b = makePlan([0.25],       [60, 90]);
+    expect(jointToolChangeOverhead([a, b], 5)).toBe(4 * 5);
+  });
+
+  it('takes the union of clearance diameters too', () => {
+    // Design A uses 1/2" + 1/4", design B uses 1/4" + 1/8".
+    // Union: {1/2, 1/4, 1/8} = 3 clearance + 1 v-bit angle = 4 bits.
+    const a = makePlan([0.5, 0.25], [60]);
+    const b = makePlan([0.25, 0.125], [60]);
+    expect(jointToolChangeOverhead([a, b], 5)).toBe(4 * 5);
+  });
+
+  it('skips null plans', () => {
+    const a = makePlan([0.25], [60]);
+    expect(jointToolChangeOverhead([a, null, null], 5)).toBe(2 * 5); // 1 clearance + 1 v-bit
+  });
+
+  it('returns 0 when all plans are null', () => {
+    expect(jointToolChangeOverhead([null, null], 5)).toBe(0);
   });
 });

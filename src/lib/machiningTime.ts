@@ -318,6 +318,35 @@ function isLayerFeasibleAtVbit(
   );
 }
 
+/**
+ * Joint tool-change overhead across a set of per-design bit plans.
+ * Each design's `PerLayerBitPlan` already includes its own internal
+ * tool-change overhead, but when several designs are carved on the
+ * same board their bits can be shared — a 1/4" clearance bit loaded
+ * once covers every design that uses it.
+ *
+ * Returns `(|union clearance diameters| + |union v-bit angles|) ×
+ * toolChangeMinutes`. Callers should subtract each design's
+ * `toolChangeOverheadMinutes` from its `totalTimeMinutes` (or sum
+ * `cuttingTimeMinutes` directly) to avoid double-counting.
+ *
+ * Null entries (designs with no feasible bit plan) are skipped — they
+ * contribute neither a clearance nor a v-bit to the union.
+ */
+export function jointToolChangeOverhead(
+  perDesignBitPlans: ReadonlyArray<PerLayerBitPlan | null>,
+  toolChangeMinutes: number,
+): number {
+  const clearanceDiameters = new Set<number>();
+  const vbitAngles = new Set<number>();
+  for (const plan of perDesignBitPlans) {
+    if (!plan) continue;
+    for (const d of plan.strategyDiameters) clearanceDiameters.add(d);
+    for (const a of plan.perLayerVbitAngles) vbitAngles.add(a);
+  }
+  return (clearanceDiameters.size + vbitAngles.size) * toolChangeMinutes;
+}
+
 export interface PerLayerBitPlan {
   /** Index into matrix.strategies of the chosen clearance strategy. */
   strategyIdx: number;

@@ -1,29 +1,29 @@
 import type {
-  DFMSettings, VectorData, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot,
+  DFMSettings, VectorData, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot, Placement,
 } from '@/types';
 import { combineLayers } from './svgLayers';
 
 /**
  * Bump when the session schema changes in a backward-incompatible way.
- * `loadSession` rejects files with a different version so we never
- * silently apply a malformed state.
+ *
+ * - v1: single-design session with top-level `vector`, `history`,
+ *       `historyIndex`, `woodConfigs`. Loader migrates these into a
+ *       single-element `designs[]` so multi-design code paths can
+ *       consume them uniformly.
+ * - v2: multi-design session with `designs: SerializedDesign[]` and
+ *       an `activeDesignId`. Each design carries its own vector,
+ *       history, and woodConfigs.
  */
-const SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * Persistable subset of an analyzer session — everything the user has
- * configured plus the design itself, but NOT the analysis results
+ * configured plus the designs themselves, but NOT the analysis results
  * (which are large, contain typed-array masks that don't survive JSON
  * round-trips, and are regeneratable from the saved state).
- *
- * On load the recipient must re-run analysis (the stepper gates Step 2
- * onward on a fresh result), but every input that produced the original
- * analysis is restored exactly — so the result is reproducible.
  */
-export interface SessionFile {
-  version: number;
-  exportedAt: string;
-  /** Source design — combined `svgString` is reconstructed from layers on load. */
+export interface SerializedDesign {
+  id: string;
   vector: {
     layers: Layer[];
     naturalWidth: number;
@@ -33,11 +33,22 @@ export interface SessionFile {
     fileType: 'svg' | 'dxf';
     detectedColors: string[];
   };
-  /** Geometry-modification history. `result` is intentionally stripped from snapshots. */
   history: { layers: Layer[]; label: string }[];
   historyIndex: number;
-  settings: DFMSettings;
   woodConfigs: WoodConfig[];
+  /** Per-design placement on the board (in inches). Optional in the
+   *  schema for forward-compat with files written before this field
+   *  existed (still v2 if `designs` is present); the loader falls back
+   *  to a sensible default. */
+  placement?: Placement;
+}
+
+export interface SessionFile {
+  version: number;
+  exportedAt: string;
+  designs: SerializedDesign[];
+  activeDesignId: string | null;
+  settings: DFMSettings;
   backgroundSpecies: WoodSpeciesKey;
   ui: {
     currentStep: 1 | 2 | 3 | 4;
@@ -47,12 +58,31 @@ export interface SessionFile {
   };
 }
 
-interface SaveSessionInput {
-  originalVector: VectorData;
-  history: LayerSnapshot[];
+/** v1 (legacy) shape — used only by the loader's migration branch. */
+interface SessionFileV1 {
+  version: 1;
+  vector: SerializedDesign['vector'];
+  history: SerializedDesign['history'];
   historyIndex: number;
   settings: DFMSettings;
   woodConfigs: WoodConfig[];
+  backgroundSpecies: WoodSpeciesKey;
+  ui: SessionFile['ui'];
+}
+
+export interface ExpertDesignLike {
+  id: string;
+  originalVector: VectorData;
+  history: LayerSnapshot[];
+  historyIndex: number;
+  woodConfigs: WoodConfig[];
+  placement: Placement;
+}
+
+interface SaveSessionInput {
+  designs: ExpertDesignLike[];
+  activeDesignId: string | null;
+  settings: DFMSettings;
   backgroundSpecies: WoodSpeciesKey;
   currentStep: 1 | 2 | 3 | 4;
   maxReachedStep: 1 | 2 | 3 | 4;
@@ -63,21 +93,27 @@ interface SaveSessionInput {
 /** Serialize a session and trigger a browser download. */
 export function saveSessionToFile(input: SaveSessionInput): void {
   const file: SessionFile = {
-    version: SCHEMA_VERSION,
+    version: CURRENT_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    vector: {
-      layers: input.originalVector.layers,
-      naturalWidth: input.originalVector.naturalWidth,
-      naturalHeight: input.originalVector.naturalHeight,
-      viewBox: input.originalVector.viewBox,
-      fileName: input.originalVector.fileName,
-      fileType: input.originalVector.fileType,
-      detectedColors: input.originalVector.detectedColors,
-    },
-    history: input.history.map(s => ({ layers: s.layers, label: s.label })),
-    historyIndex: input.historyIndex,
+    designs: input.designs.map(d => ({
+      id: d.id,
+      vector: {
+        layers: d.originalVector.layers,
+        naturalWidth: d.originalVector.naturalWidth,
+        naturalHeight: d.originalVector.naturalHeight,
+        viewBox: d.originalVector.viewBox,
+        fileName: d.originalVector.fileName,
+        fileType: d.originalVector.fileType,
+        detectedColors: d.originalVector.detectedColors,
+      },
+      // Strip cached analysis results — they don't survive JSON round-trip.
+      history: d.history.map(s => ({ layers: s.layers, label: s.label })),
+      historyIndex: d.historyIndex,
+      woodConfigs: d.woodConfigs,
+      placement: d.placement,
+    })),
+    activeDesignId: input.activeDesignId,
     settings: input.settings,
-    woodConfigs: input.woodConfigs,
     backgroundSpecies: input.backgroundSpecies,
     ui: {
       currentStep: input.currentStep,
@@ -92,7 +128,8 @@ export function saveSessionToFile(input: SaveSessionInput): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = sessionFileName(input.originalVector.fileName);
+  const firstName = input.designs[0]?.originalVector.fileName ?? 'design';
+  a.download = sessionFileName(firstName);
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -105,12 +142,9 @@ function sessionFileName(designName: string): string {
 }
 
 export interface LoadedSession {
-  /** Reconstructed VectorData with svgString rebuilt from layers. */
-  originalVector: VectorData;
-  history: LayerSnapshot[];
-  historyIndex: number;
+  designs: ExpertDesignLike[];
+  activeDesignId: string | null;
   settings: DFMSettings;
-  woodConfigs: WoodConfig[];
   backgroundSpecies: WoodSpeciesKey;
   currentStep: 1 | 2 | 3 | 4;
   maxReachedStep: 1 | 2 | 3 | 4;
@@ -118,12 +152,7 @@ export interface LoadedSession {
   hasEverAnalyzed: boolean;
 }
 
-/**
- * Tiny ad-hoc validation helpers. Each throws a specific message naming
- * the offending field instead of a generic schema-failure error, since
- * the user typically can't fix the file directly — the precise location
- * helps decide whether to re-export or troubleshoot.
- */
+// Validation helpers (unchanged shape from v1).
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
@@ -205,25 +234,87 @@ function validateSettings(value: unknown): DFMSettings {
   };
 }
 
-function validateWoodConfigs(value: unknown): WoodConfig[] {
-  if (!Array.isArray(value)) throw new Error('Session field "woodConfigs" must be an array.');
+function validateWoodConfigs(value: unknown, path: string): WoodConfig[] {
+  if (!Array.isArray(value)) throw new Error(`Session field "${path}" must be an array.`);
   return value.map((wc, i) => {
-    if (!wc || typeof wc !== 'object') throw new Error(`Session field "woodConfigs[${i}]" must be an object.`);
+    if (!wc || typeof wc !== 'object') throw new Error(`Session field "${path}[${i}]" must be an object.`);
     const w = wc as Partial<WoodConfig>;
     return {
-      colorHex: expectString(w.colorHex, `woodConfigs[${i}].colorHex`),
-      label:    expectString(w.label,    `woodConfigs[${i}].label`),
-      species:  expectString(w.species,  `woodConfigs[${i}].species`) as WoodSpeciesKey,
+      colorHex: expectString(w.colorHex, `${path}[${i}].colorHex`),
+      label:    expectString(w.label,    `${path}[${i}].label`),
+      species:  expectString(w.species,  `${path}[${i}].species`) as WoodSpeciesKey,
     };
   });
 }
 
+function validateVector(value: unknown, path: string): SerializedDesign['vector'] {
+  if (!value || typeof value !== 'object') throw new Error(`Session field "${path}" must be an object.`);
+  const v = value as Partial<SerializedDesign['vector']>;
+  if (v.fileType !== 'svg' && v.fileType !== 'dxf') {
+    throw new Error(`Session field "${path}.fileType" must be "svg" or "dxf".`);
+  }
+  if (!Array.isArray(v.detectedColors)) {
+    throw new Error(`Session field "${path}.detectedColors" must be an array.`);
+  }
+  return {
+    layers:         expectLayerArray(v.layers, `${path}.layers`),
+    naturalWidth:   expectFiniteNumber(v.naturalWidth,  `${path}.naturalWidth`),
+    naturalHeight:  expectFiniteNumber(v.naturalHeight, `${path}.naturalHeight`),
+    viewBox:        expectString(v.viewBox,  `${path}.viewBox`),
+    fileName:       expectString(v.fileName, `${path}.fileName`),
+    fileType:       v.fileType,
+    detectedColors: v.detectedColors.map((c, i) => expectString(c, `${path}.detectedColors[${i}]`)),
+  };
+}
+
+function validateHistory(value: unknown, path: string): { layers: Layer[]; label: string }[] {
+  if (!Array.isArray(value)) throw new Error(`Session field "${path}" must be an array.`);
+  return value.map((s, i) => {
+    if (!s || typeof s !== 'object') throw new Error(`Session field "${path}[${i}]" must be an object.`);
+    return {
+      layers: expectLayerArray((s as { layers: unknown }).layers, `${path}[${i}].layers`),
+      label:  expectString((s as { label: unknown }).label,        `${path}[${i}].label`),
+    };
+  });
+}
+
+/** Convert a SerializedDesign back into the in-memory `ExpertDesignLike`. */
+function deserializeDesign(d: SerializedDesign): ExpertDesignLike {
+  const originalVector: VectorData = {
+    layers:         d.vector.layers,
+    naturalWidth:   d.vector.naturalWidth,
+    naturalHeight:  d.vector.naturalHeight,
+    viewBox:        d.vector.viewBox,
+    fileName:       d.vector.fileName,
+    fileType:       d.vector.fileType,
+    detectedColors: d.vector.detectedColors,
+    svgString: combineLayers(
+      d.vector.layers, d.vector.viewBox, d.vector.naturalWidth, d.vector.naturalHeight,
+    ),
+  };
+  // Default placement when missing (legacy v1, or v2 file written
+  // before per-design placement was added): sized to the design's
+  // natural aspect at 5" wide, anchored at origin. The expert app
+  // re-clamps on load so this is just a sensible fallback.
+  const placement: Placement = d.placement ?? {
+    offsetXInches: 0,
+    offsetYInches: 0,
+    designWidthInches: 5,
+  };
+  return {
+    id: d.id,
+    originalVector,
+    history: d.history,
+    historyIndex: d.historyIndex,
+    woodConfigs: d.woodConfigs,
+    placement,
+  };
+}
+
 /**
  * Read a session file and validate its schema. Throws on parse error,
- * version mismatch, missing required fields, or wrong field types.
- *
- * Cached AnalysisResults are NOT in the file — caller should expect a
- * stale result state and prompt re-analysis on Step 2.
+ * missing required fields, or wrong field types. Handles v1 (legacy
+ * single-design) and v2 (multi-design) sessions transparently.
  */
 export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
   const text = await file.text();
@@ -233,78 +324,87 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
   } catch (e) {
     throw new Error('Not a valid JSON file: ' + (e as Error).message);
   }
-
   if (!raw || typeof raw !== 'object') {
     throw new Error('Session file is empty or malformed.');
   }
-  const sf = raw as Partial<SessionFile>;
-  if (sf.version !== SCHEMA_VERSION) {
+  const sf = raw as { version?: unknown };
+  if (sf.version !== 1 && sf.version !== 2) {
     throw new Error(
-      `Session file version ${sf.version ?? '?'} is not supported (this app expects v${SCHEMA_VERSION}).`,
+      `Session file version ${sf.version ?? '?'} is not supported (this app reads v1 or v2).`,
     );
   }
-  if (!sf.vector || typeof sf.vector !== 'object') {
-    throw new Error('Session file is missing required "vector" data.');
-  }
-  const vRaw = sf.vector as Partial<SessionFile['vector']>;
-  const vectorLayers = expectLayerArray(vRaw.layers, 'vector.layers');
-  const vectorNaturalWidth  = expectFiniteNumber(vRaw.naturalWidth,  'vector.naturalWidth');
-  const vectorNaturalHeight = expectFiniteNumber(vRaw.naturalHeight, 'vector.naturalHeight');
-  const vectorViewBox  = expectString(vRaw.viewBox,  'vector.viewBox');
-  const vectorFileName = expectString(vRaw.fileName, 'vector.fileName');
-  if (vRaw.fileType !== 'svg' && vRaw.fileType !== 'dxf') {
-    throw new Error('Session field "vector.fileType" must be "svg" or "dxf".');
-  }
-  if (!Array.isArray(vRaw.detectedColors)) {
-    throw new Error('Session field "vector.detectedColors" must be an array.');
-  }
-  const vectorDetectedColors = vRaw.detectedColors.map((c, i) => expectString(c, `vector.detectedColors[${i}]`));
 
-  if (!Array.isArray(sf.history)) {
-    throw new Error('Session field "history" must be an array.');
-  }
-  const history: LayerSnapshot[] = sf.history.map((s, i) => {
-    if (!s || typeof s !== 'object') throw new Error(`Session field "history[${i}]" must be an object.`);
-    return {
-      layers: expectLayerArray((s as { layers: unknown }).layers, `history[${i}].layers`),
-      label:  expectString((s as { label: unknown }).label,        `history[${i}].label`),
-    };
-  });
-  const historyIndex = expectFiniteNumber(sf.historyIndex, 'historyIndex');
-  if (historyIndex < 0 || historyIndex >= history.length) {
-    throw new Error(`Session field "historyIndex" (${historyIndex}) is out of range for history of length ${history.length}.`);
-  }
-
-  const settings = validateSettings(sf.settings);
-  const woodConfigs = validateWoodConfigs(sf.woodConfigs);
-  const backgroundSpecies = expectString(sf.backgroundSpecies, 'backgroundSpecies') as WoodSpeciesKey;
-
-  if (!sf.ui || typeof sf.ui !== 'object') {
+  // Common fields shared by both versions.
+  const top = raw as Partial<SessionFile> & Partial<SessionFileV1>;
+  const settings          = validateSettings(top.settings);
+  const backgroundSpecies = expectString(top.backgroundSpecies, 'backgroundSpecies') as WoodSpeciesKey;
+  if (!top.ui || typeof top.ui !== 'object') {
     throw new Error('Session field "ui" must be an object.');
   }
-  const ui = sf.ui as Partial<SessionFile['ui']>;
+  const ui = top.ui as Partial<SessionFile['ui']>;
   const currentStep    = expectStepNumber(ui.currentStep,    'ui.currentStep');
   const maxReachedStep = expectStepNumber(ui.maxReachedStep, 'ui.maxReachedStep');
   const vbitTouched    = expectBoolean(ui.vbitTouched,       'ui.vbitTouched');
   const hasEverAnalyzed = expectBoolean(ui.hasEverAnalyzed,  'ui.hasEverAnalyzed');
 
-  const originalVector: VectorData = {
-    layers: vectorLayers,
-    naturalWidth: vectorNaturalWidth,
-    naturalHeight: vectorNaturalHeight,
-    viewBox: vectorViewBox,
-    fileName: vectorFileName,
-    fileType: vRaw.fileType,
-    detectedColors: vectorDetectedColors,
-    svgString: combineLayers(vectorLayers, vectorViewBox, vectorNaturalWidth, vectorNaturalHeight),
-  };
+  let designs: ExpertDesignLike[];
+  let activeDesignId: string | null;
+
+  if (sf.version === 1) {
+    // Migrate v1 → in-memory single-design list.
+    const vec = validateVector(top.vector, 'vector');
+    const history = validateHistory(top.history, 'history');
+    const historyIndex = expectFiniteNumber(top.historyIndex, 'historyIndex');
+    if (historyIndex < 0 || historyIndex >= history.length) {
+      throw new Error(`Session field "historyIndex" (${historyIndex}) is out of range for history of length ${history.length}.`);
+    }
+    const woodConfigs = validateWoodConfigs(top.woodConfigs, 'woodConfigs');
+    const id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `legacy-${Date.now()}`;
+    designs = [deserializeDesign({
+      id,
+      vector: vec,
+      history,
+      historyIndex,
+      woodConfigs,
+    })];
+    activeDesignId = id;
+  } else {
+    // v2: designs array.
+    if (!Array.isArray(top.designs)) {
+      throw new Error('Session field "designs" must be an array.');
+    }
+    designs = top.designs.map((d, i) => {
+      if (!d || typeof d !== 'object') {
+        throw new Error(`Session field "designs[${i}]" must be an object.`);
+      }
+      const dd = d as Partial<SerializedDesign>;
+      const vec = validateVector(dd.vector, `designs[${i}].vector`);
+      const history = validateHistory(dd.history, `designs[${i}].history`);
+      const historyIndex = expectFiniteNumber(dd.historyIndex, `designs[${i}].historyIndex`);
+      if (historyIndex < 0 || historyIndex >= history.length) {
+        throw new Error(`Session field "designs[${i}].historyIndex" (${historyIndex}) is out of range for history of length ${history.length}.`);
+      }
+      const woodConfigs = validateWoodConfigs(dd.woodConfigs, `designs[${i}].woodConfigs`);
+      return deserializeDesign({
+        id: expectString(dd.id, `designs[${i}].id`),
+        vector: vec,
+        history,
+        historyIndex,
+        woodConfigs,
+      });
+    });
+    if (top.activeDesignId !== null && typeof top.activeDesignId !== 'string') {
+      throw new Error('Session field "activeDesignId" must be a string or null.');
+    }
+    activeDesignId = (top.activeDesignId as string | null | undefined) ?? designs[0]?.id ?? null;
+  }
 
   return {
-    originalVector,
-    history,
-    historyIndex,
+    designs,
+    activeDesignId,
     settings,
-    woodConfigs,
     backgroundSpecies,
     currentStep,
     maxReachedStep,

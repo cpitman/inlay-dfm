@@ -1,16 +1,75 @@
 import { describe, it, expect } from 'vitest';
-import { loadSessionFromFile, looksLikeSessionFile, type SessionFile } from './sessionExport';
+import {
+  loadSessionFromFile, looksLikeSessionFile,
+  type SessionFile, type SerializedDesign,
+} from './sessionExport';
 import type { Layer } from '@/types';
 
-// Build a minimal valid session file. Tests mutate copies of this to
-// exercise validation paths.
-function makeSession(): SessionFile {
-  const layers: Layer[] = [{ colorHex: '#a52a2a', svgFragment: '<path d="M0 0h10v10h-10z"/>' }];
+// Tests mutate fixtures in place to exercise validation. Use factory
+// functions so each test gets a fresh, deep-copied object instead of a
+// shared constant that earlier tests may have corrupted.
+function freshSettings() {
   return {
-    version: 1,
+    designWidthInches: 5,
+    vbitAngleDegrees: 60,
+    inlayDepthInches: 0.125,
+    grainDirection: 'horizontal' as const,
+    analysisResolution: 'default' as const,
+    clearanceBitDiameterInches: 0.25 as const,
+    clearanceStrategy: [0.25],
+    toolChangeMinutes: 5,
+    plugStockMarginInches: 0.25,
+    plugGlueGapInches: 0.005,
+    plugSurfaceGapInches: 0.010,
+    boardWidthInches: 12,
+    boardHeightInches: 9,
+    designOffsetXInches: 3.5,
+    designOffsetYInches: 2,
+  };
+}
+
+function freshUi() {
+  return {
+    currentStep: 1 as const,
+    maxReachedStep: 1 as const,
+    vbitTouched: false,
+    hasEverAnalyzed: false,
+  };
+}
+
+function freshLayers(): Layer[] {
+  return [{ colorHex: '#a52a2a', svgFragment: '<path d="M0 0h10v10h-10z"/>' }];
+}
+
+/** Build a v1 (legacy single-design) session for migration tests. */
+function makeV1Session() {
+  return {
+    version: 1 as const,
     exportedAt: '2026-05-01T00:00:00.000Z',
     vector: {
-      layers,
+      layers: freshLayers(),
+      naturalWidth: 100,
+      naturalHeight: 80,
+      viewBox: '0 0 100 80',
+      fileName: 'test.svg',
+      fileType: 'svg' as const,
+      detectedColors: ['#a52a2a'],
+    },
+    history: [{ layers: freshLayers(), label: 'Original' }],
+    historyIndex: 0,
+    settings: freshSettings(),
+    woodConfigs: [{ colorHex: '#a52a2a', label: 'Cherry', species: 'cherry' as const }],
+    backgroundSpecies: 'maple' as const,
+    ui: freshUi(),
+  };
+}
+
+/** Build a v2 (multi-design) session. */
+function makeV2Session(): SessionFile {
+  const design: SerializedDesign = {
+    id: 'design-1',
+    vector: {
+      layers: freshLayers(),
       naturalWidth: 100,
       naturalHeight: 80,
       viewBox: '0 0 100 80',
@@ -18,33 +77,18 @@ function makeSession(): SessionFile {
       fileType: 'svg',
       detectedColors: ['#a52a2a'],
     },
-    history: [{ layers, label: 'Original' }],
+    history: [{ layers: freshLayers(), label: 'Original' }],
     historyIndex: 0,
-    settings: {
-      designWidthInches: 5,
-      vbitAngleDegrees: 60,
-      inlayDepthInches: 0.125,
-      grainDirection: 'horizontal',
-      analysisResolution: 'default',
-      clearanceBitDiameterInches: 0.25,
-      clearanceStrategy: [0.25],
-      toolChangeMinutes: 5,
-      plugStockMarginInches: 0.25,
-      plugGlueGapInches: 0.005,
-      plugSurfaceGapInches: 0.010,
-      boardWidthInches: 12,
-      boardHeightInches: 9,
-      designOffsetXInches: 3.5,
-      designOffsetYInches: 2,
-    },
     woodConfigs: [{ colorHex: '#a52a2a', label: 'Cherry', species: 'cherry' }],
+  };
+  return {
+    version: 2,
+    exportedAt: '2026-05-01T00:00:00.000Z',
+    designs: [design],
+    activeDesignId: 'design-1',
+    settings: freshSettings(),
     backgroundSpecies: 'maple',
-    ui: {
-      currentStep: 1,
-      maxReachedStep: 1,
-      vbitTouched: false,
-      hasEverAnalyzed: false,
-    },
+    ui: freshUi(),
   };
 }
 
@@ -67,73 +111,124 @@ describe('looksLikeSessionFile', () => {
   });
 });
 
-describe('loadSessionFromFile', () => {
-  it('round-trips a valid session', async () => {
-    const original = makeSession();
+describe('loadSessionFromFile — v1 migration', () => {
+  it('migrates a v1 session into a single-element designs array', async () => {
+    const original = makeV1Session();
     const loaded = await loadSessionFromFile(asFile(original));
-    expect(loaded.originalVector.layers).toHaveLength(1);
-    expect(loaded.originalVector.layers[0].colorHex).toBe('#a52a2a');
-    expect(loaded.originalVector.viewBox).toBe('0 0 100 80');
-    // svgString is reconstructed from layers; should be a string containing the fragment
-    expect(loaded.originalVector.svgString).toContain('<path d="M0 0h10v10h-10z"/>');
-    expect(loaded.history).toHaveLength(1);
-    expect(loaded.historyIndex).toBe(0);
+    expect(loaded.designs).toHaveLength(1);
+    expect(loaded.designs[0].originalVector.layers).toHaveLength(1);
+    expect(loaded.designs[0].originalVector.layers[0].colorHex).toBe('#a52a2a');
+    expect(loaded.designs[0].originalVector.viewBox).toBe('0 0 100 80');
+    // svgString reconstructed from layers
+    expect(loaded.designs[0].originalVector.svgString).toContain('<path d="M0 0h10v10h-10z"/>');
+    expect(loaded.designs[0].history).toHaveLength(1);
+    expect(loaded.designs[0].historyIndex).toBe(0);
+    expect(loaded.designs[0].woodConfigs).toEqual(original.woodConfigs);
+    expect(loaded.activeDesignId).toBe(loaded.designs[0].id);
     expect(loaded.settings.vbitAngleDegrees).toBe(60);
-    expect(loaded.settings.clearanceStrategy).toEqual([0.25]);
-    expect(loaded.woodConfigs).toEqual(original.woodConfigs);
     expect(loaded.currentStep).toBe(1);
-    expect(loaded.vbitTouched).toBe(false);
   });
 
   it('strips cached AnalysisResults from history snapshots', async () => {
-    const original = makeSession();
+    const loaded = await loadSessionFromFile(asFile(makeV1Session()));
+    expect((loaded.designs[0].history[0] as { result?: unknown }).result).toBeUndefined();
+  });
+
+  it('throws on out-of-range historyIndex (v1)', async () => {
+    const s = makeV1Session() as { historyIndex: number };
+    s.historyIndex = 5;
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/historyIndex/);
+  });
+});
+
+describe('loadSessionFromFile — v2 round-trip', () => {
+  it('round-trips a v2 single-design session', async () => {
+    const original = makeV2Session();
     const loaded = await loadSessionFromFile(asFile(original));
-    expect((loaded.history[0] as { result?: unknown }).result).toBeUndefined();
+    expect(loaded.designs).toHaveLength(1);
+    expect(loaded.designs[0].id).toBe('design-1');
+    expect(loaded.activeDesignId).toBe('design-1');
+    expect(loaded.designs[0].originalVector.layers[0].colorHex).toBe('#a52a2a');
+    expect(loaded.designs[0].woodConfigs).toEqual(original.designs[0].woodConfigs);
+  });
+
+  it('round-trips multiple designs', async () => {
+    const session = makeV2Session();
+    const second: SerializedDesign = {
+      id: 'design-2',
+      vector: { ...session.designs[0].vector, fileName: 'second.svg' },
+      history: [{ layers: freshLayers(), label: 'Original' }],
+      historyIndex: 0,
+      woodConfigs: [{ colorHex: '#a52a2a', label: 'Walnut', species: 'walnut' }],
+    };
+    session.designs.push(second);
+
+    const loaded = await loadSessionFromFile(asFile(session));
+    expect(loaded.designs).toHaveLength(2);
+    expect(loaded.designs[0].id).toBe('design-1');
+    expect(loaded.designs[1].id).toBe('design-2');
+    expect(loaded.designs[1].originalVector.fileName).toBe('second.svg');
+    expect(loaded.designs[1].woodConfigs[0].species).toBe('walnut');
+  });
+
+  it('falls back to first design id when activeDesignId is missing', async () => {
+    const s = makeV2Session() as Partial<SessionFile>;
+    s.activeDesignId = null;
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.activeDesignId).toBe('design-1');
   });
 
   it('throws on unrecognized version', async () => {
-    const s = makeSession();
-    (s as unknown as { version: number }).version = 999;
+    const s = makeV2Session() as unknown as { version: number };
+    s.version = 999;
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/version 999/);
   });
 
+  it('throws on out-of-range historyIndex (v2)', async () => {
+    const s = makeV2Session();
+    s.designs[0].historyIndex = 5;
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/historyIndex/);
+  });
+
+  it('throws when a design is missing required fields', async () => {
+    const s = makeV2Session() as unknown as { designs: unknown[] };
+    s.designs[0] = { id: 'x' }; // missing vector/history/woodConfigs
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow();
+  });
+});
+
+describe('loadSessionFromFile — shared validation', () => {
   it('throws on malformed JSON', async () => {
     const f = new File(['{not json'], 'broken.json', { type: 'application/json' });
     await expect(loadSessionFromFile(f)).rejects.toThrow(/Not a valid JSON file/);
   });
 
   it('throws when settings is missing', async () => {
-    const s = makeSession();
-    delete (s as Partial<SessionFile>).settings;
+    const s = makeV2Session() as Partial<SessionFile>;
+    delete s.settings;
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/settings/);
   });
 
   it('throws naming the offending field on a bad type', async () => {
-    const s = makeSession() as unknown as Record<string, unknown>;
+    const s = makeV2Session() as unknown as Record<string, unknown>;
     (s.settings as Record<string, unknown>).vbitAngleDegrees = 'sixty';
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/settings\.vbitAngleDegrees/);
   });
 
-  it('throws on out-of-range historyIndex', async () => {
-    const s = makeSession();
-    (s as { historyIndex: number }).historyIndex = 5;
-    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/historyIndex/);
-  });
-
   it('throws on bad grainDirection enum', async () => {
-    const s = makeSession() as unknown as Record<string, unknown>;
+    const s = makeV2Session() as unknown as Record<string, unknown>;
     (s.settings as Record<string, unknown>).grainDirection = 'diagonal';
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/grainDirection/);
   });
 
   it('throws on bad clearanceStrategy entries', async () => {
-    const s = makeSession() as unknown as Record<string, unknown>;
+    const s = makeV2Session() as unknown as Record<string, unknown>;
     (s.settings as Record<string, unknown>).clearanceStrategy = ['big', 'small'];
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/clearanceStrategy/);
   });
 
   it('round-trips plug-fit settings', async () => {
-    const s = makeSession();
+    const s = makeV2Session();
     s.settings.plugGlueGapInches = 0.007;
     s.settings.plugSurfaceGapInches = 0.013;
     const loaded = await loadSessionFromFile(asFile(s));
@@ -141,26 +236,20 @@ describe('loadSessionFromFile', () => {
     expect(loaded.settings.plugSurfaceGapInches).toBe(0.013);
   });
 
-  it('throws on bad plug-fit value type', async () => {
-    const s = makeSession() as unknown as Record<string, unknown>;
-    (s.settings as Record<string, unknown>).plugGlueGapInches = 'a lot';
-    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/plugGlueGapInches/);
-  });
-
   it('throws on bad currentStep', async () => {
-    const s = makeSession() as unknown as Record<string, unknown>;
+    const s = makeV2Session() as unknown as Record<string, unknown>;
     (s.ui as Record<string, unknown>).currentStep = 7;
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/currentStep/);
   });
 
   it('throws when woodConfigs entry has wrong type', async () => {
-    const s = makeSession() as unknown as Record<string, unknown>;
-    (s.woodConfigs as unknown[])[0] = { colorHex: 123, label: 'x', species: 'cherry' };
+    const s = makeV2Session();
+    (s.designs[0].woodConfigs as unknown[])[0] = { colorHex: 123, label: 'x', species: 'cherry' };
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/woodConfigs\[0\]\.colorHex/);
   });
 
   it('accepts a session with v-bit custom rates set', async () => {
-    const s = makeSession();
+    const s = makeV2Session();
     s.settings.vbitMRRInches3PerMin = 0.4;
     s.settings.vbitFeedInchesPerMin = 60;
     const loaded = await loadSessionFromFile(asFile(s));

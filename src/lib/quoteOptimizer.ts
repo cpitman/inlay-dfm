@@ -1,10 +1,10 @@
-import type { VectorData, WoodConfig, AnalysisResult, DFMSettings } from '@/types';
+import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Placement } from '@/types';
 import { runDfmAnalysis } from './dfmAnalysis';
 import { extendForRegistration } from './extendForRegistration';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
-import { pickPerLayerBitPlan, type PerLayerBitPlan } from './machiningTime';
+import { pickPerLayerBitPlan, jointToolChangeOverhead, type PerLayerBitPlan } from './machiningTime';
 
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
@@ -18,64 +18,113 @@ const TOOL_CHANGE_MINUTES_MANUAL = 5;
  */
 const GUIDED_PIXELS_PER_INCH = 240;
 
-export interface QuoteOptimizationResult {
+/** Per-design optimization output. One entry per `Design` in the input. */
+export interface DesignOptimizationResult {
+  /** Stable id from the input `Design`. */
+  designId: string;
   /** Final vector after fill + extend modifications applied. */
   vector: VectorData;
-  /** WoodConfigs sorted by surface area ascending (smallest carved first). */
+  /** WoodConfigs sorted by overlap-aware topo order (smallest carved first). */
   woodConfigs: WoodConfig[];
+  /** Placement passed through unchanged from input — consumer needs it
+   *  to render the design at the right spot on the board. */
+  placement: Placement;
   /** Final analysis result after every modification + re-analysis pass. */
   result: AnalysisResult;
   /**
    * Per-layer bit plan: chosen clearance strategy + the largest feasible
-   * v-bit for each layer + total wall time including tool-change
-   * overhead. `null` when no strategy makes every layer feasible — the
-   * design is irreducibly non-manufacturable, same as the previous
-   * "no feasible v-bit at any preset" failure mode.
+   * v-bit for each layer + cutting time + per-design tool-change overhead.
+   * `null` when no strategy makes every layer feasible — that design is
+   * irreducibly non-manufacturable.
    */
   bitPlan: PerLayerBitPlan | null;
-  /** True iff the pipeline ran a fill-holes pass. */
+  /** True iff a fill-holes pass ran for this design. */
   appliedFill: boolean;
-  /** True iff the pipeline ran an extend-for-registration pass. */
+  /** True iff an extend-for-registration pass ran for this design. */
   appliedExtend: boolean;
-  /** Total wall time (incl. tool changes) at the chosen bit plan. NaN when not feasible. */
-  totalMachineMinutes: number;
+}
+
+/**
+ * Aggregated cost inputs across all designs, ready to feed straight
+ * into `computeQuote`. The optimizer builds these so the caller
+ * (QuoteApp) doesn't have to repeat the per-species / cross-design
+ * deduplication logic.
+ */
+export interface AggregatedQuoteInputs {
+  /** Sum of per-design `bitPlan.cuttingTimeMinutes`. Excludes tool
+   *  changes — those are tracked separately so we can deduplicate
+   *  bits across designs. NaN if any design's bitPlan was null. */
+  totalCuttingMinutes: number;
+  /** Tool-change minutes after deduplicating clearance + v-bits across
+   *  every design's bitPlan. See `jointToolChangeOverhead`. */
+  jointToolChangeMinutes: number;
+  /** Distinct wood species across all designs' woodConfigs. */
+  uniqueSpeciesCount: number;
+  /** Per-species plug-stock OBB usage summed across designs + slots. */
+  plugStockUsageBySpecies: Map<string, number>;
+  /** True iff any design has `bitPlan === null` (the quote is
+   *  approximate when this is true — at least one design has features
+   *  no v-bit can carve). */
+  noFeasibleAngle: boolean;
+}
+
+export interface MultiDesignOptimizationResult {
+  perDesign: DesignOptimizationResult[];
+  aggregated: AggregatedQuoteInputs;
 }
 
 export interface QuoteOptimizationInput {
-  vector: VectorData;
-  woodConfigs: WoodConfig[];
-  designWidthInches: number;
+  designs: Design[];
   /** Optional override; defaults to 0.25" for the guided experience. */
   inlayDepthInches?: number;
-  /** Optional progress callback — receives a short status label per phase. */
+  /** Optional progress callback — receives a short status label. */
   onProgress?: (label: string) => void;
 }
 
 /**
- * The guided quote pipeline. Conditionally executes each phase to
- * skip redundant work:
- *
- *   Pre-pass. Cheap low-resolution rasterization to learn per-layer
- *     surface area and which layer pairs actually overlap. The
- *     overlap result becomes a topological constraint on carving
- *     order — overlapping layers MUST keep their user-stack order
- *     since the later one cuts through the earlier one's territory.
- *   Order. Topo-sort smallest-area-first within those constraints.
- *   Phase 1. One full DFM analysis at the chosen order.
- *   Phase 2. Fill enclosed holes for any layer reporting
- *     fillableHoleCount > 0; re-analyze if applied.
- *   Phase 3. Extend for registration on any layer with alignment
- *     risks; re-analyze if applied.
- *   Phase 4. Pick the fastest feasible per-layer bit plan.
- *
- * Returns the final vector, sorted woodConfigs, the final analysis
- * result, and the optimal cell.
+ * The guided quote pipeline for a multi-design board. Runs the existing
+ * single-design pipeline (pre-pass + Phase 1 analysis + fill + extend +
+ * bit-plan) for each design, then aggregates the per-design results
+ * into `AggregatedQuoteInputs` so `computeQuote` can apply the
+ * per-species cost rules across all designs.
  */
 export async function runQuoteOptimization(
   input: QuoteOptimizationInput,
-): Promise<QuoteOptimizationResult> {
-  const { vector: initialVector, woodConfigs: initialWoodConfigs, designWidthInches, onProgress } = input;
+): Promise<MultiDesignOptimizationResult> {
+  const { designs, onProgress } = input;
   const inlayDepthInches = input.inlayDepthInches ?? 0.25;
+
+  // Sequential rather than parallel — the user reads the progress
+  // text and parallel runs would scramble it. Total wall time is
+  // identical (compute-bound either way) and per-design output is
+  // self-contained.
+  const perDesign: DesignOptimizationResult[] = [];
+  for (let i = 0; i < designs.length; i++) {
+    const d = designs[i];
+    const label = designs.length === 1
+      ? undefined
+      : ` (design ${i + 1}/${designs.length})`;
+    perDesign.push(
+      await runSingleDesignOptimization(d, inlayDepthInches, label, onProgress),
+    );
+  }
+
+  const aggregated = aggregate(perDesign);
+  return { perDesign, aggregated };
+}
+
+/**
+ * Pipeline for one design, in isolation. Mirrors the previous
+ * single-design `runQuoteOptimization` body — extracted so the new
+ * top-level orchestrator can run it per design.
+ */
+async function runSingleDesignOptimization(
+  design: Design,
+  inlayDepthInches: number,
+  progressSuffix: string | undefined,
+  onProgress?: (label: string) => void,
+): Promise<DesignOptimizationResult> {
+  const designWidthInches = design.placement.designWidthInches;
   // Scale the analysis canvas with the design — bigger designs need
   // more pixels to keep the same physical resolution. No upper cap;
   // very large designs trade some optimizer wall-time for fidelity.
@@ -99,35 +148,32 @@ export async function runQuoteOptimization(
     designOffsetYInches: 0,
   };
 
-  let workingVector = initialVector;
+  const suffix = progressSuffix ?? '';
+  let workingVector = design.vector;
 
-  // Pre-pass: pick the carving order at low resolution. Cheap
-  // (~16× less compute than the full 240-ppi analysis) but sufficient
-  // for area + overlap topology. Replaces the previous "run full
-  // analysis just to learn areas, then re-run if the order changed"
-  // pattern — saves one full analysis pass.
-  onProgress?.('Checking layer overlaps and sizes…');
-  const initialOrder = initialWoodConfigs.map(wc => wc.colorHex);
+  // Pre-pass at low res for area + overlap topology.
+  onProgress?.(`Checking layer overlaps and sizes${suffix}…`);
+  const initialOrder = design.woodConfigs.map(wc => wc.colorHex);
   const { areaSqInByColor, overlapConstraints } = await preAnalyzeLayerOrder(
     workingVector, designWidthInches, initialOrder,
   );
   const order = topoSortByArea(initialOrder, areaSqInByColor, overlapConstraints);
   const sortedWoodConfigs = order.map(c =>
-    initialWoodConfigs.find(wc => wc.colorHex === c)!
+    design.woodConfigs.find(wc => wc.colorHex === c)!
   );
 
   // Phase 1: full DFM analysis at the chosen order.
-  onProgress?.('Analyzing your design…');
+  onProgress?.(`Analyzing your design${suffix}…`);
   let result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
 
   // Phase 2: fill enclosed holes where possible.
   let appliedFill = false;
   const fillTargets = result.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
   if (fillTargets.length > 0) {
-    onProgress?.(`Filling enclosed holes in ${fillTargets.length} layer${fillTargets.length === 1 ? '' : 's'}…`);
+    onProgress?.(`Filling enclosed holes${suffix}…`);
     workingVector = await applyFillAll(workingVector, fillTargets, designWidthInches, order, canvasWidth);
     appliedFill = true;
-    onProgress?.('Re-analyzing after fill…');
+    onProgress?.(`Re-analyzing after fill${suffix}…`);
     result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
   }
 
@@ -135,19 +181,15 @@ export async function runQuoteOptimization(
   let appliedExtend = false;
   const extendTargets = result.woods.filter(w => w.alignmentIssues.length > 0).map(w => w.colorHex);
   if (extendTargets.length > 0) {
-    onProgress?.(`Extending registration borders on ${extendTargets.length} layer${extendTargets.length === 1 ? '' : 's'}…`);
+    onProgress?.(`Extending registration borders${suffix}…`);
     workingVector = await applyExtendAll(workingVector, extendTargets, designWidthInches, order, canvasWidth);
     appliedExtend = true;
-    onProgress?.('Re-analyzing after extend…');
+    onProgress?.(`Re-analyzing after extend${suffix}…`);
     result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
   }
 
-  // Phase 4: pick the per-layer bit plan. Each layer chooses the widest
-  // v-bit angle that's still feasible for its own pocket+plug; the
-  // optimizer minimizes total time across (clearance strategy × distinct
-  // v-bits used). The clearance bit + distinct v-bit count drives the
-  // tool-change overhead at manual swap (5 min/load).
-  onProgress?.('Picking optimal cutting bits per layer…');
+  // Phase 4: pick the per-layer bit plan.
+  onProgress?.(`Picking optimal cutting bits${suffix}…`);
   const perLayerPresetAnalysis = result.woods.map(w => w.perPresetAnalysis);
   const bitPlan = pickPerLayerBitPlan(
     result.machiningTimeTable,
@@ -156,13 +198,59 @@ export async function runQuoteOptimization(
   );
 
   return {
+    designId: design.id,
     vector: workingVector,
     woodConfigs: sortedWoodConfigs,
+    placement: design.placement,
     result,
     bitPlan,
     appliedFill,
     appliedExtend,
-    totalMachineMinutes: bitPlan?.totalTimeMinutes ?? NaN,
+  };
+}
+
+/**
+ * Roll per-design results into the cross-design aggregates that
+ * `computeQuote` consumes. Pure function — no I/O.
+ */
+function aggregate(perDesign: DesignOptimizationResult[]): AggregatedQuoteInputs {
+  let totalCuttingMinutes = 0;
+  const speciesSet = new Set<string>();
+  const plugStockUsageBySpecies = new Map<string, number>();
+  let noFeasibleAngle = false;
+
+  for (const d of perDesign) {
+    if (d.bitPlan === null) noFeasibleAngle = true;
+    else                    totalCuttingMinutes += d.bitPlan.cuttingTimeMinutes;
+
+    // Species union + per-species plug-stock sum. The result.woods
+    // array is in carve order (matches sortedWoodConfigs), and each
+    // wood carries its own plugStockUsageSqIn measurement.
+    for (let i = 0; i < d.woodConfigs.length; i++) {
+      const wc = d.woodConfigs[i];
+      speciesSet.add(wc.species);
+      const wood = d.result.woods.find(w => w.colorHex === wc.colorHex);
+      const usage = wood?.plugStockUsageSqIn;
+      if (usage !== undefined && Number.isFinite(usage)) {
+        plugStockUsageBySpecies.set(
+          wc.species,
+          (plugStockUsageBySpecies.get(wc.species) ?? 0) + usage,
+        );
+      }
+    }
+  }
+
+  const jointToolChangeMinutes = jointToolChangeOverhead(
+    perDesign.map(d => d.bitPlan),
+    TOOL_CHANGE_MINUTES_MANUAL,
+  );
+
+  return {
+    totalCuttingMinutes: noFeasibleAngle ? NaN : totalCuttingMinutes,
+    jointToolChangeMinutes,
+    uniqueSpeciesCount: speciesSet.size,
+    plugStockUsageBySpecies,
+    noFeasibleAngle,
   };
 }
 

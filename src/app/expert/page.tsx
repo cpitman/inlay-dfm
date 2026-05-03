@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { DFMSettings, VectorData, AnalysisResult, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot } from '@/types';
+import type { DFMSettings, VectorData, AnalysisResult, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot, Placement } from '@/types';
 import { parseVectorFile } from '@/lib/vectorParser';
 import { runDfmAnalysis } from '@/lib/dfmAnalysis';
 import { generateComposite } from '@/lib/compositeRenderer';
@@ -12,6 +12,7 @@ import { fillEnclosedHoles } from '@/lib/fillEnclosedHoles';
 import { downloadSvg } from '@/lib/svgExport';
 import { saveSessionToFile, loadSessionFromFile, looksLikeSessionFile } from '@/lib/sessionExport';
 import StepperBar, { type StepNumber } from '@/components/StepperBar';
+import DesignSelector from '@/components/DesignSelector';
 import Step1Design from '@/components/steps/Step1Design';
 import Step2DFM from '@/components/steps/Step2DFM';
 import Step3Vbit from '@/components/steps/Step3Vbit';
@@ -35,6 +36,61 @@ const DEFAULT_SETTINGS: DFMSettings = {
   designOffsetYInches: 2,
 };
 
+/**
+ * Build a `VectorData` for any design (active or not). Mirrors the
+ * `vector` memo's logic but without the active-design dependency, so
+ * we can analyze a different design without flipping `activeDesignId`
+ * and waiting for state to settle.
+ */
+function vectorForDesign(d: ExpertDesign): VectorData {
+  const snap = d.history[d.historyIndex];
+  const snapLayers = snap?.layers ?? d.originalVector.layers;
+  const orderHexes = d.woodConfigs.map(wc => wc.colorHex);
+
+  let orderedLayers: Layer[];
+  if (orderHexes.length === 0) {
+    orderedLayers = snapLayers;
+  } else {
+    const byHex = new Map(snapLayers.map(l => [l.colorHex, l]));
+    orderedLayers = [];
+    for (const hex of orderHexes) {
+      const l = byHex.get(hex);
+      if (l) { orderedLayers.push(l); byHex.delete(hex); }
+    }
+    for (const l of byHex.values()) orderedLayers.push(l);
+  }
+
+  return {
+    ...d.originalVector,
+    layers: orderedLayers,
+    svgString: combineLayers(
+      orderedLayers, d.originalVector.viewBox, d.originalVector.naturalWidth, d.originalVector.naturalHeight,
+    ),
+  };
+}
+
+/**
+ * Per-design state in the expert flow. The user can hold several
+ * designs in flight; analysis, layer history, and color→wood mapping
+ * are independent per design. Session-global settings (DFM params,
+ * v-bit angle, etc.) apply to whichever design is active.
+ */
+interface ExpertDesign {
+  id: string;
+  originalVector: VectorData;
+  history: LayerSnapshot[];
+  historyIndex: number;
+  woodConfigs: WoodConfig[];
+  /**
+   * Where this design sits on the board, in inches. Per-design so two
+   * designs can be scaled and positioned independently. The shared
+   * `settings.designOffsetX/Y/designWidthInches` mirror the *active*
+   * design's placement (kept in sync below) so existing components
+   * that read those settings fields keep working unchanged.
+   */
+  placement: Placement;
+}
+
 /** Convert the user's resolution preset into the canvas pixel width used by the analyzer/extender. */
 function resolvedCanvasWidth(res: DFMSettings['analysisResolution']): number {
   return res === 'low' ? 600 : res === 'high' ? 2400 : 1200;
@@ -44,66 +100,67 @@ type Status = 'idle' | 'parsing' | 'analyzing' | 'done' | 'error';
 type OverlayMode = 'none' | 'threshold' | 'suggestions' | 'depthmap';
 
 export default function Home() {
-  // `originalVector` is the parsed file (immutable after parse).
-  // `history` is a stack of layer snapshots; `historyIndex` points at the
-  // currently-applied snapshot. The "live" vector is reconstructed by
-  // combining `originalVector`'s metadata with `history[historyIndex].layers`.
-  const [originalVector, setOriginalVector] = useState<VectorData | null>(null);
-  const [history, setHistory] = useState<LayerSnapshot[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(0);
+  // Multi-design state. The "active" design is the one steps 1-4 render.
+  const [designs, setDesigns] = useState<ExpertDesign[]>([]);
+  const [activeDesignId, setActiveDesignId] = useState<string | null>(null);
   const [settings, setSettings] = useState<DFMSettings>(DEFAULT_SETTINGS);
   const [hasEverAnalyzed, setHasEverAnalyzed] = useState(false);
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('suggestions');
-  const [woodConfigs, setWoodConfigs] = useState<WoodConfig[]>([]);
   const [backgroundSpecies, setBackgroundSpecies] = useState<WoodSpeciesKey>('maple');
-  const [compositeDataUrl, setCompositeDataUrl] = useState<string | null>(null);
+  /** Per-design composite PNG dataURL (keyed by design id), so the
+   *  CompositeView can paint every design on the board, not just the
+   *  active one. The active design is read out of this map by
+   *  `compositeDataUrl` below. */
+  const [compositeUrls, setCompositeUrls] = useState<Map<string, string>>(new Map());
   const [compositeGenerating, setCompositeGenerating] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [busyModification, setBusyModification] = useState(false);
   const compositeAbort = useRef<{ cancelled: boolean }>({ cancelled: false });
   // Set by session-load to defer analysis until the corresponding state
-  // updates (originalVector / woodConfigs / settings) have been committed
-  // and the derived `vector` memo has settled. A useEffect below picks
-  // this up on the next render and fires handleAnalyze once.
+  // updates have been committed and the derived `vector` memo has settled.
   const pendingSessionAnalysis = useRef(false);
-  // True from the moment a session starts loading until the deferred
-  // analysis completes. Drives a full-screen "Restoring…" overlay so
-  // users who land on Step 4 don't think the page is blank.
   const [sessionRestoring, setSessionRestoring] = useState(false);
 
-  // Stepper state. `maxReachedStep` is the high-water mark; once a step has
-  // been visited the user can always click back to it from the stepper bar,
-  // even if a downstream edit invalidated a later step's prerequisite.
+  // Stepper state.
   const [currentStep, setCurrentStep] = useState<StepNumber>(1);
   const [maxReachedStep, setMaxReachedStep] = useState<StepNumber>(1);
-  // True once the user has explicitly picked a v-bit on Step 3. Until then,
-  // Step 3 auto-defaults vbitAngleDegrees to the widest feasible preset.
   const [vbitTouched, setVbitTouched] = useState(false);
 
-  // Current analysis result — derived from the snapshot's cache.
-  const result: AnalysisResult | null = useMemo(
-    () => history[historyIndex]?.result ?? null,
-    [history, historyIndex],
+  /** The active design — most state derivations key off this. */
+  const activeDesign = useMemo(
+    () => designs.find(d => d.id === activeDesignId) ?? null,
+    [designs, activeDesignId],
   );
+
+  /** Mutate just the active design via a transformer; no-op if none. */
+  const updateActiveDesign = useCallback((fn: (d: ExpertDesign) => ExpertDesign) => {
+    setDesigns(prev => prev.map(d => d.id === activeDesignId ? fn(d) : d));
+  }, [activeDesignId]);
+
+  // Active design's analysis result — derived from its current snapshot.
+  const result: AnalysisResult | null = useMemo(() => {
+    if (!activeDesign) return null;
+    return activeDesign.history[activeDesign.historyIndex]?.result ?? null;
+  }, [activeDesign]);
 
   const analysisStale = hasEverAnalyzed && result === null;
 
-  // Order-only key derived from woodConfigs: changes only when the user
-  // re-orders or adds/removes a layer. Label and species edits don't
-  // affect this key, so memos that key on it (like `vector` below) avoid
-  // expensive re-tracing when only display metadata changes.
-  const colorOrderKey = useMemo(() => woodConfigs.map(w => w.colorHex).join('|'), [woodConfigs]);
+  // Order-only key for the active design — drives expensive memos that
+  // shouldn't refire on label/species edits.
+  const activeColorOrderKey = useMemo(
+    () => activeDesign?.woodConfigs.map(w => w.colorHex).join('|') ?? '',
+    [activeDesign],
+  );
 
-  // Live vector — original metadata plus the current snapshot's layers,
-  // reordered to match woodConfigs's z-order. Keyed on `colorOrderKey`
-  // (not `woodConfigs`) so label/species edits don't recompute the
-  // expensive combineLayers call.
+  // Live vector — active design's metadata + the current snapshot's
+  // layers, reordered to match its woodConfigs.
   const vector: VectorData | null = useMemo(() => {
-    if (!originalVector) return null;
+    if (!activeDesign) return null;
+    const { originalVector, history, historyIndex } = activeDesign;
     const snap = history[historyIndex];
     const snapLayers = snap?.layers ?? originalVector.layers;
-    const orderHexes = colorOrderKey ? colorOrderKey.split('|').filter(Boolean) : [];
+    const orderHexes = activeColorOrderKey ? activeColorOrderKey.split('|').filter(Boolean) : [];
 
     let orderedLayers: Layer[];
     if (orderHexes.length === 0) {
@@ -125,20 +182,17 @@ export default function Home() {
         orderedLayers, originalVector.viewBox, originalVector.naturalWidth, originalVector.naturalHeight,
       ),
     };
-  }, [originalVector, history, historyIndex, colorOrderKey]);
+  }, [activeDesign, activeColorOrderKey]);
 
-  // Invalidate every snapshot's cached analysis result when an *analysis-
-  // affecting* setting or the layer order changes. Settings that the
-  // analysis pre-computes for every choice are deliberately excluded so
-  // changing them is an instant view swap, not a re-run:
-  //   - vbitAngleDegrees: every preset is in WoodAnalysis.perPresetAnalysis
-  //     and result.machiningTimeTable, so Step 3 picks are free.
-  //   - clearanceBitDiameterInches: machiningTimeTable iterates every
-  //     clearance bit, so Step 4 cell clicks are free.
-  //   - boardWidthInches/boardHeightInches/designOffset*: composite-view
-  //     placement only — not consumed by analysis math.
-  const analysisInputsKey = useMemo(() => [
-    settings.designWidthInches,
+  // Settings keys split by scope:
+  //   - sessionSettingsKey: fields that apply to every design. A change
+  //     here invalidates ALL designs' cached analyses.
+  //   - placement settings (designWidthInches, designOffsetX/Y) are NOT
+  //     in either key here — they're per-design now, and we invalidate
+  //     the active design inline in `onSettingsChange` / `onCommitPlacement`
+  //     so a design-selector swap (which syncs settings) doesn't masquerade
+  //     as an analysis-input change.
+  const sessionSettingsKey = useMemo(() => [
     settings.inlayDepthInches,
     settings.grainDirection,
     settings.analysisResolution,
@@ -148,7 +202,6 @@ export default function Home() {
     settings.vbitMRRInches3PerMin,
     settings.vbitFeedInchesPerMin,
   ].join('|'), [
-    settings.designWidthInches,
     settings.inlayDepthInches,
     settings.grainDirection,
     settings.analysisResolution,
@@ -158,127 +211,184 @@ export default function Home() {
     settings.vbitMRRInches3PerMin,
     settings.vbitFeedInchesPerMin,
   ]);
+  // Skip the first run so we don't clobber freshly-loaded session caches
+  // on initial mount.
+  const sessionSettingsKeyDidMount = useRef(false);
   useEffect(() => {
-    setHistory(prev => {
-      if (!prev.some(s => s.result)) return prev;
-      return prev.map(s => (s.result ? { ...s, result: undefined } : s));
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisInputsKey, colorOrderKey]);
+    if (!sessionSettingsKeyDidMount.current) {
+      sessionSettingsKeyDidMount.current = true;
+      return;
+    }
+    // Session-global settings changed — every design's cached analysis
+    // is stale. Per-design placement and color-order changes are
+    // invalidated inline (see moveWood / onCommitPlacement / onSettingsChange).
+    setDesigns(prev => prev.map(d => {
+      if (!d.history.some(s => s.result)) return d;
+      return { ...d, history: d.history.map(s => (s.result ? { ...s, result: undefined } : s)) };
+    }));
+  }, [sessionSettingsKey]);
 
-  // Init woodConfigs from detected colors whenever a NEW file is parsed.
+
+  // Regenerate per-design composites whenever any design's vector /
+  // configs / bg species change. One PNG per design — used by
+  // CompositeView to paint every design on the board (active editable,
+  // others read-only ghosts).
   useEffect(() => {
-    if (!originalVector) { setWoodConfigs([]); setCompositeDataUrl(null); }
-    // Auto-init of woodConfigs for fresh design uploads happens INLINE in
-    // handleFile. Doing it here would clobber session-restored woodConfigs
-    // (order, label, species) since session-load also bumps `originalVector`
-    // and would race with this effect.
-  }, [originalVector]);
-
-  // Regenerate composite whenever configs or vector changes
-  useEffect(() => {
-    if (!vector || woodConfigs.length === 0) { setCompositeDataUrl(null); return; }
-
+    if (designs.length === 0) {
+      setCompositeUrls(new Map());
+      setCompositeGenerating(false);
+      return;
+    }
     const token = { cancelled: false };
     compositeAbort.current = token;
     setCompositeGenerating(true);
-
-    generateComposite(vector, woodConfigs, backgroundSpecies)
-      .then(url => { if (!token.cancelled) { setCompositeDataUrl(url); setCompositeGenerating(false); } })
-      .catch(err => {
-        if (token.cancelled) return;
-        // Surface the failure: log for debugging and clear the data URL so
-        // the CompositeView's "no preview" placeholder shows up instead of
-        // a frozen "generating…" spinner.
-        // eslint-disable-next-line no-console
-        console.error('Composite render failed:', err);
-        setCompositeDataUrl(null);
-        setCompositeGenerating(false);
-      });
-
+    Promise.all(designs.map(async d => {
+      if (d.woodConfigs.length === 0) return [d.id, null] as const;
+      const v = vectorForDesign(d);
+      const url = await generateComposite(v, d.woodConfigs, backgroundSpecies);
+      return [d.id, url] as const;
+    })).then(entries => {
+      if (token.cancelled) return;
+      const next = new Map<string, string>();
+      for (const [id, url] of entries) if (url) next.set(id, url);
+      setCompositeUrls(next);
+      setCompositeGenerating(false);
+    }).catch(err => {
+      if (token.cancelled) return;
+      // eslint-disable-next-line no-console
+      console.error('Composite render failed:', err);
+      setCompositeGenerating(false);
+    });
     return () => { token.cancelled = true; };
-  }, [vector, woodConfigs, backgroundSpecies]);
+  }, [designs, backgroundSpecies]);
+
+  /** Composite for the active design (used by Step1's primary composite slot). */
+  const compositeDataUrl = activeDesignId ? (compositeUrls.get(activeDesignId) ?? null) : null;
+
+  /** Other designs (non-active) for read-only ghost rendering. */
+  const otherDesigns = useMemo(() => {
+    return designs
+      .filter(d => d.id !== activeDesignId)
+      .map(d => ({
+        id: d.id,
+        vector: d.originalVector,
+        compositeUrl: compositeUrls.get(d.id) ?? null,
+        placement: d.placement,
+      }));
+  }, [designs, activeDesignId, compositeUrls]);
+
+  /** Add a new design from a parsed vector — same auto-init as the previous single-design path. */
+  const appendDesign = useCallback((parsed: VectorData) => {
+    const id = crypto.randomUUID();
+    const woodConfigs: WoodConfig[] = parsed.detectedColors.map((hex, i) => ({
+      colorHex: hex,
+      label: WOOD_SPECIES[guessSpecies(hex)].name + (parsed.detectedColors.length > 1 ? ` ${i + 1}` : ''),
+      species: guessSpecies(hex),
+    }));
+
+    // Default placement: same auto-fit as the previous single-design
+    // path used (centered, sized to fit the board's aspect ratio).
+    // Each new design gets its OWN placement — they'll likely overlap
+    // on first paint, which the user fixes by dragging in the
+    // composite view (same UX as the guided flow).
+    const aspect = parsed.naturalHeight / parsed.naturalWidth;
+    const maxWForBoard = Math.min(settings.boardWidthInches, settings.boardHeightInches / aspect);
+    const designW = Math.min(settings.designWidthInches, maxWForBoard);
+    const designH = designW * aspect;
+    const placement: Placement = {
+      designWidthInches: designW,
+      offsetXInches: Math.max(0, (settings.boardWidthInches  - designW) / 2),
+      offsetYInches: Math.max(0, (settings.boardHeightInches - designH) / 2),
+    };
+
+    const newDesign: ExpertDesign = {
+      id,
+      originalVector: parsed,
+      history: [{ layers: parsed.layers, label: 'Original' }],
+      historyIndex: 0,
+      woodConfigs,
+      placement,
+    };
+    setDesigns(prev => [...prev, newDesign]);
+    setActiveDesignId(id);
+    return id;
+  }, [settings.boardWidthInches, settings.boardHeightInches, settings.designWidthInches]);
 
   const handleFile = useCallback(async (file: File) => {
     setStatus('parsing');
     setErrorMsg('');
     try {
       // .json files are saved sessions; route them to the session-restore
-      // path. Everything else (.svg / .dxf) is a fresh design upload.
+      // path. Everything else (.svg / .dxf) is appended as a new design.
       if (looksLikeSessionFile(file)) {
         const session = await loadSessionFromFile(file);
-        setOriginalVector(session.originalVector);
-        setHistory(session.history);
-        setHistoryIndex(session.historyIndex);
+        // Session schema v2 carries `designs[]`; v1 sessions are hoisted
+        // into a single-design list by the loader.
+        setDesigns(session.designs);
+        setActiveDesignId(session.activeDesignId ?? session.designs[0]?.id ?? null);
         setSettings(session.settings);
-        setWoodConfigs(session.woodConfigs);
         setBackgroundSpecies(session.backgroundSpecies);
         setCurrentStep(session.currentStep);
         setMaxReachedStep(session.maxReachedStep);
         setVbitTouched(session.vbitTouched);
         setHasEverAnalyzed(session.hasEverAnalyzed);
-        // Pick a sensible overlay mode for the destination step (mirrors
-        // goToStep). Step 2 wants suggestions; Step 3 wants threshold.
         if (session.currentStep === 2) setOverlayMode('suggestions');
         else if (session.currentStep === 3) setOverlayMode('threshold');
-        setCompositeDataUrl(null); // regenerated by the composite useEffect
-        // Sessions don't carry the cached AnalysisResult (too big, contains
-        // typed-array masks). Flag a deferred re-analysis so the user lands
-        // on the same step with a fresh result instead of a "re-run" banner,
-        // and show a "Restoring…" overlay while it runs.
+        setCompositeUrls(new Map());
         pendingSessionAnalysis.current = true;
         setSessionRestoring(true);
         setStatus('idle');
         return;
       }
 
-      // Fresh design upload — full reset of session state.
-      setCompositeDataUrl(null);
-      setHasEverAnalyzed(false);
-      setCurrentStep(1);
-      setMaxReachedStep(1);
-      setVbitTouched(false);
+      // Fresh design upload — append. Reset session step state only
+      // when this is the FIRST design.
       const parsed = await parseVectorFile(file);
-      setOriginalVector(parsed);
-      setHistory([{ layers: parsed.layers, label: 'Original' }]);
-      setHistoryIndex(0);
-      setWoodConfigs(
-        parsed.detectedColors.map((hex, i) => ({
-          colorHex: hex,
-          label: WOOD_SPECIES[guessSpecies(hex)].name + (parsed.detectedColors.length > 1 ? ` ${i + 1}` : ''),
-          species: guessSpecies(hex),
-        }))
-      );
-      setSettings(prev => {
-        const aspect = parsed.naturalHeight / parsed.naturalWidth;
-        const maxWForBoard = Math.min(prev.boardWidthInches, prev.boardHeightInches / aspect);
-        const designW = Math.min(prev.designWidthInches, maxWForBoard);
-        const designH = designW * aspect;
-        return {
-          ...prev,
-          designWidthInches: designW,
-          designOffsetXInches: Math.max(0, (prev.boardWidthInches  - designW) / 2),
-          designOffsetYInches: Math.max(0, (prev.boardHeightInches - designH) / 2),
-        };
-      });
+      const wasEmpty = designs.length === 0;
+      if (wasEmpty) {
+        setCompositeUrls(new Map());
+        setHasEverAnalyzed(false);
+        setCurrentStep(1);
+        setMaxReachedStep(1);
+        setVbitTouched(false);
+        setSettings(prev => {
+          const aspect = parsed.naturalHeight / parsed.naturalWidth;
+          const maxWForBoard = Math.min(prev.boardWidthInches, prev.boardHeightInches / aspect);
+          const designW = Math.min(prev.designWidthInches, maxWForBoard);
+          const designH = designW * aspect;
+          return {
+            ...prev,
+            designWidthInches: designW,
+            designOffsetXInches: Math.max(0, (prev.boardWidthInches  - designW) / 2),
+            designOffsetYInches: Math.max(0, (prev.boardHeightInches - designH) / 2),
+          };
+        });
+      }
+      appendDesign(parsed);
       setStatus('idle');
     } catch (e) {
       setErrorMsg((e as Error).message);
       setStatus('error');
     }
-  }, []);
+  }, [designs.length, appendDesign]);
 
-  // Trigger a download of the entire session (design + settings + history
-  // + stepper state) as a JSON file. Recipient can drop it into the same
-  // FileUpload to restore exactly this state.
+  /** Remove a design from the list. If the active one is removed, fall back to the first remaining. */
+  const handleRemoveDesign = useCallback((id: string) => {
+    setDesigns(prev => prev.filter(d => d.id !== id));
+    setActiveDesignId(prev => {
+      if (prev !== id) return prev;
+      const remaining = designs.filter(d => d.id !== id);
+      return remaining[0]?.id ?? null;
+    });
+  }, [designs]);
+
+  /** Save the entire session — all designs + settings — as a JSON file. */
   const handleSaveSession = useCallback(() => {
-    if (!originalVector) return;
+    if (designs.length === 0) return;
     saveSessionToFile({
-      originalVector,
-      history,
-      historyIndex,
+      designs,
+      activeDesignId,
       settings,
-      woodConfigs,
       backgroundSpecies,
       currentStep,
       maxReachedStep,
@@ -286,52 +396,58 @@ export default function Home() {
       hasEverAnalyzed,
     });
   }, [
-    originalVector, history, historyIndex, settings, woodConfigs,
-    backgroundSpecies, currentStep, maxReachedStep, vbitTouched, hasEverAnalyzed,
+    designs, activeDesignId, settings, backgroundSpecies,
+    currentStep, maxReachedStep, vbitTouched, hasEverAnalyzed,
   ]);
 
-  // Push a new snapshot onto history.
+  /** Push a new snapshot onto the active design's history. */
   const pushSnapshot = useCallback((layers: Layer[], label: string) => {
-    setHistory(prev => {
-      const truncated = prev.slice(0, historyIndex + 1);
-      return [...truncated, { layers, label }];
+    updateActiveDesign(d => {
+      const truncated = d.history.slice(0, d.historyIndex + 1);
+      return { ...d, history: [...truncated, { layers, label }], historyIndex: d.historyIndex + 1 };
     });
-    setHistoryIndex(idx => idx + 1);
-  }, [historyIndex]);
+  }, [updateActiveDesign]);
 
-  const canUndo = historyIndex > 0;
-  const canRedo = historyIndex < history.length - 1;
+  const canUndo = activeDesign ? activeDesign.historyIndex > 0 : false;
+  const canRedo = activeDesign ? activeDesign.historyIndex < activeDesign.history.length - 1 : false;
 
-  const handleUndo = useCallback(() => { if (canUndo) setHistoryIndex(historyIndex - 1); }, [canUndo, historyIndex]);
-  const handleRedo = useCallback(() => { if (canRedo) setHistoryIndex(historyIndex + 1); }, [canRedo, historyIndex]);
+  const handleUndo = useCallback(() => {
+    if (!canUndo) return;
+    updateActiveDesign(d => ({ ...d, historyIndex: d.historyIndex - 1 }));
+  }, [canUndo, updateActiveDesign]);
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) return;
+    updateActiveDesign(d => ({ ...d, historyIndex: d.historyIndex + 1 }));
+  }, [canRedo, updateActiveDesign]);
 
   const handleResetAll = useCallback(() => {
-    if (!originalVector) return;
-    pushSnapshot(originalVector.layers, 'Reset all to original');
-  }, [originalVector, pushSnapshot]);
+    if (!activeDesign) return;
+    pushSnapshot(activeDesign.originalVector.layers, 'Reset all to original');
+  }, [activeDesign, pushSnapshot]);
 
   const handleResetLayer = useCallback((colorHex: string) => {
-    if (!originalVector || !vector) return;
-    const orig = originalVector.layers.find(l => l.colorHex === colorHex);
+    if (!activeDesign || !vector) return;
+    const orig = activeDesign.originalVector.layers.find(l => l.colorHex === colorHex);
     if (!orig) return;
     const newLayers = vector.layers.map(l => l.colorHex === colorHex ? orig : l);
-    const label = woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
+    const label = activeDesign.woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
     pushSnapshot(newLayers, `Reset ${label}`);
-  }, [originalVector, vector, woodConfigs, pushSnapshot]);
+  }, [activeDesign, vector, pushSnapshot]);
 
   const handleExtendForRegistration = useCallback(async (colorHex: string) => {
-    if (!vector) return;
+    if (!vector || !activeDesign) return;
     setBusyModification(true);
     setErrorMsg('');
     try {
-      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
       const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
       const res = await extendForRegistration(vector, colorHex, settings.designWidthInches, colorOrder, canvasWidth);
       if (res.addedPixelCount === 0) {
         setErrorMsg('No alignment risk regions found to extend on this layer.');
         setStatus('error');
       } else {
-        const label = woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
+        const label = activeDesign.woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
         pushSnapshot(res.layers, `Extend ${label} for registration (+${res.addedAreaSqInches.toFixed(3)} in²)`);
       }
     } catch (e) {
@@ -340,21 +456,21 @@ export default function Home() {
     } finally {
       setBusyModification(false);
     }
-  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
 
   const handleFillEnclosedHoles = useCallback(async (colorHex: string) => {
-    if (!vector) return;
+    if (!vector || !activeDesign) return;
     setBusyModification(true);
     setErrorMsg('');
     try {
-      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
       const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
       const res = await fillEnclosedHoles(vector, colorHex, settings.designWidthInches, colorOrder, canvasWidth);
       if (res.filledHoleCount === 0) {
         setErrorMsg('No fillable enclosed holes found on this layer.');
         setStatus('error');
       } else {
-        const label = woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
+        const label = activeDesign.woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
         pushSnapshot(
           res.layers,
           `Fill ${res.filledHoleCount} hole${res.filledHoleCount !== 1 ? 's' : ''} in ${label} (+${res.filledAreaSqIn.toFixed(3)} in²)`,
@@ -366,18 +482,14 @@ export default function Home() {
     } finally {
       setBusyModification(false);
     }
-  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
 
-  // Apply extend-for-registration to every eligible layer in a single
-  // undoable snapshot. Threads the per-step result through a working layer
-  // array so each call sees the previous one's output, instead of relying
-  // on React state which is async.
   const handleExtendAll = useCallback(async (colorHexes: string[]) => {
-    if (!vector || colorHexes.length === 0) return;
+    if (!vector || !activeDesign || colorHexes.length === 0) return;
     setBusyModification(true);
     setErrorMsg('');
     try {
-      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
       const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
       let workingLayers = vector.layers;
       let totalAdded = 0;
@@ -414,14 +526,14 @@ export default function Home() {
     } finally {
       setBusyModification(false);
     }
-  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
 
   const handleFillAll = useCallback(async (colorHexes: string[]) => {
-    if (!vector || colorHexes.length === 0) return;
+    if (!vector || !activeDesign || colorHexes.length === 0) return;
     setBusyModification(true);
     setErrorMsg('');
     try {
-      const colorOrder = woodConfigs.map(wc => wc.colorHex);
+      const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
       const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
       let workingLayers = vector.layers;
       let totalFilled = 0;
@@ -460,39 +572,52 @@ export default function Home() {
     } finally {
       setBusyModification(false);
     }
-  }, [vector, woodConfigs, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
 
   const handleExportSvg = useCallback(() => {
     if (vector) downloadSvg(vector);
   }, [vector]);
 
-  // Returns the new result so callers (like Step-1 Next) can chain on success.
-  // Coalesces re-runs: if an analysis is already in flight, returns null
-  // immediately so a rapid double-click doesn't kick off two parallel runs
-  // (the second of which would silently lose its result, since both runs
-  // capture the same `snapshotAtStart` and the first commit replaces the
-  // snapshot reference the second is looking for).
-  const handleAnalyze = useCallback(async (): Promise<AnalysisResult | null> => {
-    if (!vector) return null;
+  /**
+   * Run DFM analysis on a specific design (not necessarily the active
+   * one). Used by `handleStep1Next` to analyze every uploaded design
+   * before advancing to Step 2. Each design is analyzed with its OWN
+   * placement (designWidth + offsets) overlayed onto the session-
+   * shared `settings`.
+   */
+  const handleAnalyzeFor = useCallback(async (
+    design: ExpertDesign | null,
+  ): Promise<AnalysisResult | null> => {
+    if (!design) return null;
     if (status === 'analyzing') return null;
-    if (settings.designWidthInches <= 0 || settings.inlayDepthInches <= 0) {
+    if (design.placement.designWidthInches <= 0 || settings.inlayDepthInches <= 0) {
       setErrorMsg('Design width and inlay depth must be greater than zero.');
       setStatus('error');
       return null;
     }
     setStatus('analyzing');
     setErrorMsg('');
-    const colorOrder = woodConfigs.map(wc => wc.colorHex);
+    const designVector = vectorForDesign(design);
+    const effSettings: DFMSettings = {
+      ...settings,
+      designWidthInches:    design.placement.designWidthInches,
+      designOffsetXInches:  design.placement.offsetXInches,
+      designOffsetYInches:  design.placement.offsetYInches,
+    };
+    const colorOrder = design.woodConfigs.map(wc => wc.colorHex);
     const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
-    const snapshotAtStart = history[historyIndex];
+    const designIdAtStart = design.id;
+    const snapshotIndexAtStart = design.historyIndex;
     try {
-      const r = await runDfmAnalysis(vector, settings, colorOrder, canvasWidth);
-      setHistory(prev => prev.map(s => (s === snapshotAtStart ? { ...s, result: r } : s)));
+      const r = await runDfmAnalysis(designVector, effSettings, colorOrder, canvasWidth);
+      setDesigns(prev => prev.map(d => {
+        if (d.id !== designIdAtStart) return d;
+        return {
+          ...d,
+          history: d.history.map((s, i) => i === snapshotIndexAtStart ? { ...s, result: r } : s),
+        };
+      }));
       setHasEverAnalyzed(true);
-      // Note: overlayMode is owned by `goToStep` (navigation) and the
-      // session-load branch, not by handleAnalyze. Forcing 'suggestions'
-      // here would clobber the user's chosen mode when they re-run on
-      // Step 3, or override the restored mode on session load.
       setStatus('done');
       return r;
     } catch (e) {
@@ -500,47 +625,56 @@ export default function Home() {
       setStatus('error');
       return null;
     }
-  }, [vector, settings, woodConfigs, history, historyIndex, status]);
+  }, [settings, status]);
 
-  // Watch for the deferred-analysis flag set by the session-load branch of
-  // handleFile. Once `vector` and `woodConfigs` have settled into the
-  // restored state, kick off analysis so the user lands on a populated
-  // step instead of a "re-run" banner. Guarded by a ref to fire exactly
-  // once per session load. Clears `sessionRestoring` (and thus the
-  // restoring overlay) when the analysis settles, success or error.
+  /** Convenience: analyze the currently-active design. */
+  const handleAnalyze = useCallback(
+    () => handleAnalyzeFor(activeDesign),
+    [activeDesign, handleAnalyzeFor],
+  );
+
+  // Deferred analysis after a session load.
   useEffect(() => {
     if (!pendingSessionAnalysis.current) return;
-    if (!vector || woodConfigs.length === 0) return;
+    if (!vector || !activeDesign || activeDesign.woodConfigs.length === 0) return;
     pendingSessionAnalysis.current = false;
     handleAnalyze().finally(() => setSessionRestoring(false));
-  }, [vector, woodConfigs, handleAnalyze]);
+  }, [vector, activeDesign, handleAnalyze]);
 
   const moveWood = useCallback((index: number, dir: -1 | 1) => {
-    setWoodConfigs(prev => {
-      const next = [...prev];
+    updateActiveDesign(d => {
+      const next = [...d.woodConfigs];
       const swap = index + dir;
-      if (swap < 0 || swap >= next.length) return prev;
+      if (swap < 0 || swap >= next.length) return d;
       [next[index], next[swap]] = [next[swap], next[index]];
-      return next;
+      // Color order is an analysis input — invalidate this design's cache.
+      return {
+        ...d,
+        woodConfigs: next,
+        history: d.history.map(snap => snap.result ? { ...snap, result: undefined } : snap),
+      };
     });
-  }, []);
+  }, [updateActiveDesign]);
 
   const updateWoodConfig = useCallback((colorHex: string, patch: Partial<WoodConfig>) => {
-    setWoodConfigs(prev => prev.map(wc => wc.colorHex === colorHex ? { ...wc, ...patch } : wc));
-  }, []);
+    updateActiveDesign(d => ({
+      ...d,
+      woodConfigs: d.woodConfigs.map(wc => wc.colorHex === colorHex ? { ...wc, ...patch } : wc),
+    }));
+  }, [updateActiveDesign]);
 
-  // Per-step validity. Steps gate on derived prerequisites — no extra state.
-  const step1Valid = vector !== null && woodConfigs.length > 0;
-  const step2Valid = step1Valid && result !== null;
+  // Per-step validity. A step is valid iff EVERY design satisfies its
+  // prerequisites — otherwise switching to a new design from a later
+  // step would leave the user on a step whose preconditions don't hold.
+  const everyDesignValid = (predicate: (d: ExpertDesign) => boolean): boolean =>
+    designs.length > 0 && designs.every(predicate);
+  const everyDesignAnalyzed = everyDesignValid(d => d.history[d.historyIndex]?.result != null);
+  const step1Valid = everyDesignValid(d => d.woodConfigs.length > 0);
+  const step2Valid = step1Valid && everyDesignAnalyzed;
   const step3Valid = step2Valid;
   const step4Valid = step3Valid;
   const validity: Record<StepNumber, boolean> = { 1: step1Valid, 2: step2Valid, 3: step3Valid, 4: step4Valid };
 
-  // Single navigation entry point used for forward (Next), backward (Back),
-  // and direct stepper-bar clicks. Each step has a sensible default overlay
-  // mode that we apply on entry — without this, leaving Step 3 (which uses
-  // 'threshold') for Step 2 (which uses 'suggestions') would show the wrong
-  // overlay until the user toggled it manually.
   const goToStep = useCallback((step: StepNumber) => {
     setCurrentStep(step);
     setMaxReachedStep(prev => (step > prev ? step : prev));
@@ -548,16 +682,54 @@ export default function Home() {
     else if (step === 3) setOverlayMode('threshold');
   }, []);
 
-  // Step 1's "Next" doubles as Run Analysis. If a fresh result already exists
-  // we just advance. Otherwise we run analysis and advance on success.
+  // Step 1's "Next" doubles as Run Analysis for ALL designs (one at a time).
   const handleStep1Next = useCallback(async () => {
-    if (result) { goToStep(2); return; }
-    const r = await handleAnalyze();
-    if (r) goToStep(2);
-  }, [result, handleAnalyze, goToStep]);
+    const unanalyzed = designs.filter(d => d.history[d.historyIndex]?.result == null);
+    if (unanalyzed.length === 0) { goToStep(2); return; }
+    for (const d of unanalyzed) {
+      await handleAnalyzeFor(d);
+    }
+    goToStep(2);
+  }, [designs, handleAnalyzeFor, goToStep]);
 
-  const onSettingsChange = useCallback((s: DFMSettings) => setSettings(s), []);
+  /**
+   * Settings update path. Keeps `settings.designOffsetX/Y/designWidthInches`
+   * in sync with the active design's `placement` — so two designs can be
+   * scaled and positioned independently while the existing components
+   * (CompositeView, Step1Design inputs) keep reading from settings as
+   * before. The active design is the source of truth on save and analysis.
+   *
+   * `designWidthInches` is an analysis input, so a width change also
+   * invalidates the active design's cache. Pure offset changes don't
+   * affect analysis (only the composite-view placement).
+   */
+  const onSettingsChange = useCallback((s: DFMSettings) => {
+    setSettings(s);
+    if (!activeDesign) return;
+    const offsetXChanged = s.designOffsetXInches !== activeDesign.placement.offsetXInches;
+    const offsetYChanged = s.designOffsetYInches !== activeDesign.placement.offsetYInches;
+    const widthChanged   = s.designWidthInches   !== activeDesign.placement.designWidthInches;
+    if (!offsetXChanged && !offsetYChanged && !widthChanged) return;
+    updateActiveDesign(d => {
+      const next = {
+        ...d,
+        placement: {
+          offsetXInches: s.designOffsetXInches,
+          offsetYInches: s.designOffsetYInches,
+          designWidthInches: s.designWidthInches,
+        },
+      };
+      // Width drives pixelsPerInch, so its change invalidates the cache.
+      if (widthChanged) {
+        next.history = d.history.map(snap => snap.result ? { ...snap, result: undefined } : snap);
+      }
+      return next;
+    });
+  }, [activeDesign, updateActiveDesign]);
 
+  /** Commit a drag/resize from CompositeView. Updates BOTH the active
+   *  design's placement and settings (so inputs reflect immediately).
+   *  A width change also invalidates the active design's cache. */
   const onCommitPlacement = useCallback((offsetX: number, offsetY: number, designWidth: number) => {
     setSettings(prev => ({
       ...prev,
@@ -565,10 +737,44 @@ export default function Home() {
       designOffsetYInches: offsetY,
       designWidthInches: designWidth,
     }));
-  }, []);
+    updateActiveDesign(d => {
+      const widthChanged = designWidth !== d.placement.designWidthInches;
+      const next = {
+        ...d,
+        placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches: designWidth },
+      };
+      if (widthChanged) {
+        next.history = d.history.map(snap => snap.result ? { ...snap, result: undefined } : snap);
+      }
+      return next;
+    });
+  }, [updateActiveDesign]);
 
-  const step1NextLabel = !result ? 'Run analysis →' : 'Next →';
-  const originalLayers = originalVector?.layers ?? [];
+  /** When the active design changes (selection swap), pull its
+   *  placement into settings so CompositeView and Step1 inputs render
+   *  the new design's values. The reverse direction (settings → design)
+   *  is handled by `onSettingsChange` and `onCommitPlacement`. */
+  useEffect(() => {
+    if (!activeDesign) return;
+    setSettings(prev => {
+      if (prev.designWidthInches    === activeDesign.placement.designWidthInches
+       && prev.designOffsetXInches  === activeDesign.placement.offsetXInches
+       && prev.designOffsetYInches  === activeDesign.placement.offsetYInches) return prev;
+      return {
+        ...prev,
+        designWidthInches:    activeDesign.placement.designWidthInches,
+        designOffsetXInches:  activeDesign.placement.offsetXInches,
+        designOffsetYInches:  activeDesign.placement.offsetYInches,
+      };
+    });
+    // Intentionally only on ID change — re-running on every activeDesign
+    // mutation would loop with the settings-write path above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDesignId]);
+
+  const step1NextLabel = !everyDesignAnalyzed ? 'Run analysis →' : 'Next →';
+  const originalLayers = activeDesign?.originalVector.layers ?? [];
+  const woodConfigs = activeDesign?.woodConfigs ?? [];
 
   return (
     <div className="flex flex-col h-screen">
@@ -582,12 +788,12 @@ export default function Home() {
         <h1 className="font-semibold text-slate-100 text-lg">Inlay DFM Analyzer</h1>
         <span className="text-slate-500 text-sm hidden md:block">— VCarve design feasibility for CNC inlays</span>
 
-        {vector && history.length > 0 && (
+        {activeDesign && (
           <div className="ml-auto flex items-center gap-2">
             <button
               onClick={handleUndo}
               disabled={!canUndo || busyModification}
-              title={canUndo ? `Undo: ${history[historyIndex].label}` : 'Nothing to undo'}
+              title={canUndo ? `Undo: ${activeDesign.history[activeDesign.historyIndex].label}` : 'Nothing to undo'}
               className="px-2 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               ← Undo
@@ -595,17 +801,17 @@ export default function Home() {
             <button
               onClick={handleRedo}
               disabled={!canRedo || busyModification}
-              title={canRedo ? `Redo: ${history[historyIndex + 1]?.label}` : 'Nothing to redo'}
+              title={canRedo ? `Redo: ${activeDesign.history[activeDesign.historyIndex + 1]?.label}` : 'Nothing to redo'}
               className="px-2 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               Redo →
             </button>
-            <span className="text-xs text-slate-500 max-w-[14rem] truncate hidden lg:inline" title={history[historyIndex]?.label}>
-              {historyIndex + 1}/{history.length}: {history[historyIndex]?.label}
+            <span className="text-xs text-slate-500 max-w-[14rem] truncate hidden lg:inline" title={activeDesign.history[activeDesign.historyIndex]?.label}>
+              {activeDesign.historyIndex + 1}/{activeDesign.history.length}: {activeDesign.history[activeDesign.historyIndex]?.label}
             </span>
             <button
               onClick={handleResetAll}
-              disabled={(historyIndex === 0 && history.length === 1) || busyModification}
+              disabled={(activeDesign.historyIndex === 0 && activeDesign.history.length === 1) || busyModification}
               className="px-2 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               Reset all
@@ -618,7 +824,7 @@ export default function Home() {
             </button>
             <button
               onClick={handleSaveSession}
-              title="Download a .inlay-session.json that captures the design, settings, and history. Drop it back into the file picker to restore."
+              title="Download a .inlay-session.json that captures every design, settings, and history. Drop it back into the file picker to restore."
               className="px-3 py-1 rounded text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-slate-100 transition-colors"
             >
               Save session
@@ -635,6 +841,17 @@ export default function Home() {
       />
 
       <main className="flex-1 overflow-hidden p-6 min-h-0">
+        {/* Design selector — visible whenever there are any designs. */}
+        {designs.length > 0 && activeDesignId && (
+          <DesignSelector
+            designs={designs.map(d => ({ id: d.id, fileName: d.originalVector.fileName }))}
+            activeDesignId={activeDesignId}
+            onSelect={setActiveDesignId}
+            onAdd={handleFile}
+            onRemove={handleRemoveDesign}
+          />
+        )}
+
         {currentStep === 1 && (
           <Step1Design
             vector={vector}
@@ -650,6 +867,7 @@ export default function Home() {
             onBackgroundSpeciesChange={setBackgroundSpecies}
             compositeDataUrl={compositeDataUrl}
             compositeGenerating={compositeGenerating}
+            otherDesigns={otherDesigns}
             onCommitPlacement={onCommitPlacement}
             canAdvance={step1Valid && status !== 'analyzing'}
             nextLabel={status === 'analyzing' ? 'Analyzing…' : step1NextLabel}

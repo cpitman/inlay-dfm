@@ -7,7 +7,7 @@ import DesignSettingsPanel from '../DesignSettingsPanel';
 import AdvancedSettingsPanel from '../AdvancedSettingsPanel';
 import PlugFitPanel from '../PlugFitPanel';
 import WoodList from '../WoodList';
-import CompositeView from '../CompositeView';
+import CompositeView, { type OtherDesign } from '../CompositeView';
 import { StepNav } from '../StepperBar';
 
 interface Step1DesignProps {
@@ -28,6 +28,8 @@ interface Step1DesignProps {
 
   compositeDataUrl: string | null;
   compositeGenerating: boolean;
+  /** Other designs on the same board, drawn read-only at their placements. */
+  otherDesigns?: OtherDesign[];
   onCommitPlacement: (offsetX: number, offsetY: number, designWidth: number) => void;
 
   // Step navigation
@@ -52,7 +54,7 @@ export default function Step1Design({
   settings, onSettingsChange,
   woodConfigs, onUpdateWoodConfig, onMoveWood,
   backgroundSpecies, onBackgroundSpeciesChange,
-  compositeDataUrl, compositeGenerating, onCommitPlacement,
+  compositeDataUrl, compositeGenerating, otherDesigns, onCommitPlacement,
   canAdvance, nextLabel, onNext,
 }: Step1DesignProps) {
   return (
@@ -153,6 +155,7 @@ export default function Step1Design({
                 designOffsetXInches={settings.designOffsetXInches}
                 designOffsetYInches={settings.designOffsetYInches}
                 onCommitPlacement={onCommitPlacement}
+                otherDesigns={otherDesigns}
               />
             </div>
           ) : (

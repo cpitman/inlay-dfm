@@ -1,5 +1,4 @@
 import type { BoardWoodKey, BoardConfig } from '@/types/board';
-import type { WoodConfig } from '@/types';
 
 /**
  * Manufacturing price tables for the guided "Get a quote" experience.
@@ -68,22 +67,36 @@ export const INLAY_PACKING_THRESHOLD = 0.70;
 
 export interface QuoteInput {
   boardConfig: BoardConfig;
-  woodConfigs: WoodConfig[];
   /**
-   * Total machining minutes from the optimizer (already includes tool-
-   * change overhead at the chosen strategy). Per-feature premiums are
-   * added on top by `computeQuote`.
+   * Sum of per-design cutting time (machining minutes) across every
+   * design on the board. Excludes tool-change overhead — that's
+   * tracked separately so the caller can deduplicate bits across
+   * designs.
    */
-  totalMachineMinutes: number;
+  totalCuttingMinutes: number;
   /**
-   * Optional per-inlay plug-stock area in square inches (aligned with
-   * `woodConfigs`). When provided AND the value is at-or-below
-   * `INLAY_PACKING_THRESHOLD * INLAY_SHEET_AREA_SQ_IN`, the inlay's
-   * material cost is scaled to the fraction of the sheet actually used.
-   * Larger usage falls back to the full sheet price. When the array is
-   * omitted (or an entry is undefined), the full sheet price is used.
+   * Tool-change overhead minutes after deduplicating clearance bits
+   * and v-bit angles across all designs. See
+   * `jointToolChangeOverhead` in `machiningTime.ts`.
    */
-  plugStockUsageSqIn?: (number | undefined)[];
+  jointToolChangeMinutes: number;
+  /**
+   * Distinct wood species across every design's `woodConfigs`. Drives
+   * both the per-inlay machining premium and the per-inlay labor
+   * minutes — both are charged once per species, not once per color
+   * slot. Two slots both mapped to walnut count once.
+   */
+  uniqueSpeciesCount: number;
+  /**
+   * Per-species plug-stock OBB area, in square inches, summed across
+   * every design + color slot that uses that species. The 70%-of-
+   * sheet packing threshold is applied to this **sum** per species:
+   *   - Sum > 70% → charged the full per-species sheet price.
+   *   - Sum ≤ 70% → charged a fraction of the sheet price.
+   * Species absent from the map contribute $0 (e.g. when the optimizer
+   * couldn't measure plug stock for that species).
+   */
+  plugStockUsageBySpecies: Map<string, number>;
 }
 
 export interface QuoteBreakdown {
@@ -115,30 +128,40 @@ export interface QuoteResult {
  *   total = materials + machine + labor + add-ons
  *   range = round( total × {0.90, 1.25} / 10 ) × 10
  *
- * `totalMachineMinutes` should already include tool-change overhead at
- * the chosen clearance strategy (see `findFastestFeasibleCell`'s
- * `totalTimeMinutes`). Per-feature minute premiums (per-inlay, juice
- * groove, handles) are added here.
+ * Inputs are aggregated across all designs on the board. The caller
+ * (typically the quote optimizer) sums per-design cutting time,
+ * computes joint tool-change overhead via `jointToolChangeOverhead`,
+ * and groups plug-stock usage by species. `computeQuote` itself only
+ * applies the per-feature premiums and the per-species threshold to
+ * those aggregates.
  */
 export function computeQuote(input: QuoteInput): QuoteResult {
-  const { boardConfig, woodConfigs, totalMachineMinutes, plugStockUsageSqIn } = input;
+  const {
+    boardConfig,
+    totalCuttingMinutes,
+    jointToolChangeMinutes,
+    uniqueSpeciesCount,
+    plugStockUsageBySpecies,
+  } = input;
 
-  // Materials. Inlay cost is per-layer with optional packing-aware
-  // scaling: when a layer's plug stock would consume ≤ 70% of a 12×18"
-  // sheet, the customer is charged the actual fraction (since the
-  // remainder is reusable for other orders); above 70%, full price.
-  const baseDollars  = BASE_BOARD_PRICE[boardConfig.wood];
-  const inlayDollars = woodConfigs.reduce((s, wc, i) => {
-    const fullPrice = INLAY_WOOD_PRICE[wc.species] ?? 0;
-    const usage = plugStockUsageSqIn?.[i];
-    if (usage === undefined) return s + fullPrice;
+  // Materials. Per-species inlay cost with packing-aware scaling: a
+  // species' plug-stock OBB area is summed across every slot in every
+  // design that uses it. If the sum is ≤ 70% of a 12×18" sheet, the
+  // customer is charged the fraction (the remainder is reusable for
+  // other orders). Above 70% → full sheet price.
+  const baseDollars = BASE_BOARD_PRICE[boardConfig.wood];
+  let inlayDollars = 0;
+  for (const [species, usage] of plugStockUsageBySpecies) {
+    const fullPrice = INLAY_WOOD_PRICE[species] ?? 0;
     const utilization = usage / INLAY_SHEET_AREA_SQ_IN;
-    if (utilization > INLAY_PACKING_THRESHOLD) return s + fullPrice;
-    return s + utilization * fullPrice;
-  }, 0);
+    if (utilization > INLAY_PACKING_THRESHOLD) inlayDollars += fullPrice;
+    else                                       inlayDollars += utilization * fullPrice;
+  }
   const materialsDollars = baseDollars + inlayDollars;
 
-  // Machine time premiums.
+  // Machine time premiums. Per-inlay charge is per UNIQUE SPECIES,
+  // not per color slot — two slots mapped to walnut share one bit
+  // load, one alignment pass, one stock setup.
   const grooveSides =
     boardConfig.juiceGroove === 'both' ? 2 :
     boardConfig.juiceGroove === 'none' ? 0 : 1;
@@ -146,15 +169,18 @@ export function computeQuote(input: QuoteInput): QuoteResult {
     boardConfig.handles === 'inset'     ? MACHINE_MIN_INSET_HANDLES :
     boardConfig.handles === 'underside' ? MACHINE_MIN_UNDERSIDE_HANDLES :
     0;
-  const machineMinutes = totalMachineMinutes
-    + MACHINE_MIN_PER_INLAY        * woodConfigs.length
+  const machineMinutes = totalCuttingMinutes
+    + jointToolChangeMinutes
+    + MACHINE_MIN_PER_INLAY        * uniqueSpeciesCount
     + MACHINE_MIN_PER_GROOVE_SIDE  * grooveSides
     + handlesMinutes;
   const machineDollars = (machineMinutes / 60) * MACHINE_HOURLY;
 
-  // Labor: setup + per-inlay + finishing.
+  // Labor: setup + per-species + finishing. Same per-species rule:
+  // multiple slots of the same species can be cut, glued, and
+  // sanded in one batch — one labor block.
   const laborMinutes = LABOR_MIN_SETUP
-    + LABOR_MIN_PER_INLAY * woodConfigs.length
+    + LABOR_MIN_PER_INLAY * uniqueSpeciesCount
     + LABOR_MIN_FINISHING;
   const laborDollars = (laborMinutes / 60) * LABOR_HOURLY;
 

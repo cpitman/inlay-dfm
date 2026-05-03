@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { WoodConfig } from '@/types';
 import type { BoardConfig } from '@/types/board';
 import type { QuoteResult } from '@/lib/pricing';
+import type { MultiDesignOptimizationResult } from '@/lib/quoteOptimizer';
 import { WOOD_SPECIES } from '@/lib/woodSpecies';
 
 interface RequestManufacturingDialogProps {
@@ -11,7 +11,10 @@ interface RequestManufacturingDialogProps {
   onClose: () => void;
   /** Read-only order details summarized in the dialog body. */
   boardConfig: BoardConfig;
-  woodConfigs: WoodConfig[];
+  /** Per-design optimizer output + aggregated cost inputs. The dialog
+   *  surfaces a per-design summary so the customer can confirm what
+   *  they're ordering. */
+  optimization: MultiDesignOptimizationResult;
   quote: QuoteResult;
 }
 
@@ -23,7 +26,7 @@ interface RequestManufacturingDialogProps {
  * to-end successfully we'll wire it up to a real submission endpoint.
  */
 export default function RequestManufacturingDialog({
-  open, onClose, boardConfig, woodConfigs, quote,
+  open, onClose, boardConfig, optimization, quote,
 }: RequestManufacturingDialogProps) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -83,7 +86,7 @@ export default function RequestManufacturingDialog({
             </header>
 
             <form onSubmit={handleSubmit} className="p-5 space-y-4">
-              <OrderSummary boardConfig={boardConfig} woodConfigs={woodConfigs} quote={quote} />
+              <OrderSummary boardConfig={boardConfig} optimization={optimization} quote={quote} />
 
               <div>
                 <label htmlFor="rm-name" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
@@ -152,10 +155,10 @@ export default function RequestManufacturingDialog({
 }
 
 function OrderSummary({
-  boardConfig, woodConfigs, quote,
+  boardConfig, optimization, quote,
 }: {
   boardConfig: BoardConfig;
-  woodConfigs: WoodConfig[];
+  optimization: MultiDesignOptimizationResult;
   quote: QuoteResult;
 }) {
   const grooveLabel = boardConfig.juiceGroove === 'none' ? 'None' :
@@ -166,6 +169,13 @@ function OrderSummary({
     boardConfig.handles === 'inset' ? 'Inset (sides)' :
     'Underside pocket';
   const sidedLabel = boardConfig.sided === 'feet' ? 'Feet on bottom' : 'Dual-sided';
+
+  // Union of distinct species across all designs (matches the
+  // pricing model — labor + machining are charged per-species).
+  const speciesNames = [...new Set(
+    optimization.perDesign.flatMap(d => d.woodConfigs.map(wc => WOOD_SPECIES[wc.species].name))
+  )];
+
   return (
     <section className="bg-slate-900/60 border border-slate-700 rounded-md p-3 space-y-2">
       <div className="flex items-baseline justify-between">
@@ -180,8 +190,19 @@ function OrderSummary({
         <SummaryRow k="Edge"  v={capitalize(boardConfig.edge)} />
         <SummaryRow k="Juice groove" v={grooveLabel} />
         <SummaryRow k="Handles" v={handlesLabel} />
-        <SummaryRow k="Inlays" v={woodConfigs.map(wc => WOOD_SPECIES[wc.species].name).join(', ')} />
+        <SummaryRow k="Inlay woods" v={speciesNames.join(', ')} />
+        <SummaryRow k="Designs" v={`${optimization.perDesign.length}`} />
       </dl>
+      {optimization.perDesign.length > 1 && (
+        <ul className="text-[11px] text-slate-400 mt-2 space-y-0.5 pl-1">
+          {optimization.perDesign.map(d => (
+            <li key={d.designId} className="truncate">
+              · {d.vector.fileName}
+              <span className="text-slate-500"> — {d.placement.designWidthInches.toFixed(2)}" wide</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

@@ -1,31 +1,31 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VectorData, WoodConfig } from '@/types';
+import type { Design, Placement, WoodConfig } from '@/types';
 import type { BoardConfig } from '@/types/board';
 import { hasTopGroove, TOP_GROOVE_INLAY_MARGIN_INCHES } from '@/types/board';
 import { renderBoardWithFeatures } from '@/lib/boardFeatures';
+import { boxesOverlap, type AABB } from '@/lib/aabb';
 import FileUpload from '../FileUpload';
 import InlayColorPicker from './InlayColorPicker';
 import { StepNav } from '../StepperBar';
 
-export interface Placement {
-  offsetXInches: number;
-  offsetYInches: number;
-  designWidthInches: number;
-}
+// Re-export so existing imports of `Placement` from this module keep working.
+export type { Placement };
 
 interface Step2ArtPlacementProps {
   boardConfig: BoardConfig;
-  vector: VectorData | null;
+  designs: Design[];
+  /** Per-design composite PNG dataURL, keyed by design id. */
+  compositeUrls: Map<string, string>;
   parsing: boolean;
   errorMsg: string;
-  onFile: (file: File) => void;
-  woodConfigs: WoodConfig[];
-  onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
-  placement: Placement;
-  onPlacementChange: (next: Placement) => void;
-  designCompositeUrl: string | null;
+  /** True when at least one pair of designs overlaps. Disables Next + shows banner. */
+  overlapping: boolean;
+  onAddDesign: (file: File) => void;
+  onRemoveDesign: (id: string) => void;
+  onUpdateDesignPlacement: (id: string, next: Placement) => void;
+  onUpdateDesignWoodConfig: (designId: string, colorHex: string, patch: Partial<WoodConfig>) => void;
   onBack: () => void;
   onNext: () => void;
   canAdvance: boolean;
@@ -33,6 +33,7 @@ interface Step2ArtPlacementProps {
 
 const MIN_DESIGN_WIDTH_INCHES = 0.25;
 type DragMode = 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
+
 interface DragStart {
   mouseX: number;
   mouseY: number;
@@ -40,23 +41,29 @@ interface DragStart {
   offsetY: number;
   designWidth: number;
   mode: DragMode;
+  designId: string;
+}
+
+/** AABB derived from a placement + design aspect. */
+function aabbFromPlacement(p: Placement, aspect: number): AABB {
+  return {
+    x: p.offsetXInches,
+    y: p.offsetYInches,
+    w: p.designWidthInches,
+    h: p.designWidthInches * aspect,
+  };
 }
 
 /**
- * Step 2 of the guided quote experience. The user uploads their art and
- * places it on the board (drag, resize, auto-center) and assigns one of
- * the priced inlay species to each detected color.
- *
- * On upload the design is auto-fit to the largest size that lands inside
- * the placeable area (full board, minus a 1" margin around the perimeter
- * if a top juice groove is selected) and centered. The placeable area is
- * also enforced as a clamp during drag/resize.
+ * Step 2 of the guided quote experience. The user uploads one or more
+ * designs and places each on the board. Each design has its own
+ * color→wood mapping. Designs cannot AABB-overlap each other on the
+ * board; touching is allowed.
  */
 export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
   const {
-    boardConfig, vector, parsing, errorMsg, onFile,
-    woodConfigs, onUpdateWoodConfig,
-    placement, onPlacementChange, designCompositeUrl,
+    boardConfig, designs, compositeUrls, parsing, errorMsg, overlapping,
+    onAddDesign, onRemoveDesign, onUpdateDesignPlacement, onUpdateDesignWoodConfig,
     onBack, onNext, canAdvance,
   } = props;
 
@@ -64,151 +71,17 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
   const placeableW = boardConfig.widthInches  - 2 * margin;
   const placeableH = boardConfig.heightInches - 2 * margin;
 
-  const aspect = vector ? vector.naturalHeight / vector.naturalWidth : 1;
-
-  // Effective placement: live drag overrides the committed placement so the
-  // visual updates 60Hz without re-running effects.
-  const [drag, setDrag] = useState<Placement | null>(null);
+  // Drag state — at most one design is dragged at a time.
+  const [drag, setDrag] = useState<{ designId: string; placement: Placement; overlapping: boolean } | null>(null);
   const dragStart = useRef<DragStart | null>(null);
-  const eff = drag ?? placement;
-  const designHeight = eff.designWidthInches * aspect;
-
-  // Fit-area clamp: design must sit inside the placeable rectangle (i.e.
-  // inside the margin band when a top juice groove is selected).
-  const clampPlacement = useCallback((next: Placement): Placement => {
-    const maxByX = placeableW;
-    const maxByY = placeableH / aspect;
-    const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxByX, maxByY);
-    const dw = Math.max(minW, Math.min(next.designWidthInches, maxByX, maxByY));
-    const dh = dw * aspect;
-    const ox = Math.max(margin, Math.min(next.offsetXInches, margin + placeableW - dw));
-    const oy = Math.max(margin, Math.min(next.offsetYInches, margin + placeableH - dh));
-    return { offsetXInches: ox, offsetYInches: oy, designWidthInches: dw };
-  }, [aspect, margin, placeableW, placeableH]);
-
-  // Re-clamp when the placeable area shrinks (e.g., user toggled a top
-  // groove on after placing the design).
-  useEffect(() => {
-    if (!vector) return;
-    const c = clampPlacement(placement);
-    if (c.offsetXInches !== placement.offsetXInches
-     || c.offsetYInches !== placement.offsetYInches
-     || c.designWidthInches !== placement.designWidthInches) {
-      onPlacementChange(c);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vector, margin, placeableW, placeableH]);
-
-  const handleMouseDown = useCallback((mode: DragMode) => (e: React.MouseEvent) => {
-    if (!vector) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragStart.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      offsetX: placement.offsetXInches,
-      offsetY: placement.offsetYInches,
-      designWidth: placement.designWidthInches,
-      mode,
-    };
-    setDrag({ ...placement });
-  }, [vector, placement]);
-
-  // Global mouse listeners while dragging — same pattern as CompositeView.
-  const containerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!drag) return;
-    const onMove = (e: MouseEvent) => {
-      const start = dragStart.current;
-      const container = containerRef.current;
-      if (!start || !container) return;
-      const rect = container.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return;
-      const dxInches = ((e.clientX - start.mouseX) / rect.width)  * boardConfig.widthInches;
-      const dyInches = ((e.clientY - start.mouseY) / rect.height) * boardConfig.heightInches;
-      const startH = start.designWidth * aspect;
-
-      let nextOff = { offsetX: start.offsetX, offsetY: start.offsetY, dw: start.designWidth };
-      switch (start.mode) {
-        case 'move':
-          nextOff.offsetX = start.offsetX + dxInches;
-          nextOff.offsetY = start.offsetY + dyInches;
-          break;
-        case 'resize-br':
-          nextOff.dw = start.designWidth + dxInches;
-          break;
-        case 'resize-bl': {
-          const fixedRight = start.offsetX + start.designWidth;
-          nextOff.dw = start.designWidth - dxInches;
-          nextOff.offsetX = fixedRight - nextOff.dw;
-          break;
-        }
-        case 'resize-tr': {
-          const fixedBottom = start.offsetY + startH;
-          nextOff.dw = start.designWidth + dxInches;
-          nextOff.offsetY = fixedBottom - nextOff.dw * aspect;
-          break;
-        }
-        case 'resize-tl': {
-          const fixedRight  = start.offsetX + start.designWidth;
-          const fixedBottom = start.offsetY + startH;
-          nextOff.dw = start.designWidth - dxInches;
-          nextOff.offsetX = fixedRight  - nextOff.dw;
-          nextOff.offsetY = fixedBottom - nextOff.dw * aspect;
-          break;
-        }
-      }
-      setDrag(clampPlacement({
-        offsetXInches: nextOff.offsetX,
-        offsetYInches: nextOff.offsetY,
-        designWidthInches: nextOff.dw,
-      }));
-    };
-    const onUp = () => {
-      const final = drag;
-      dragStart.current = null;
-      setDrag(null);
-      if (final) onPlacementChange(final);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup',   onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup',   onUp);
-    };
-  }, [drag, aspect, boardConfig.widthInches, boardConfig.heightInches, clampPlacement, onPlacementChange]);
-
-  // Auto-center actions.
-  const centerH = () => {
-    if (!vector) return;
-    const dh = placement.designWidthInches * aspect;
-    onPlacementChange(clampPlacement({
-      ...placement,
-      offsetYInches: margin + (placeableH - dh) / 2,
-    }));
-  };
-  const centerV = () => {
-    if (!vector) return;
-    onPlacementChange(clampPlacement({
-      ...placement,
-      offsetXInches: margin + (placeableW - placement.designWidthInches) / 2,
-    }));
-  };
-  const centerBoth = () => {
-    if (!vector) return;
-    const dh = placement.designWidthInches * aspect;
-    onPlacementChange(clampPlacement({
-      offsetXInches: margin + (placeableW - placement.designWidthInches) / 2,
-      offsetYInches: margin + (placeableH - dh) / 2,
-      designWidthInches: placement.designWidthInches,
-    }));
-  };
 
   // Render the board PNG locally so we can position the design overlay
   // in the same coordinate space.
   const [boardUrl, setBoardUrl] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [boardPx, setBoardPx] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
   useEffect(() => {
     let cancelled = false;
     renderBoardWithFeatures(boardConfig).then(url => {
@@ -216,6 +89,7 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     }).catch(() => { /* surfaced elsewhere */ });
     return () => { cancelled = true; };
   }, [boardConfig]);
+
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
@@ -235,62 +109,192 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     return () => ro.disconnect();
   }, [boardConfig.widthInches, boardConfig.heightInches]);
 
+  // Clamp a placement to the placeable rectangle (margin band) for a given aspect.
+  const clampToPlaceable = useCallback((next: Placement, aspect: number): Placement => {
+    const maxByX = placeableW;
+    const maxByY = placeableH / aspect;
+    const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxByX, maxByY);
+    const dw = Math.max(minW, Math.min(next.designWidthInches, maxByX, maxByY));
+    const dh = dw * aspect;
+    const ox = Math.max(margin, Math.min(next.offsetXInches, margin + placeableW - dw));
+    const oy = Math.max(margin, Math.min(next.offsetYInches, margin + placeableH - dh));
+    return { offsetXInches: ox, offsetYInches: oy, designWidthInches: dw };
+  }, [margin, placeableW, placeableH]);
+
+  // Re-clamp every design's placement when the placeable area changes
+  // (e.g., user toggled a top groove on after placing some designs).
+  useEffect(() => {
+    for (const d of designs) {
+      const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
+      const c = clampToPlaceable(d.placement, aspect);
+      if (c.offsetXInches !== d.placement.offsetXInches
+       || c.offsetYInches !== d.placement.offsetYInches
+       || c.designWidthInches !== d.placement.designWidthInches) {
+        onUpdateDesignPlacement(d.id, c);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [margin, placeableW, placeableH]);
+
+  // Begin a drag for the given design.
+  const handleMouseDown = useCallback(
+    (designId: string, mode: DragMode) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const d = designs.find(x => x.id === designId);
+      if (!d) return;
+      dragStart.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        offsetX: d.placement.offsetXInches,
+        offsetY: d.placement.offsetYInches,
+        designWidth: d.placement.designWidthInches,
+        mode,
+        designId,
+      };
+      setDrag({ designId, placement: { ...d.placement }, overlapping: false });
+    }, [designs]);
+
+  // Global mouse listeners while dragging — same pattern as before.
+  useEffect(() => {
+    if (!drag) return;
+    const dragged = designs.find(d => d.id === drag.designId);
+    if (!dragged) return;
+    const aspect = dragged.vector.naturalHeight / dragged.vector.naturalWidth;
+    const others = designs.filter(d => d.id !== drag.designId)
+      .map(d => aabbFromPlacement(d.placement, d.vector.naturalHeight / d.vector.naturalWidth));
+
+    const onMove = (e: MouseEvent) => {
+      const start = dragStart.current;
+      const container = containerRef.current;
+      if (!start || !container) return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const dxInches = ((e.clientX - start.mouseX) / rect.width)  * boardConfig.widthInches;
+      const dyInches = ((e.clientY - start.mouseY) / rect.height) * boardConfig.heightInches;
+      const startH = start.designWidth * aspect;
+
+      const next = { offsetX: start.offsetX, offsetY: start.offsetY, dw: start.designWidth };
+      switch (start.mode) {
+        case 'move':
+          next.offsetX = start.offsetX + dxInches;
+          next.offsetY = start.offsetY + dyInches;
+          break;
+        case 'resize-br':
+          next.dw = start.designWidth + dxInches;
+          break;
+        case 'resize-bl': {
+          const fixedRight = start.offsetX + start.designWidth;
+          next.dw = start.designWidth - dxInches;
+          next.offsetX = fixedRight - next.dw;
+          break;
+        }
+        case 'resize-tr': {
+          const fixedBottom = start.offsetY + startH;
+          next.dw = start.designWidth + dxInches;
+          next.offsetY = fixedBottom - next.dw * aspect;
+          break;
+        }
+        case 'resize-tl': {
+          const fixedRight  = start.offsetX + start.designWidth;
+          const fixedBottom = start.offsetY + startH;
+          next.dw = start.designWidth - dxInches;
+          next.offsetX = fixedRight  - next.dw;
+          next.offsetY = fixedBottom - next.dw * aspect;
+          break;
+        }
+      }
+      const clamped = clampToPlaceable({
+        offsetXInches: next.offsetX,
+        offsetYInches: next.offsetY,
+        designWidthInches: next.dw,
+      }, aspect);
+      const candidate = aabbFromPlacement(clamped, aspect);
+      const overlaps = others.some(o => boxesOverlap(candidate, o));
+      setDrag({ designId: drag.designId, placement: clamped, overlapping: overlaps });
+    };
+
+    const onUp = () => {
+      const final = drag;
+      dragStart.current = null;
+      setDrag(null);
+      if (final && !final.overlapping) {
+        onUpdateDesignPlacement(final.designId, final.placement);
+      }
+      // overlapping → snap back: do NOT call onUpdateDesignPlacement;
+      // the design returns to its committed (pre-drag) position.
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup',   onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup',   onUp);
+    };
+  }, [drag, designs, boardConfig.widthInches, boardConfig.heightInches, clampToPlaceable, onUpdateDesignPlacement]);
+
   const pctX = (inches: number) => `${(inches / boardConfig.widthInches)  * 100}%`;
   const pctY = (inches: number) => `${(inches / boardConfig.heightInches) * 100}%`;
+
+  // For each design, compute the live placement (drag override or committed).
+  const designsForRender = designs.map(d => {
+    if (drag && drag.designId === d.id) {
+      return { d, placement: drag.placement, isDragOverlapping: drag.overlapping };
+    }
+    return { d, placement: d.placement, isDragOverlapping: false };
+  });
 
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="grid grid-cols-1 lg:grid-cols-[20rem_1fr] gap-6 flex-1 min-h-0">
-        {/* Left column */}
-        <div className="space-y-5 overflow-y-auto pr-2 min-h-0">
+        {/* Left column: design list + add */}
+        <div className="space-y-4 overflow-y-auto pr-2 min-h-0">
           <section>
-            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              Your art
-            </h2>
-            <FileUpload onFile={onFile} fileName={vector?.fileName} />
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                Designs
+              </h2>
+              <span className="text-[11px] text-slate-500">{designs.length} placed</span>
+            </div>
+
+            {designs.length === 0 && (
+              <FileUpload onFile={onAddDesign} fileName={undefined} />
+            )}
+
+            <div className="space-y-3">
+              {designs.map(d => (
+                <DesignCard
+                  key={d.id}
+                  design={d}
+                  onRemove={() => onRemoveDesign(d.id)}
+                  onUpdateWoodConfig={(colorHex, patch) => onUpdateDesignWoodConfig(d.id, colorHex, patch)}
+                />
+              ))}
+            </div>
+
+            {designs.length > 0 && (
+              <div className="mt-3">
+                <FileUpload onFile={onAddDesign} fileName={undefined} />
+              </div>
+            )}
+
             {parsing && (
               <p className="text-xs text-slate-400 mt-2 text-center animate-pulse">Parsing file…</p>
             )}
             {errorMsg && (
               <p className="text-xs text-red-300 bg-red-900/30 border border-red-800 rounded p-2 mt-2">{errorMsg}</p>
             )}
+            {overlapping && (
+              <p className="text-xs text-amber-200 bg-amber-900/30 border border-amber-800 rounded p-2 mt-2">
+                Two designs overlap. Drag one apart so their bounding boxes don't intersect — touching is fine.
+              </p>
+            )}
           </section>
 
-          {vector && woodConfigs.length > 0 && (
-            <section>
-              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                Inlay woods
-              </h2>
-              <InlayColorPicker
-                woodConfigs={woodConfigs}
-                onUpdate={onUpdateWoodConfig}
-              />
-            </section>
-          )}
-
-          {vector && (
-            <section>
-              <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                Center on board
-              </h2>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={centerH}
-                  className="px-2 py-1.5 rounded-md text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200"
-                >Vertical</button>
-                <button
-                  onClick={centerV}
-                  className="px-2 py-1.5 rounded-md text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-200"
-                >Horizontal</button>
-                <button
-                  onClick={centerBoth}
-                  className="px-2 py-1.5 rounded-md text-xs font-medium bg-blue-700 hover:bg-blue-600 text-white"
-                >Both</button>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-2">
-                Drag the design to reposition or pull a corner to scale (aspect locked).
-              </p>
-            </section>
+          {designs.length > 0 && (
+            <p className="text-[11px] text-slate-500">
+              Drag any design to reposition or pull a corner to scale (aspect locked).
+              Designs can't overlap; you'll see a red ring while dragging if they would.
+            </p>
           )}
         </div>
 
@@ -309,41 +313,51 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                 draggable={false}
               />
 
-              {vector && designCompositeUrl && (
-                <div
-                  className="absolute"
-                  style={{
-                    left:   pctX(eff.offsetXInches),
-                    top:    pctY(eff.offsetYInches),
-                    width:  pctX(eff.designWidthInches),
-                    height: pctY(designHeight),
-                  }}
-                >
-                  <img
-                    src={designCompositeUrl}
-                    alt="Design"
-                    className={`absolute inset-0 w-full h-full select-none ${drag ? 'cursor-grabbing' : 'cursor-move'}`}
-                    style={{ outline: '1px dashed rgba(96, 165, 250, 0.55)' }}
-                    draggable={false}
-                    onMouseDown={handleMouseDown('move')}
-                  />
-                  {(['resize-tl', 'resize-tr', 'resize-bl', 'resize-br'] as DragMode[]).map(mode => {
-                    const top    = mode === 'resize-tl' || mode === 'resize-tr' ? '-5px' : 'auto';
-                    const bottom = mode === 'resize-bl' || mode === 'resize-br' ? '-5px' : 'auto';
-                    const left   = mode === 'resize-tl' || mode === 'resize-bl' ? '-5px' : 'auto';
-                    const right  = mode === 'resize-tr' || mode === 'resize-br' ? '-5px' : 'auto';
-                    const cursor = (mode === 'resize-tl' || mode === 'resize-br') ? 'nwse-resize' : 'nesw-resize';
-                    return (
-                      <div
-                        key={mode}
-                        onMouseDown={handleMouseDown(mode)}
-                        style={{ top, bottom, left, right, cursor, position: 'absolute', width: 10, height: 10, background: 'rgba(96,165,250,0.9)', border: '1px solid white', borderRadius: 2 }}
-                        aria-label={`Resize from ${mode.replace('resize-', '')}`}
-                      />
-                    );
-                  })}
-                </div>
-              )}
+              {designsForRender.map(({ d, placement, isDragOverlapping }) => {
+                const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
+                const compositeUrl = compositeUrls.get(d.id);
+                const designH = placement.designWidthInches * aspect;
+                if (!compositeUrl) return null;
+                const ringClass = isDragOverlapping
+                  ? 'outline outline-2 outline-red-500'
+                  : '';
+                return (
+                  <div
+                    key={d.id}
+                    className="absolute"
+                    style={{
+                      left:   pctX(placement.offsetXInches),
+                      top:    pctY(placement.offsetYInches),
+                      width:  pctX(placement.designWidthInches),
+                      height: pctY(designH),
+                    }}
+                  >
+                    <img
+                      src={compositeUrl}
+                      alt={`Design ${d.vector.fileName}`}
+                      className={`absolute inset-0 w-full h-full select-none ${drag?.designId === d.id ? 'cursor-grabbing' : 'cursor-move'} ${ringClass}`}
+                      style={{ outlineOffset: isDragOverlapping ? '0' : undefined }}
+                      draggable={false}
+                      onMouseDown={handleMouseDown(d.id, 'move')}
+                    />
+                    {(['resize-tl', 'resize-tr', 'resize-bl', 'resize-br'] as DragMode[]).map(mode => {
+                      const top    = mode === 'resize-tl' || mode === 'resize-tr' ? '-5px' : 'auto';
+                      const bottom = mode === 'resize-bl' || mode === 'resize-br' ? '-5px' : 'auto';
+                      const left   = mode === 'resize-tl' || mode === 'resize-bl' ? '-5px' : 'auto';
+                      const right  = mode === 'resize-tr' || mode === 'resize-br' ? '-5px' : 'auto';
+                      const cursor = (mode === 'resize-tl' || mode === 'resize-br') ? 'nwse-resize' : 'nesw-resize';
+                      return (
+                        <div
+                          key={mode}
+                          onMouseDown={handleMouseDown(d.id, mode)}
+                          style={{ top, bottom, left, right, cursor, position: 'absolute', width: 10, height: 10, background: 'rgba(96,165,250,0.9)', border: '1px solid white', borderRadius: 2 }}
+                          aria-label={`Resize ${d.vector.fileName} from ${mode.replace('resize-', '')}`}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -356,6 +370,41 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
         totalSteps={3}
         onBack={onBack}
         onNext={onNext}
+      />
+    </div>
+  );
+}
+
+/**
+ * One card in the design list — shows the filename, color→wood
+ * mapping, and a remove button. Position/scale lives in the board
+ * preview's drag handles, not here.
+ */
+function DesignCard({
+  design,
+  onRemove,
+  onUpdateWoodConfig,
+}: {
+  design: Design;
+  onRemove: () => void;
+  onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
+}) {
+  return (
+    <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/40 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-slate-200 truncate" title={design.vector.fileName}>
+          {design.vector.fileName}
+        </p>
+        <button
+          onClick={onRemove}
+          className="shrink-0 w-6 h-6 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center text-lg leading-none"
+          aria-label={`Remove ${design.vector.fileName}`}
+          title="Remove design"
+        >×</button>
+      </div>
+      <InlayColorPicker
+        woodConfigs={design.woodConfigs}
+        onUpdate={onUpdateWoodConfig}
       />
     </div>
   );
