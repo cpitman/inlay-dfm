@@ -316,6 +316,16 @@ export interface AnalysisResult {
   alignmentThresholdInches: number;
   pixelsPerInch: number;
   /**
+   * Pixel dimensions of the analysis canvas every per-wood mask is
+   * sized to. Exposed so consumers (overlay renderers, badge centroid
+   * extractors) don't have to re-derive the same numbers from the
+   * vector and pixelsPerInch — and so the guided flow's variable
+   * resolution doesn't break the assumption that the canvas was
+   * always 1200 × N.
+   */
+  canvasW: number;
+  canvasH: number;
+  /**
    * Largest preset v-bit angle that is feasible for the whole design (≤10%
    * problem area on every side AND no isolated unreachable component).
    * Each wood's `suggestionOverlayDataUrl` is rendered at this angle.

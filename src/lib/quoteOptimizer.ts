@@ -7,7 +7,15 @@ import { pickPerLayerBitPlan, type PerLayerBitPlan } from './machiningTime';
 
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
-const ANALYSIS_RESOLUTION_DEFAULT_PX = 1200;
+/**
+ * Analysis canvas resolution for the guided flow, in pixels per inch.
+ * 240 ppi resolves features down to ~0.0042" — slightly finer than the
+ * ±0.005" X/Y accuracy of a typical CNC router, so the analysis catches
+ * everything the machine could realistically miscarve. The expert flow
+ * keeps its own user-controlled `analysisResolution` setting and is
+ * unaffected.
+ */
+const GUIDED_PIXELS_PER_INCH = 240;
 
 export interface QuoteOptimizationResult {
   /** Final vector after fill + extend modifications applied. */
@@ -65,7 +73,10 @@ export async function runQuoteOptimization(
 ): Promise<QuoteOptimizationResult> {
   const { vector: initialVector, woodConfigs: initialWoodConfigs, designWidthInches, onProgress } = input;
   const inlayDepthInches = input.inlayDepthInches ?? 0.25;
-  const canvasWidth = ANALYSIS_RESOLUTION_DEFAULT_PX;
+  // Scale the analysis canvas with the design — bigger designs need
+  // more pixels to keep the same physical resolution. No upper cap;
+  // very large designs trade some optimizer wall-time for fidelity.
+  const canvasWidth = Math.max(1, Math.ceil(designWidthInches * GUIDED_PIXELS_PER_INCH));
 
   const settings: DFMSettings = {
     designWidthInches,

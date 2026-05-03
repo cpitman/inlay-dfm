@@ -1252,6 +1252,8 @@ ${plugStockOutlineSvg}
     thinWallThresholdInches: THIN_WALL_THRESHOLD_INCHES,
     alignmentThresholdInches: ALIGNMENT_THRESHOLD_INCHES,
     pixelsPerInch,
+    canvasW,
+    canvasH,
     step2DisplayAngleDegrees,
     step2SuggestionAngleDegrees,
     totalMachineTimeMinutes: anyMachineTimeMissing || !haveMachiningRates ? NaN : totalMachineTime,

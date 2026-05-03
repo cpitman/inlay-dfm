@@ -53,8 +53,11 @@ export default function Step3QuoteDisplay({
   onBack, onRequestManufacturing,
 }: Step3QuoteDisplayProps) {
   const aspect = vector.naturalHeight / vector.naturalWidth;
-  const canvasW = result.machiningTimeTable.vbits.length > 0 ? 1200 : 1200;
-  const canvasH = Math.max(1, Math.round(canvasW * aspect));
+  // Mask coordinates exposed by the analysis. Scales with the design's
+  // physical size in the guided pipeline (240 ppi); the overlay
+  // renderer + badge math need these to match the masks exactly.
+  const canvasW = result.canvasW;
+  const canvasH = result.canvasH;
 
   // Render the highlight overlay PNG that sits over the design composite.
   // Two flavors:

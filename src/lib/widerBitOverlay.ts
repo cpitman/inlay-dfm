@@ -26,12 +26,14 @@ const POCKET_TEAL:   RGBA = { r: 40,  g: 200, b: 210, a: 170 };
  */
 const PLUG_CYAN:     RGBA = { r: 110, g: 230, b: 235, a: 170 };
 
-/** Pixel-radius the masks are dilated by before rasterizing. Plug
- *  problems are typically 1-3 pixels wide at canvas resolution; this
- *  expands them to a small but seeable footprint at thumbnail scale.
- *  Centroids are NOT dilated — they continue to point at the true
- *  problem location. */
-const DILATE_RADIUS_PX = 4;
+/** Physical-size target for the rasterized splash radius. Plug-side
+ *  problems are typically 1-3 pixels wide at any analysis resolution;
+ *  expanding them to ~0.04" of physical coverage keeps the highlight
+ *  visible at thumbnail display size regardless of canvas ppi. The
+ *  guided flow runs at 240 ppi → 10 px; the expert flow's 100-200 ppi
+ *  → 4-8 px. Centroids are NOT dilated — they continue to point at
+ *  the true problem location. */
+const DILATE_PHYSICAL_INCHES = 0.04;
 
 /** Public color tokens so the legend in Step3QuoteDisplay can render
  *  the same hues as the overlay PNG. */
@@ -60,12 +62,14 @@ async function renderTwoBandOverlay(opts: {
   plugMasks:   Uint8Array[];
   canvasW: number;
   canvasH: number;
+  pixelsPerInch: number;
   pocketColor: RGBA;
   plugColor:   RGBA;
   dilateRadiusPx?: number;
 }): Promise<string | null> {
-  const { pocketMasks, plugMasks, canvasW, canvasH, pocketColor, plugColor } = opts;
-  const dilateRadius = opts.dilateRadiusPx ?? DILATE_RADIUS_PX;
+  const { pocketMasks, plugMasks, canvasW, canvasH, pixelsPerInch, pocketColor, plugColor } = opts;
+  const dilateRadius = opts.dilateRadiusPx
+    ?? Math.max(2, Math.round(DILATE_PHYSICAL_INCHES * pixelsPerInch));
   const n = canvasW * canvasH;
 
   // Validate sizes; bail rather than rasterize garbage.
@@ -146,6 +150,7 @@ export async function renderWiderBitOverlay(
   const { pocketMasks, plugMasks } = collectMasksBySide(result, w => w.widerBitInfeasibleMask);
   return renderTwoBandOverlay({
     pocketMasks, plugMasks, canvasW, canvasH,
+    pixelsPerInch: result.pixelsPerInch,
     pocketColor: POCKET_TEAL,
     plugColor:   PLUG_CYAN,
   });
@@ -165,6 +170,7 @@ export async function renderIrreducibleProblemOverlay(
   const { pocketMasks, plugMasks } = collectMasksBySide(result, w => w.irreducibleProblemMask);
   return renderTwoBandOverlay({
     pocketMasks, plugMasks, canvasW, canvasH,
+    pixelsPerInch: result.pixelsPerInch,
     pocketColor: POCKET_RED,
     plugColor:   PLUG_YELLOW,
   });
