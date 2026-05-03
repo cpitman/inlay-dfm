@@ -310,7 +310,12 @@ function DesignOverlay({
 }) {
   const aspect = design.vector.naturalHeight / design.vector.naturalWidth;
   const placement = design.placement;
-  const designH = placement.designWidthInches * aspect;
+  const rotation = placement.rotationDegrees ?? 0;
+  const turned = (rotation % 180) !== 0;
+  const visW = turned ? placement.designWidthInches * aspect : placement.designWidthInches;
+  const visH = turned ? placement.designWidthInches          : placement.designWidthInches * aspect;
+  const innerW = turned ? 100 / aspect : 100;
+  const innerH = turned ? 100 * aspect : 100;
   const canvasW = design.result.canvasW;
   const canvasH = design.result.canvasH;
 
@@ -356,36 +361,58 @@ function DesignOverlay({
   }, [design.result, canvasW, canvasH, noFeasibleAngle]);
 
   if (!compositeUrl) return null;
+  // Outer container = visible AABB on the board. Inner img is sized
+  // to the *unrotated* dimensions and rotated via CSS transform — so
+  // composite + overlay layers + locator badges all rotate together
+  // and the design appears at its on-board orientation. Locator
+  // badges are positioned in the unrotated mask space (matching the
+  // analysis's pixel grid), so they must rotate with the overlay.
+  const innerStyle: React.CSSProperties = {
+    left: '50%',
+    top:  '50%',
+    width:  `${innerW}%`,
+    height: `${innerH}%`,
+    // Override Tailwind preflight's `img { max-width: 100% }` — the
+    // inner width can exceed 100% on a quarter-turned wide design.
+    maxWidth: 'none',
+    maxHeight: 'none',
+    transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+    transformOrigin: 'center center',
+  };
   return (
     <div
       className="absolute"
       style={{
         left:   pctX(placement.offsetXInches),
         top:    pctY(placement.offsetYInches),
-        width:  pctX(placement.designWidthInches),
-        height: pctY(designH),
+        width:  pctX(visW),
+        height: pctY(visH),
       }}
     >
       <img
         src={compositeUrl}
         alt={`Design ${design.vector.fileName}`}
-        className="absolute inset-0 w-full h-full select-none pointer-events-none"
+        className="absolute select-none pointer-events-none"
+        style={innerStyle}
         draggable={false}
       />
       {overlayUrl && (
         <img
           src={overlayUrl}
           alt={noFeasibleAngle ? 'Unmanufacturable regions' : 'Suggested widening regions'}
-          className="absolute inset-0 w-full h-full select-none pointer-events-none"
+          className="absolute select-none pointer-events-none"
+          style={innerStyle}
           draggable={false}
         />
       )}
       {overlayComponents.length > 0 && (
-        <IssueLocatorBadges
-          components={overlayComponents}
-          sourceWidth={canvasW}
-          sourceHeight={canvasH}
-        />
+        <div className="absolute" style={innerStyle}>
+          <IssueLocatorBadges
+            components={overlayComponents}
+            sourceWidth={canvasW}
+            sourceHeight={canvasH}
+          />
+        </div>
       )}
     </div>
   );

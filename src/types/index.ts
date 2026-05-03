@@ -111,10 +111,26 @@ export interface VectorData {
  * `offsetX/Y` is the top-left corner of the design's bounding box;
  * the height is derived from `designWidthInches` × design aspect.
  */
+/** Discrete 90°-step rotation values supported on a placed design. */
+export type RotationDegrees = 0 | 90 | 180 | 270;
+
 export interface Placement {
   offsetXInches: number;
   offsetYInches: number;
   designWidthInches: number;
+  /**
+   * Visual rotation around the design's center, restricted to 90° steps.
+   * Only affects display + collision footprint; the analysis pipeline is
+   * rotation-invariant on the pixel grid (90°-step pixel rotations are
+   * lossless permutations under the EDT, problem-area %, full-depth %,
+   * isolated-component, alignment-risk, and OBB-packing operations), so
+   * cached `AnalysisResult` stays valid across rotation changes — same
+   * as for translation.
+   *
+   * Optional with default `0`. Files written before rotation existed
+   * (legacy v1 / early v2 sessions) load as unrotated.
+   */
+  rotationDegrees?: RotationDegrees;
 }
 
 /**

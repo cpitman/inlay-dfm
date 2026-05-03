@@ -741,7 +741,12 @@ export default function Home() {
       const widthChanged = designWidth !== d.placement.designWidthInches;
       const next = {
         ...d,
-        placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches: designWidth },
+        placement: {
+          ...d.placement,
+          offsetXInches: offsetX,
+          offsetYInches: offsetY,
+          designWidthInches: designWidth,
+        },
       };
       if (widthChanged) {
         next.history = d.history.map(snap => snap.result ? { ...snap, result: undefined } : snap);
@@ -749,6 +754,47 @@ export default function Home() {
       return next;
     });
   }, [updateActiveDesign]);
+
+  /** Commit a 90°-step rotation from CompositeView. Rotation rotates
+   *  around the design's center — recompute the visible AABB's top-
+   *  left so the design stays "in place" — then clamp to fit the
+   *  board. Does NOT invalidate the cached analysis: the DFM pipeline
+   *  is rotation-invariant on the pixel grid for 90° steps, so the
+   *  cached `AnalysisResult` (machining time, bit plan, plug OBB) is
+   *  still correct. */
+  const onCommitRotation = useCallback((next: import('@/types').RotationDegrees) => {
+    if (!activeDesign) return;
+    const aspect = activeDesign.originalVector.naturalHeight / activeDesign.originalVector.naturalWidth;
+    const oldTurned = ((activeDesign.placement.rotationDegrees ?? 0) % 180) !== 0;
+    const newTurned = (next % 180) !== 0;
+    const dw = activeDesign.placement.designWidthInches;
+    const oldVisW = oldTurned ? dw * aspect : dw;
+    const oldVisH = oldTurned ? dw          : dw * aspect;
+    const newVisW = newTurned ? dw * aspect : dw;
+    const newVisH = newTurned ? dw          : dw * aspect;
+    const cx = activeDesign.placement.offsetXInches + oldVisW / 2;
+    const cy = activeDesign.placement.offsetYInches + oldVisH / 2;
+    // Clamp the new top-left so the visible AABB stays inside the
+    // board. (Width itself doesn't change on rotation.)
+    const ox = Math.max(0, Math.min(cx - newVisW / 2, settings.boardWidthInches  - newVisW));
+    const oy = Math.max(0, Math.min(cy - newVisH / 2, settings.boardHeightInches - newVisH));
+    updateActiveDesign(d => ({
+      ...d,
+      placement: {
+        ...d.placement,
+        offsetXInches: ox,
+        offsetYInches: oy,
+        rotationDegrees: next,
+      },
+    }));
+    // Mirror the post-rotation offset into settings so sidebar inputs
+    // reflect the new position. Width is unchanged by rotation.
+    setSettings(prev => ({
+      ...prev,
+      designOffsetXInches: ox,
+      designOffsetYInches: oy,
+    }));
+  }, [activeDesign, updateActiveDesign, settings.boardWidthInches, settings.boardHeightInches]);
 
   /** When the active design changes (selection swap), pull its
    *  placement into settings so CompositeView and Step1 inputs render
@@ -869,6 +915,8 @@ export default function Home() {
             compositeGenerating={compositeGenerating}
             otherDesigns={otherDesigns}
             onCommitPlacement={onCommitPlacement}
+            designRotationDegrees={activeDesign?.placement.rotationDegrees}
+            onCommitRotation={onCommitRotation}
             canAdvance={step1Valid && status !== 'analyzing'}
             nextLabel={status === 'analyzing' ? 'Analyzing…' : step1NextLabel}
             onNext={handleStep1Next}

@@ -31,6 +31,9 @@ interface Step1DesignProps {
   /** Other designs on the same board, drawn read-only at their placements. */
   otherDesigns?: OtherDesign[];
   onCommitPlacement: (offsetX: number, offsetY: number, designWidth: number) => void;
+  /** Active design's 90°-step rotation + commit handler. */
+  designRotationDegrees?: import('@/types').RotationDegrees;
+  onCommitRotation?: (next: import('@/types').RotationDegrees) => void;
 
   // Step navigation
   canAdvance: boolean;
@@ -55,6 +58,7 @@ export default function Step1Design({
   woodConfigs, onUpdateWoodConfig, onMoveWood,
   backgroundSpecies, onBackgroundSpeciesChange,
   compositeDataUrl, compositeGenerating, otherDesigns, onCommitPlacement,
+  designRotationDegrees, onCommitRotation,
   canAdvance, nextLabel, onNext,
 }: Step1DesignProps) {
   return (
@@ -154,7 +158,9 @@ export default function Step1Design({
                 designWidthInches={settings.designWidthInches}
                 designOffsetXInches={settings.designOffsetXInches}
                 designOffsetYInches={settings.designOffsetYInches}
+                designRotationDegrees={designRotationDegrees}
                 onCommitPlacement={onCommitPlacement}
+                onCommitRotation={onCommitRotation}
                 otherDesigns={otherDesigns}
               />
             </div>

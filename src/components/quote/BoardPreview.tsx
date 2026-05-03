@@ -2,19 +2,25 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { BoardConfig } from '@/types/board';
+import type { RotationDegrees } from '@/types';
 import { renderBoardWithFeatures } from '@/lib/boardFeatures';
 
 interface BoardPreviewProps {
   config: BoardConfig;
   /** Optional design composite (data URL) overlaid on top of the board. */
   designDataUrl?: string | null;
-  /** Where the design sits on the board (inches from top-left). */
+  /** Where the design sits on the board (inches from top-left). This is
+   *  the *visible* AABB origin — when rotation is 90° or 270°, the
+   *  rotated design's bounding box swaps width and height, and this
+   *  offset is the top-left of the swapped box. */
   designOffsetXInches?: number;
   designOffsetYInches?: number;
-  /** Width of the design in inches. Aspect ratio preserved. */
+  /** Visible width / height of the design in inches (after rotation). */
   designWidthInches?: number;
-  /** Height of the design in inches; required when designDataUrl is set. */
   designHeightInches?: number;
+  /** 90°-step rotation; default 0. The image content rotates around
+   *  its center inside the visible AABB so it doesn't stretch. */
+  designRotationDegrees?: RotationDegrees;
 }
 
 /**
@@ -30,6 +36,7 @@ export default function BoardPreview({
   config,
   designDataUrl, designOffsetXInches, designOffsetYInches,
   designWidthInches, designHeightInches,
+  designRotationDegrees,
 }: BoardPreviewProps) {
   const [boardUrl, setBoardUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,20 +104,49 @@ export default function BoardPreview({
             && designHeightInches !== undefined
             && designOffsetXInches !== undefined
             && designOffsetYInches !== undefined
-            && inchesToPx > 0 && (
-            <img
-              src={designDataUrl}
-              alt="Design overlay"
-              className="absolute select-none pointer-events-none"
-              draggable={false}
-              style={{
-                left:   `${designOffsetXInches * inchesToPx}px`,
-                top:    `${designOffsetYInches * inchesToPx}px`,
-                width:  `${designWidthInches  * inchesToPx}px`,
-                height: `${designHeightInches * inchesToPx}px`,
-              }}
-            />
-          )}
+            && inchesToPx > 0 && (() => {
+              const rotation = designRotationDegrees ?? 0;
+              const turned = (rotation % 180) !== 0;
+              // designWidthInches/designHeightInches are the *visible*
+              // AABB dims. The img element is sized to the *unrotated*
+              // dims (swapped from visible for 90°/270°) so its layout
+              // box matches the design's natural aspect, then rotated
+              // via CSS so the visual exactly fills the visible AABB.
+              const innerW = turned ? designHeightInches : designWidthInches;
+              const innerH = turned ? designWidthInches  : designHeightInches;
+              return (
+                <div
+                  className="absolute"
+                  style={{
+                    left:   `${designOffsetXInches * inchesToPx}px`,
+                    top:    `${designOffsetYInches * inchesToPx}px`,
+                    width:  `${designWidthInches  * inchesToPx}px`,
+                    height: `${designHeightInches * inchesToPx}px`,
+                  }}
+                >
+                  <img
+                    src={designDataUrl}
+                    alt="Design overlay"
+                    className="absolute select-none pointer-events-none"
+                    draggable={false}
+                    style={{
+                      left: '50%',
+                      top:  '50%',
+                      width:  `${innerW * inchesToPx}px`,
+                      height: `${innerH * inchesToPx}px`,
+                      // BoardPreview uses pixel dims so Tailwind's
+                      // `max-width: 100%` rule generally doesn't bite,
+                      // but be explicit anyway for parity with the
+                      // other rotation-aware overlays.
+                      maxWidth: 'none',
+                      maxHeight: 'none',
+                      transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                      transformOrigin: 'center center',
+                    }}
+                  />
+                </div>
+              );
+            })()}
         </div>
       )}
     </div>

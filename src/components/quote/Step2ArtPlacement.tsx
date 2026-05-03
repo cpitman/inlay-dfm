@@ -1,7 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Design, Placement, WoodConfig } from '@/types';
+import type { Design, Placement, RotationDegrees, WoodConfig } from '@/types';
+import {
+  effectivePlacementAabb, isQuarterTurn, rotateLeft, rotateRight,
+} from '@/lib/rotation';
 import type { BoardConfig } from '@/types/board';
 import {
   hasTopGroove, hasBottomGroove,
@@ -54,14 +57,9 @@ interface DragStart {
   designId: string;
 }
 
-/** AABB derived from a placement + design aspect. */
-function aabbFromPlacement(p: Placement, aspect: number): AABB {
-  return {
-    x: p.offsetXInches,
-    y: p.offsetYInches,
-    w: p.designWidthInches,
-    h: p.designWidthInches * aspect,
-  };
+/** AABB derived from a placement + the design's natural dimensions. */
+function aabbFromPlacement(p: Placement, naturalW: number, naturalH: number): AABB {
+  return effectivePlacementAabb(p, naturalW, naturalH);
 }
 
 /**
@@ -154,16 +152,30 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     return () => ro.disconnect();
   }, [boardConfig.widthInches, boardConfig.heightInches]);
 
-  // Clamp a placement to the placeable rectangle (margin band) for a given aspect.
+  // Clamp a placement to the placeable rectangle (margin band) using the
+  // *visible* AABB (rotation-aware). designWidthInches is the unrotated
+  // horizontal extent; for 90°/270° the visible width and height swap.
   const clampToPlaceable = useCallback((next: Placement, aspect: number): Placement => {
-    const maxByX = placeableW;
-    const maxByY = placeableH / aspect;
-    const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxByX, maxByY);
-    const dw = Math.max(minW, Math.min(next.designWidthInches, maxByX, maxByY));
-    const dh = dw * aspect;
-    const ox = Math.max(margin, Math.min(next.offsetXInches, margin + placeableW - dw));
-    const oy = Math.max(margin, Math.min(next.offsetYInches, margin + placeableH - dh));
-    return { offsetXInches: ox, offsetYInches: oy, designWidthInches: dw };
+    const turned = isQuarterTurn(next.rotationDegrees);
+    // The visible AABB's max dimensions are the placeable rect itself.
+    // Translate back to designWidth: visW = (turned ? designW*aspect : designW).
+    const maxVisW = placeableW;
+    const maxVisH = placeableH;
+    const maxDesignW = turned
+      ? Math.min(maxVisW / aspect, maxVisH)        // visW = dw*aspect ≤ pW;  visH = dw ≤ pH
+      : Math.min(maxVisW,          maxVisH / aspect); // visW = dw ≤ pW;       visH = dw*aspect ≤ pH
+    const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxDesignW);
+    const dw = Math.max(minW, Math.min(next.designWidthInches, maxDesignW));
+    const visW = turned ? dw * aspect : dw;
+    const visH = turned ? dw          : dw * aspect;
+    const ox = Math.max(margin, Math.min(next.offsetXInches, margin + placeableW - visW));
+    const oy = Math.max(margin, Math.min(next.offsetYInches, margin + placeableH - visH));
+    return {
+      offsetXInches: ox,
+      offsetYInches: oy,
+      designWidthInches: dw,
+      ...(next.rotationDegrees !== undefined ? { rotationDegrees: next.rotationDegrees } : {}),
+    };
   }, [margin, placeableW, placeableH]);
 
   // Re-clamp every design's placement on its OWN side when that side's
@@ -177,15 +189,23 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
       const sidePlaceableW = boardConfig.widthInches  - 2 * sideMargin;
       const sidePlaceableH = boardConfig.heightInches - 2 * sideMargin;
       const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
-      const maxByX = sidePlaceableW;
-      const maxByY = sidePlaceableH / aspect;
-      const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxByX, maxByY);
-      const dw = Math.max(minW, Math.min(d.placement.designWidthInches, maxByX, maxByY));
-      const dh = dw * aspect;
-      const ox = Math.max(sideMargin, Math.min(d.placement.offsetXInches, sideMargin + sidePlaceableW - dw));
-      const oy = Math.max(sideMargin, Math.min(d.placement.offsetYInches, sideMargin + sidePlaceableH - dh));
+      const turned = isQuarterTurn(d.placement.rotationDegrees);
+      const maxDesignW = turned
+        ? Math.min(sidePlaceableW / aspect, sidePlaceableH)
+        : Math.min(sidePlaceableW,          sidePlaceableH / aspect);
+      const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxDesignW);
+      const dw = Math.max(minW, Math.min(d.placement.designWidthInches, maxDesignW));
+      const visW = turned ? dw * aspect : dw;
+      const visH = turned ? dw          : dw * aspect;
+      const ox = Math.max(sideMargin, Math.min(d.placement.offsetXInches, sideMargin + sidePlaceableW - visW));
+      const oy = Math.max(sideMargin, Math.min(d.placement.offsetYInches, sideMargin + sidePlaceableH - visH));
       if (ox !== d.placement.offsetXInches || oy !== d.placement.offsetYInches || dw !== d.placement.designWidthInches) {
-        onUpdateDesignPlacement(d.id, { offsetXInches: ox, offsetYInches: oy, designWidthInches: dw });
+        onUpdateDesignPlacement(d.id, {
+          offsetXInches: ox,
+          offsetYInches: oy,
+          designWidthInches: dw,
+          ...(d.placement.rotationDegrees !== undefined ? { rotationDegrees: d.placement.rotationDegrees } : {}),
+        });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,10 +236,12 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     const dragged = designs.find(d => d.id === drag.designId);
     if (!dragged) return;
     const aspect = dragged.vector.naturalHeight / dragged.vector.naturalWidth;
+    const rotation = dragged.placement.rotationDegrees;
+    const turned = isQuarterTurn(rotation);
     // Only same-side designs are "others" for collision purposes.
     const others: AABB[] = designs
       .filter(d => d.id !== drag.designId && d.side === dragged.side)
-      .map(d => aabbFromPlacement(d.placement, d.vector.naturalHeight / d.vector.naturalWidth));
+      .map(d => aabbFromPlacement(d.placement, d.vector.naturalWidth, d.vector.naturalHeight));
     // On the back side, fixed features (feet + handles) also count.
     const fixed: AABB[] = dragged.side === 'bottom' ? sideFixedFeatures : [];
     const obstacles: AABB[] = [...others, ...fixed];
@@ -232,7 +254,14 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
       if (rect.width === 0 || rect.height === 0) return;
       const dxInches = ((e.clientX - start.mouseX) / rect.width)  * boardConfig.widthInches;
       const dyInches = ((e.clientY - start.mouseY) / rect.height) * boardConfig.heightInches;
-      const startH = start.designWidth * aspect;
+
+      // Resize handles operate on the visible AABB. Translate visW/H ↔
+      // designWidth via the aspect (designH = designW × aspect; for 90°/
+      // 270° the visible axes are swapped). Drag handle anchors the
+      // *opposite* corner of the visible AABB.
+      const startVisW = turned ? start.designWidth * aspect : start.designWidth;
+      const startVisH = turned ? start.designWidth          : start.designWidth * aspect;
+      const visToDesignW = (vw: number) => (turned ? vw / aspect : vw);
 
       const next = { offsetX: start.offsetX, offsetY: start.offsetY, dw: start.designWidth };
       switch (start.mode) {
@@ -240,27 +269,34 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
           next.offsetX = start.offsetX + dxInches;
           next.offsetY = start.offsetY + dyInches;
           break;
-        case 'resize-br':
-          next.dw = start.designWidth + dxInches;
+        case 'resize-br': {
+          const newVisW = startVisW + dxInches;
+          next.dw = visToDesignW(newVisW);
           break;
+        }
         case 'resize-bl': {
-          const fixedRight = start.offsetX + start.designWidth;
-          next.dw = start.designWidth - dxInches;
-          next.offsetX = fixedRight - next.dw;
+          const fixedRight = start.offsetX + startVisW;
+          const newVisW = startVisW - dxInches;
+          next.dw = visToDesignW(newVisW);
+          next.offsetX = fixedRight - newVisW;
           break;
         }
         case 'resize-tr': {
-          const fixedBottom = start.offsetY + startH;
-          next.dw = start.designWidth + dxInches;
-          next.offsetY = fixedBottom - next.dw * aspect;
+          const fixedBottom = start.offsetY + startVisH;
+          const newVisW = startVisW + dxInches;
+          next.dw = visToDesignW(newVisW);
+          const newVisH = turned ? newVisW : newVisW * aspect;
+          next.offsetY = fixedBottom - newVisH;
           break;
         }
         case 'resize-tl': {
-          const fixedRight  = start.offsetX + start.designWidth;
-          const fixedBottom = start.offsetY + startH;
-          next.dw = start.designWidth - dxInches;
-          next.offsetX = fixedRight  - next.dw;
-          next.offsetY = fixedBottom - next.dw * aspect;
+          const fixedRight  = start.offsetX + startVisW;
+          const fixedBottom = start.offsetY + startVisH;
+          const newVisW = startVisW - dxInches;
+          next.dw = visToDesignW(newVisW);
+          const newVisH = turned ? newVisW : newVisW * aspect;
+          next.offsetX = fixedRight  - newVisW;
+          next.offsetY = fixedBottom - newVisH;
           break;
         }
       }
@@ -268,8 +304,9 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
         offsetXInches: next.offsetX,
         offsetYInches: next.offsetY,
         designWidthInches: next.dw,
+        ...(rotation !== undefined ? { rotationDegrees: rotation } : {}),
       }, aspect);
-      const candidate = aabbFromPlacement(clamped, aspect);
+      const candidate = aabbFromPlacement(clamped, dragged.vector.naturalWidth, dragged.vector.naturalHeight);
       const overlaps = obstacles.some(o => boxesOverlap(candidate, o));
       setDrag({ designId: drag.designId, placement: clamped, overlapping: overlaps });
     };
@@ -292,6 +329,29 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
 
   const pctX = (inches: number) => `${(inches / boardConfig.widthInches)  * 100}%`;
   const pctY = (inches: number) => `${(inches / boardConfig.heightInches) * 100}%`;
+
+  // Rotate around the design's center: keep the visible AABB's center
+  // pinned and recompute the new top-left from the new visible
+  // dimensions, then clamp to the placeable area. Re-clamp may shift
+  // the design if rotation pushes a long axis past a board edge.
+  const commitRotation = useCallback((d: Design, next: RotationDegrees) => {
+    const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
+    const oldTurned = isQuarterTurn(d.placement.rotationDegrees);
+    const newTurned = isQuarterTurn(next);
+    const oldVisW = oldTurned ? d.placement.designWidthInches * aspect : d.placement.designWidthInches;
+    const oldVisH = oldTurned ? d.placement.designWidthInches          : d.placement.designWidthInches * aspect;
+    const newVisW = newTurned ? d.placement.designWidthInches * aspect : d.placement.designWidthInches;
+    const newVisH = newTurned ? d.placement.designWidthInches          : d.placement.designWidthInches * aspect;
+    const cx = d.placement.offsetXInches + oldVisW / 2;
+    const cy = d.placement.offsetYInches + oldVisH / 2;
+    const candidate: Placement = {
+      offsetXInches: cx - newVisW / 2,
+      offsetYInches: cy - newVisH / 2,
+      designWidthInches: d.placement.designWidthInches,
+      rotationDegrees: next,
+    };
+    onUpdateDesignPlacement(d.id, clampToPlaceable(candidate, aspect));
+  }, [clampToPlaceable, onUpdateDesignPlacement]);
 
   // For each design on the active side, compute the live placement
   // (drag override or committed). Other-side designs render in the
@@ -326,8 +386,17 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
         {placedDesigns.map(({ d, placement, isDragOverlapping }) => {
           const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
           const compositeUrl = compositeUrls.get(d.id);
-          const designH = placement.designWidthInches * aspect;
           if (!compositeUrl) return null;
+          const rotation = placement.rotationDegrees ?? 0;
+          const turned = isQuarterTurn(rotation);
+          // Outer container = visible AABB on the board. Inner img is
+          // sized to the *unrotated* dimensions, centered in the
+          // container, and rotated via CSS transform — so the rotation
+          // doesn't stretch the image content.
+          const visW = turned ? placement.designWidthInches * aspect : placement.designWidthInches;
+          const visH = turned ? placement.designWidthInches          : placement.designWidthInches * aspect;
+          const innerWidthPct  = turned ? 100 / aspect : 100;
+          const innerHeightPct = turned ? 100 * aspect : 100;
           const ringClass = isDragOverlapping ? 'outline outline-2 outline-red-500' : '';
           return (
             <div
@@ -336,15 +405,29 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
               style={{
                 left:   pctX(placement.offsetXInches),
                 top:    pctY(placement.offsetYInches),
-                width:  pctX(placement.designWidthInches),
-                height: pctY(designH),
+                width:  pctX(visW),
+                height: pctY(visH),
               }}
             >
               <img
                 src={compositeUrl}
                 alt={`Design ${d.vector.fileName}`}
-                className={`absolute inset-0 w-full h-full select-none ${drag?.designId === d.id ? 'cursor-grabbing' : 'cursor-move'} ${ringClass}`}
-                style={{ outlineOffset: isDragOverlapping ? '0' : undefined }}
+                className={`absolute select-none ${drag?.designId === d.id ? 'cursor-grabbing' : 'cursor-move'} ${ringClass}`}
+                style={{
+                  left: '50%',
+                  top:  '50%',
+                  width:  `${innerWidthPct}%`,
+                  height: `${innerHeightPct}%`,
+                  // Tailwind's preflight applies `max-width: 100%` to
+                  // every <img>; without this override the 200% inner
+                  // width on a quarter-turned wide design would clamp,
+                  // squashing the image into a too-narrow layout box.
+                  maxWidth: 'none',
+                  maxHeight: 'none',
+                  transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                  transformOrigin: 'center center',
+                  outlineOffset: isDragOverlapping ? '0' : undefined,
+                }}
                 draggable={false}
                 onMouseDown={isActive ? handleMouseDown(d.id, 'move') : undefined}
               />
@@ -363,6 +446,13 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                   />
                 );
               })}
+              {isActive && (
+                <RotateToolbar
+                  rotation={rotation}
+                  onRotate={(next) => commitRotation(d, next)}
+                  onReset={rotation === 0 ? undefined : () => commitRotation(d, 0)}
+                />
+              )}
             </div>
           );
         })}
@@ -484,6 +574,55 @@ function DesignCard({
         woodConfigs={design.woodConfigs}
         onUpdate={onUpdateWoodConfig}
       />
+    </div>
+  );
+}
+
+/**
+ * Floating toolbar attached to the bottom-right of an active design's
+ * visible AABB. Rotate-left, rotate-right, and an optional reset
+ * button (shown only when the design has a non-zero rotation).
+ *
+ * Shared between the guided and expert flows — see CompositeView.
+ */
+export function RotateToolbar({
+  rotation,
+  onRotate,
+  onReset,
+}: {
+  rotation: RotationDegrees;
+  onRotate: (next: RotationDegrees) => void;
+  onReset?: () => void;
+}) {
+  return (
+    <div
+      className="absolute flex gap-1"
+      style={{ right: 0, top: '-32px' }}
+      onMouseDown={(e) => { e.stopPropagation(); }}
+    >
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onRotate(rotateLeft(rotation)); }}
+        className="w-7 h-7 rounded bg-slate-700/90 hover:bg-slate-600 text-slate-100 text-base flex items-center justify-center border border-slate-500 shadow"
+        title="Rotate 90° counter-clockwise"
+        aria-label="Rotate 90° counter-clockwise"
+      >↺</button>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onRotate(rotateRight(rotation)); }}
+        className="w-7 h-7 rounded bg-slate-700/90 hover:bg-slate-600 text-slate-100 text-base flex items-center justify-center border border-slate-500 shadow"
+        title="Rotate 90° clockwise"
+        aria-label="Rotate 90° clockwise"
+      >↻</button>
+      {onReset && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onReset(); }}
+          className="h-7 px-2 rounded bg-slate-700/90 hover:bg-slate-600 text-slate-100 text-xs flex items-center justify-center border border-slate-500 shadow"
+          title="Reset rotation to 0°"
+          aria-label="Reset rotation"
+        >0°</button>
+      )}
     </div>
   );
 }

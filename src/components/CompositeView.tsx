@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Placement, VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
+import type { Placement, RotationDegrees, VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
 import { WOOD_SPECIES } from '@/lib/woodSpecies';
 import { renderBoardSurface } from '@/lib/woodGrain';
+import { isQuarterTurn } from '@/lib/rotation';
+import { RotateToolbar } from './quote/Step2ArtPlacement';
 
 /** A read-only ghost of another design painted under the active one. */
 export interface OtherDesign {
@@ -26,6 +28,12 @@ interface CompositeViewProps {
   designWidthInches: number;
   designOffsetXInches: number;
   designOffsetYInches: number;
+  /**
+   * 90°-step rotation around the design's center. Default `0` when not
+   * provided. Drag/resize and ghosts of other designs honor each
+   * design's own rotation.
+   */
+  designRotationDegrees?: RotationDegrees;
 
   /**
    * Commit drag/resize back to settings. Called once at mouseup so an
@@ -33,6 +41,8 @@ interface CompositeViewProps {
    * frame.
    */
   onCommitPlacement: (offsetX: number, offsetY: number, designWidth: number) => void;
+  /** Commit a rotation change (separate from drag/resize). */
+  onCommitRotation?: (next: RotationDegrees) => void;
 
   /**
    * Optional: other designs on the same board, rendered read-only at
@@ -42,6 +52,14 @@ interface CompositeViewProps {
    * is the single-design case.
    */
   otherDesigns?: OtherDesign[];
+}
+
+/** OBB-aware visible-AABB helpers, mirroring `lib/rotation.ts`. */
+function visibleW(designWidth: number, aspect: number, rotation: RotationDegrees | undefined): number {
+  return isQuarterTurn(rotation) ? designWidth * aspect : designWidth;
+}
+function visibleH(designWidth: number, aspect: number, rotation: RotationDegrees | undefined): number {
+  return isQuarterTurn(rotation) ? designWidth          : designWidth * aspect;
 }
 
 const MIN_DESIGN_WIDTH_INCHES = 0.25;
@@ -80,9 +98,12 @@ export default function CompositeView({
   vector,
   boardWidthInches, boardHeightInches, designWidthInches,
   designOffsetXInches, designOffsetYInches,
-  onCommitPlacement,
+  designRotationDegrees,
+  onCommitPlacement, onCommitRotation,
   otherDesigns = [],
 }: CompositeViewProps) {
+  const rotation = designRotationDegrees ?? 0;
+  const turned = isQuarterTurn(rotation);
   const bg = WOOD_SPECIES[backgroundSpecies];
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -140,19 +161,24 @@ export default function CompositeView({
     offsetY: designOffsetYInches,
     designWidth: designWidthInches,
   };
-  const designHeight = eff.designWidth * aspect;
+  const visW = visibleW(eff.designWidth, aspect, rotation);
+  const visH = visibleH(eff.designWidth, aspect, rotation);
 
   // Strict-fit clamp: design must always sit fully inside the board.
+  // Rotation swaps the visible-AABB axes, so the maximum design width
+  // is reduced when the design is rotated to a quarter turn.
   const clampPlacement = useCallback((next: DragLive): DragLive => {
-    const maxByX = boardWidthInches;
-    const maxByY = boardHeightInches / aspect;
-    const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxByX, maxByY);
-    const dw = Math.max(minW, Math.min(next.designWidth, maxByX, maxByY));
-    const dh = dw * aspect;
-    const ox = Math.max(0, Math.min(next.offsetX, boardWidthInches  - dw));
-    const oy = Math.max(0, Math.min(next.offsetY, boardHeightInches - dh));
+    const maxDesignW = turned
+      ? Math.min(boardWidthInches  / aspect, boardHeightInches)
+      : Math.min(boardWidthInches,           boardHeightInches / aspect);
+    const minW = Math.min(MIN_DESIGN_WIDTH_INCHES, maxDesignW);
+    const dw = Math.max(minW, Math.min(next.designWidth, maxDesignW));
+    const vw = visibleW(dw, aspect, rotation);
+    const vh = visibleH(dw, aspect, rotation);
+    const ox = Math.max(0, Math.min(next.offsetX, boardWidthInches  - vw));
+    const oy = Math.max(0, Math.min(next.offsetY, boardHeightInches - vh));
     return { offsetX: ox, offsetY: oy, designWidth: dw };
-  }, [aspect, boardWidthInches, boardHeightInches]);
+  }, [aspect, boardWidthInches, boardHeightInches, rotation, turned]);
 
   const handleMouseDown = useCallback((mode: DragMode) => (e: React.MouseEvent) => {
     if (!vector) return;
@@ -187,7 +213,14 @@ export default function CompositeView({
 
       const dxInches = ((e.clientX - start.mouseX) / rect.width)  * boardWidthInches;
       const dyInches = ((e.clientY - start.mouseY) / rect.height) * boardHeightInches;
-      const startH = start.designWidth * aspect;
+
+      // Resize handles operate in *visible*-AABB space (the box the
+      // user sees and drags). Translate visW ↔ designWidth via aspect
+      // for 90°/270° rotations, and use visible H to anchor the
+      // opposite-corner pivot for resize-tr / resize-tl.
+      const startVisW = visibleW(start.designWidth, aspect, rotation);
+      const startVisH = visibleH(start.designWidth, aspect, rotation);
+      const visToDesignW = (vw: number) => (turned ? vw / aspect : vw);
 
       let next: DragLive = { ...start };
       switch (start.mode) {
@@ -196,31 +229,33 @@ export default function CompositeView({
           next.offsetY = start.offsetY + dyInches;
           break;
         case 'resize-br': {
-          // Top-left pivot; horizontal mouse motion drives width.
-          next.designWidth = start.designWidth + dxInches;
+          const newVisW = startVisW + dxInches;
+          next.designWidth = visToDesignW(newVisW);
           break;
         }
         case 'resize-bl': {
-          // Top-right pivot.
-          const fixedRight = start.offsetX + start.designWidth;
-          next.designWidth = start.designWidth - dxInches;
-          next.offsetX = fixedRight - next.designWidth;
+          const fixedRight = start.offsetX + startVisW;
+          const newVisW = startVisW - dxInches;
+          next.designWidth = visToDesignW(newVisW);
+          next.offsetX = fixedRight - newVisW;
           break;
         }
         case 'resize-tr': {
-          // Bottom-left pivot.
-          const fixedBottom = start.offsetY + startH;
-          next.designWidth = start.designWidth + dxInches;
-          next.offsetY = fixedBottom - next.designWidth * aspect;
+          const fixedBottom = start.offsetY + startVisH;
+          const newVisW = startVisW + dxInches;
+          next.designWidth = visToDesignW(newVisW);
+          const newVisH = visibleH(next.designWidth, aspect, rotation);
+          next.offsetY = fixedBottom - newVisH;
           break;
         }
         case 'resize-tl': {
-          // Bottom-right pivot.
-          const fixedRight  = start.offsetX + start.designWidth;
-          const fixedBottom = start.offsetY + startH;
-          next.designWidth = start.designWidth - dxInches;
-          next.offsetX = fixedRight  - next.designWidth;
-          next.offsetY = fixedBottom - next.designWidth * aspect;
+          const fixedRight  = start.offsetX + startVisW;
+          const fixedBottom = start.offsetY + startVisH;
+          const newVisW = startVisW - dxInches;
+          next.designWidth = visToDesignW(newVisW);
+          const newVisH = visibleH(next.designWidth, aspect, rotation);
+          next.offsetX = fixedRight  - newVisW;
+          next.offsetY = fixedBottom - newVisH;
           break;
         }
       }
@@ -240,7 +275,7 @@ export default function CompositeView({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup',   onUp);
     };
-  }, [drag, aspect, boardWidthInches, boardHeightInches, clampPlacement, onCommitPlacement]);
+  }, [drag, aspect, boardWidthInches, boardHeightInches, rotation, turned, clampPlacement, onCommitPlacement]);
 
   // Conversions for inline styles — percentages of the board container.
   const pctX = (inches: number) => `${(inches / boardWidthInches)  * 100}%`;
@@ -267,7 +302,7 @@ export default function CompositeView({
       <p className="text-xs text-slate-500 shrink-0">
         Drag the design to reposition it on the board, or pull a corner to scale it (aspect locked).
         Scaling updates the Design Width parameter in the sidebar.
-        Current design: {eff.designWidth.toFixed(2)}" × {designHeight.toFixed(2)}".
+        Current design: {visW.toFixed(2)}" × {visH.toFixed(2)}"{rotation !== 0 ? ` (rotated ${rotation}°)` : ''}.
       </p>
 
       {/* Board canvas — fills the remaining space, board itself fits inside while preserving aspect. */}
@@ -295,7 +330,12 @@ export default function CompositeView({
           {otherDesigns.map(o => {
             if (!o.compositeUrl) return null;
             const aspectO = o.vector.naturalHeight / o.vector.naturalWidth;
-            const designH = o.placement.designWidthInches * aspectO;
+            const oRotation = o.placement.rotationDegrees ?? 0;
+            const oTurned = isQuarterTurn(oRotation);
+            const oVisW = visibleW(o.placement.designWidthInches, aspectO, oRotation);
+            const oVisH = visibleH(o.placement.designWidthInches, aspectO, oRotation);
+            const oInnerW = oTurned ? 100 / aspectO : 100;
+            const oInnerH = oTurned ? 100 * aspectO : 100;
             return (
               <div
                 key={o.id}
@@ -303,8 +343,8 @@ export default function CompositeView({
                 style={{
                   left:   pctX(o.placement.offsetXInches),
                   top:    pctY(o.placement.offsetYInches),
-                  width:  pctX(o.placement.designWidthInches),
-                  height: pctY(designH),
+                  width:  pctX(oVisW),
+                  height: pctY(oVisH),
                   opacity: 0.55,
                 }}
                 title={o.vector.fileName}
@@ -313,8 +353,22 @@ export default function CompositeView({
                 <img
                   src={o.compositeUrl}
                   alt=""
-                  className="absolute inset-0 w-full h-full select-none"
-                  style={{ outline: '1px dotted rgba(148, 163, 184, 0.4)' }}
+                  className="absolute select-none"
+                  style={{
+                    left: '50%',
+                    top:  '50%',
+                    width:  `${oInnerW}%`,
+                    height: `${oInnerH}%`,
+                    // See note on the active design's img below — the
+                    // inner width can exceed 100% on a quarter-turned
+                    // wide design, so we have to defeat Tailwind's
+                    // default `max-width: 100%` rule.
+                    maxWidth: 'none',
+                    maxHeight: 'none',
+                    transform: `translate(-50%, -50%) rotate(${oRotation}deg)`,
+                    transformOrigin: 'center center',
+                    outline: '1px dotted rgba(148, 163, 184, 0.4)',
+                  }}
                   draggable={false}
                 />
               </div>
@@ -322,26 +376,43 @@ export default function CompositeView({
           })}
 
           {/* Design composite — positioned and scaled */}
-          {dataUrl && vector && (
+          {dataUrl && vector && (() => {
+            const innerW = turned ? 100 / aspect : 100;
+            const innerH = turned ? 100 * aspect : 100;
+            return (
             <div
               className="absolute"
               style={{
                 left:   pctX(eff.offsetX),
                 top:    pctY(eff.offsetY),
-                width:  pctX(eff.designWidth),
-                height: pctY(designHeight),
+                width:  pctX(visW),
+                height: pctY(visH),
               }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={dataUrl}
                 alt="Composite design preview"
-                className={`absolute inset-0 w-full h-full select-none ${drag?.designWidth === undefined ? 'cursor-move' : 'cursor-grabbing'}`}
-                style={{ outline: '1px dashed rgba(96, 165, 250, 0.55)' }}
+                className={`absolute select-none ${drag === null ? 'cursor-move' : 'cursor-grabbing'}`}
+                style={{
+                  left: '50%',
+                  top:  '50%',
+                  width:  `${innerW}%`,
+                  height: `${innerH}%`,
+                  // Tailwind's preflight applies `max-width: 100%` to
+                  // every <img>; without this override the 200% inner
+                  // width on a quarter-turned wide design would clamp,
+                  // squashing the image into a too-narrow layout box.
+                  maxWidth: 'none',
+                  maxHeight: 'none',
+                  transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                  transformOrigin: 'center center',
+                  outline: '1px dashed rgba(96, 165, 250, 0.55)',
+                }}
                 draggable={false}
                 onMouseDown={handleMouseDown('move')}
               />
-              {/* Corner resize handles */}
+              {/* Corner resize handles — at corners of the *visible* AABB. */}
               {(
                 [
                   ['resize-tl', '0 0 auto auto', 'nwse-resize'],
@@ -363,8 +434,16 @@ export default function CompositeView({
                   />
                 );
               })}
+              {onCommitRotation && (
+                <RotateToolbar
+                  rotation={rotation}
+                  onRotate={onCommitRotation}
+                  onReset={rotation === 0 ? undefined : () => onCommitRotation(0)}
+                />
+              )}
             </div>
-          )}
+            );
+          })()}
 
           {/* Generating overlay */}
           {generating && (

@@ -1,7 +1,8 @@
 import type {
-  DFMSettings, VectorData, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot, Placement,
+  DFMSettings, VectorData, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot, Placement, RotationDegrees,
 } from '@/types';
 import { combineLayers } from './svgLayers';
+import { isValidRotation } from './rotation';
 
 /**
  * Bump when the session schema changes in a backward-incompatible way.
@@ -410,12 +411,36 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
         }
         side = dd.side;
       }
+      // `placement` is optional (legacy / pre-placement files use the
+      // default in `deserializeDesign`). When present, validate
+      // `rotationDegrees` if provided — it must be one of 0/90/180/270.
+      let placement: Placement | undefined;
+      if (dd.placement !== undefined) {
+        if (!dd.placement || typeof dd.placement !== 'object') {
+          throw new Error(`Session field "designs[${i}].placement" must be an object.`);
+        }
+        const pp = dd.placement as Partial<Placement>;
+        let rotationDegrees: RotationDegrees | undefined;
+        if (pp.rotationDegrees !== undefined) {
+          if (!isValidRotation(pp.rotationDegrees)) {
+            throw new Error(`Session field "designs[${i}].placement.rotationDegrees" must be 0, 90, 180, or 270.`);
+          }
+          rotationDegrees = pp.rotationDegrees;
+        }
+        placement = {
+          offsetXInches:     expectFiniteNumber(pp.offsetXInches,     `designs[${i}].placement.offsetXInches`),
+          offsetYInches:     expectFiniteNumber(pp.offsetYInches,     `designs[${i}].placement.offsetYInches`),
+          designWidthInches: expectFiniteNumber(pp.designWidthInches, `designs[${i}].placement.designWidthInches`),
+          ...(rotationDegrees !== undefined ? { rotationDegrees } : {}),
+        };
+      }
       return deserializeDesign({
         id: expectString(dd.id, `designs[${i}].id`),
         vector: vec,
         history,
         historyIndex,
         woodConfigs,
+        ...(placement ? { placement } : {}),
         ...(side ? { side } : {}),
       });
     });

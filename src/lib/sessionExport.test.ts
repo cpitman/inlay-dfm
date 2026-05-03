@@ -215,6 +215,55 @@ describe('loadSessionFromFile — v2 round-trip', () => {
     (s.designs[0] as unknown as { side: string }).side = 'sideways';
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/side/);
   });
+
+  it('round-trips a placement with rotationDegrees', async () => {
+    const s = makeV2Session();
+    s.designs[0].placement = {
+      offsetXInches: 1.25,
+      offsetYInches: 2.5,
+      designWidthInches: 4,
+      rotationDegrees: 90,
+    };
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].placement.offsetXInches).toBe(1.25);
+    expect(loaded.designs[0].placement.offsetYInches).toBe(2.5);
+    expect(loaded.designs[0].placement.designWidthInches).toBe(4);
+    expect(loaded.designs[0].placement.rotationDegrees).toBe(90);
+  });
+
+  it('omitted rotationDegrees stays undefined on load (caller treats as 0)', async () => {
+    const s = makeV2Session();
+    s.designs[0].placement = {
+      offsetXInches: 1, offsetYInches: 1, designWidthInches: 4,
+    };
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].placement.rotationDegrees).toBeUndefined();
+  });
+
+  it('rejects an invalid rotationDegrees value', async () => {
+    const s = makeV2Session();
+    s.designs[0].placement = {
+      offsetXInches: 1, offsetYInches: 1, designWidthInches: 4,
+      rotationDegrees: 45 as unknown as 0,
+    };
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/rotationDegrees/);
+  });
+
+  it('round-trips a placement without rotationDegrees (and now actually preserves it)', async () => {
+    // Regression: prior to the rotation change, the v2 loader silently
+    // dropped placement on load. This asserts the load path now passes
+    // it through.
+    const s = makeV2Session();
+    s.designs[0].placement = {
+      offsetXInches: 7.25,
+      offsetYInches: 8.5,
+      designWidthInches: 9.75,
+    };
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].placement.offsetXInches).toBe(7.25);
+    expect(loaded.designs[0].placement.offsetYInches).toBe(8.5);
+    expect(loaded.designs[0].placement.designWidthInches).toBe(9.75);
+  });
 });
 
 describe('loadSessionFromFile — shared validation', () => {

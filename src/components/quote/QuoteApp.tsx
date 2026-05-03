@@ -16,6 +16,7 @@ import { guessSpecies, WOOD_SPECIES } from '@/lib/woodSpecies';
 import { INLAY_WOOD_OPTIONS, computeQuote, type QuoteResult } from '@/lib/pricing';
 import { runQuoteOptimization, type MultiDesignOptimizationResult } from '@/lib/quoteOptimizer';
 import { boxesOverlap, findFreeSpot, type AABB } from '@/lib/aabb';
+import { effectivePlacementAabb } from '@/lib/rotation';
 import Step1BoardForm from './Step1BoardForm';
 import Step2ArtPlacement from './Step2ArtPlacement';
 import Step3QuoteDisplay from './Step3QuoteDisplay';
@@ -38,15 +39,11 @@ function pickPricedSpecies(hex: string): WoodSpeciesKey {
   return INLAY_WOOD_OPTIONS.includes(guess) ? guess : FALLBACK_INLAY_SPECIES;
 }
 
-/** AABB of a design on the board, in inches. */
+/** AABB of a design on the board, in inches — accounts for 90°-step rotation. */
 export function designAabb(d: Design): AABB {
-  const aspect = d.vector.naturalHeight / d.vector.naturalWidth;
-  return {
-    x: d.placement.offsetXInches,
-    y: d.placement.offsetYInches,
-    w: d.placement.designWidthInches,
-    h: d.placement.designWidthInches * aspect,
-  };
+  return effectivePlacementAabb(
+    d.placement, d.vector.naturalWidth, d.vector.naturalHeight,
+  );
 }
 
 /** True iff any same-side pair of designs overlaps, OR if any design
