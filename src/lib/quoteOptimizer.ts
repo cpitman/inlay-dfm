@@ -230,10 +230,17 @@ async function runSingleDesignOptimization(
 
   // Phase 4: ONE full DFM analysis at the production resolution. This
   // is the only run whose output reaches the cost model + bit-plan
-  // picker. Replaces the previous "re-analyze after every modification"
-  // pattern — net wall-time roughly halves on common modification paths.
+  // picker. Skip the per-side / per-preset / suggestion PNG encodes —
+  // the guided UI renders its own overlays in the React layer from
+  // the raw `widerBitInfeasibleMask` / `irreducibleProblemMask` masks
+  // that this analysis still produces. The encoded URLs are consumed
+  // only by the expert flow and ignored here, so encoding ~150 PNGs
+  // we'll discard is pure overhead.
   onProgress?.(`Analyzing your design${suffix}…`);
-  const result = await runDfmAnalysis(workingVector, settings, order, canvasWidth);
+  const result = await runDfmAnalysis(
+    workingVector, settings, order, canvasWidth,
+    { produceOverlays: false },
+  );
 
   // Phase 5: pick the per-layer bit plan.
   onProgress?.(`Picking optimal cutting bits${suffix}…`);

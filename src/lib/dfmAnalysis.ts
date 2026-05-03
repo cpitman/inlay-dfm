@@ -588,12 +588,31 @@ async function buildDepthMap(
 // Defaults to vector.detectedColors order; pass woodConfigs order to reflect
 // user reordering.
 // ---------------------------------------------------------------------------
+export interface RunDfmAnalysisOptions {
+  /**
+   * When `true` (default), the analysis encodes the user-angle pocket /
+   * plug overlays + depth maps, the per-preset overlays + depth maps,
+   * and the suggestion overlays — everything the expert flow's
+   * `WoodPanel` / `Step3Vbit` / `DesignCanvas` displays.
+   *
+   * When `false`, all those PNG encodes are skipped (the corresponding
+   * `*DataUrl` fields on the result are empty strings). The guided
+   * flow doesn't read them — it renders its own overlays in the React
+   * layer from the raw `widerBitInfeasibleMask` / `irreducibleProblemMask`
+   * masks, which are still computed. Skipping the encodes saves
+   * ~150 PNG encodes per design (≈80% of the full-pass wall-time).
+   */
+  produceOverlays?: boolean;
+}
+
 export async function runDfmAnalysis(
   vector: VectorData,
   settings: DFMSettings,
   colorOrder?: string[],
   canvasWidth: number = DEFAULT_CANVAS_WIDTH,
+  options: RunDfmAnalysisOptions = {},
 ): Promise<AnalysisResult> {
+  const { produceOverlays = true } = options;
   const { designWidthInches, vbitAngleDegrees, inlayDepthInches, grainDirection } = settings;
 
   const halfAngleRad = (vbitAngleDegrees / 2) * (Math.PI / 180);
@@ -653,11 +672,15 @@ export async function runDfmAnalysis(
     hasIsolatedUnreachableComponent: maskData.hasIsolatedUnreachableComponent,
     vbitAngleWarning:   maskData.vbitAngleWarning,
     thinWallPixelCount: maskData.thinWallPixelCount,
-    overlayDataUrl:  await buildOverlay(layerBase, canvasW, canvasH, maskData.isProblem, maskData.isThinWall, alignPixels),
+    overlayDataUrl: produceOverlays
+      ? await buildOverlay(layerBase, canvasW, canvasH, maskData.isProblem, maskData.isThinWall, alignPixels)
+      : '',
     // Populated in Phase 5.5 once the largest-feasible angle is known.
     suggestionOverlayDataUrl: '',
     problemComponents: findMaskComponentCentroids(maskData.isProblem, canvasW, canvasH),
-    depthMapDataUrl: await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx, plugFit),
+    depthMapDataUrl: produceOverlays
+      ? await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx, plugFit)
+      : '',
   });
 
   // -----------------------------------------------------------------------
@@ -1026,6 +1049,26 @@ ${plugStockOutlineSvg}
   const perPresetByWood: PerPresetAngleResult[][] = woods.map(() => []);
   const matrixVbits: MachiningTimeMatrix['vbits'] = [];
 
+  // Pass 1: sequential. Walk every (angle, wood, side) computing
+  // problemStatsForAngle + accumulating per-angle feasibility totals.
+  // We need this to be sequential because matrixVbits[i].feasible
+  // closes over `maxProblem` and `anyIsolatedComponent` which are
+  // accumulated across woods within an angle. Stash everything the
+  // PNG encodes will need (problem masks + computed centroids) into
+  // an inputs array consumed by Pass 2.
+  interface PerPresetEncodeInputs {
+    angleDegrees: number;
+    angleVbitWarning: boolean;
+    angleFdrPx: number;
+    perWood: Array<{
+      pocketStats: ReturnType<typeof problemStatsForAngle>;
+      plugStats:   ReturnType<typeof problemStatsForAngle>;
+      pocketComponents: ReturnType<typeof findMaskComponentCentroids>;
+      plugComponents:   ReturnType<typeof findMaskComponentCentroids>;
+    }>;
+  }
+  const presetInputs: PerPresetEncodeInputs[] = [];
+
   for (let aIdx = 0; aIdx < VBIT_PRESET_ANGLES.length; aIdx++) {
     const angleDeg = VBIT_PRESET_ANGLES[aIdx];
     const half = (angleDeg / 2) * (Math.PI / 180);
@@ -1034,6 +1077,7 @@ ${plugStockOutlineSvg}
 
     let maxProblem = 0;
     let anyIsolatedComponent = false;
+    const perWood: PerPresetEncodeInputs['perWood'] = [];
 
     for (let wIdx = 0; wIdx < woods.length; wIdx++) {
       const inp = overlayRebuildInputs[wIdx];
@@ -1050,48 +1094,14 @@ ${plugStockOutlineSvg}
         anyIsolatedComponent = true;
       }
 
-      const pocketOverlay = await buildOverlay(
-        inp.pocketBase, canvasW, canvasH,
-        pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign,
-      );
-      const plugOverlay = await buildOverlay(
-        inp.plugBase, canvasW, canvasH,
-        plugStats.problemMask!, inp.plugIsThinWall,
-      );
-      const pocketDepth = await buildDepthMap(
-        inp.pocketBase, canvasW, canvasH, inp.pocketMask, inp.pocketDist1, angleFdrPx,
-      );
-      const plugDepth = await buildDepthMap(
-        inp.plugBase, canvasW, canvasH, inp.plugMask, inp.plugDist1, angleFdrPx, plugDepthMapFit,
-      );
-
-      perPresetByWood[wIdx].push({
-        angleDegrees: angleDeg,
-        pocket: {
-          fullDepthPercent: pocketStats.fullDepthPercent,
-          problemAreaPercent: pocketStats.percent,
-          passed: pocketStats.passed,
-          hasAnyFullDepth: pocketStats.hasAnyFullDepth,
-          hasIsolatedUnreachableComponent: pocketStats.hasIsolatedComponent,
-          vbitAngleWarning: angleVbitWarning,
-          overlayDataUrl: pocketOverlay,
-          problemComponents: findMaskComponentCentroids(pocketStats.problemMask!, canvasW, canvasH),
-          depthMapDataUrl: pocketDepth,
-        },
-        plug: {
-          fullDepthPercent: plugStats.fullDepthPercent,
-          problemAreaPercent: plugStats.percent,
-          passed: plugStats.passed,
-          hasAnyFullDepth: plugStats.hasAnyFullDepth,
-          hasIsolatedUnreachableComponent: plugStats.hasIsolatedComponent,
-          vbitAngleWarning: angleVbitWarning,
-          overlayDataUrl: plugOverlay,
-          problemComponents: findMaskComponentCentroids(plugStats.problemMask!, canvasW, canvasH),
-          depthMapDataUrl: plugDepth,
-        },
+      perWood.push({
+        pocketStats, plugStats,
+        pocketComponents: findMaskComponentCentroids(pocketStats.problemMask!, canvasW, canvasH),
+        plugComponents:   findMaskComponentCentroids(plugStats.problemMask!,   canvasW, canvasH),
       });
     }
 
+    presetInputs.push({ angleDegrees: angleDeg, angleVbitWarning, angleFdrPx, perWood });
     matrixVbits.push({
       angleDegrees: angleDeg,
       ...VBIT_RATES[angleDeg],
@@ -1099,6 +1109,99 @@ ${plugStockOutlineSvg}
       maxProblemAreaPercent: maxProblem,
       hasIsolatedComponent: anyIsolatedComponent,
     });
+  }
+
+  // Pass 2: PNG encodes for the per-preset overlays + depth maps.
+  // Each (angle, wood, side, kind) encode is independent — fire the
+  // whole batch in parallel and assemble the result objects from the
+  // resolved values. When `produceOverlays === false` (guided flow),
+  // the batch is empty and every URL field is `''`.
+  type EncodeKind = 'pocketOverlay' | 'plugOverlay' | 'pocketDepth' | 'plugDepth';
+  interface EncodeJob {
+    aIdx: number;
+    wIdx: number;
+    kind: EncodeKind;
+    promise: Promise<string>;
+  }
+  const encodeJobs: EncodeJob[] = [];
+
+  if (produceOverlays) {
+    for (let aIdx = 0; aIdx < presetInputs.length; aIdx++) {
+      const { angleFdrPx } = presetInputs[aIdx];
+      for (let wIdx = 0; wIdx < woods.length; wIdx++) {
+        const inp = overlayRebuildInputs[wIdx];
+        const w = presetInputs[aIdx].perWood[wIdx];
+        encodeJobs.push({
+          aIdx, wIdx, kind: 'pocketOverlay',
+          promise: buildOverlay(inp.pocketBase, canvasW, canvasH,
+            w.pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign),
+        });
+        encodeJobs.push({
+          aIdx, wIdx, kind: 'plugOverlay',
+          promise: buildOverlay(inp.plugBase, canvasW, canvasH,
+            w.plugStats.problemMask!, inp.plugIsThinWall),
+        });
+        encodeJobs.push({
+          aIdx, wIdx, kind: 'pocketDepth',
+          promise: buildDepthMap(inp.pocketBase, canvasW, canvasH,
+            inp.pocketMask, inp.pocketDist1, angleFdrPx),
+        });
+        encodeJobs.push({
+          aIdx, wIdx, kind: 'plugDepth',
+          promise: buildDepthMap(inp.plugBase, canvasW, canvasH,
+            inp.plugMask, inp.plugDist1, angleFdrPx, plugDepthMapFit),
+        });
+      }
+    }
+  }
+  // Fire in parallel — each encode writes its own OffscreenCanvas so
+  // there's no shared state across jobs. Browser may serialize at the
+  // canvas API level, but cycles spent waiting on encoding are
+  // reclaimable by other queued encodes.
+  const encodeResults = await Promise.all(encodeJobs.map(j => j.promise));
+  // Index the results back into a per-(aIdx, wIdx) bucket.
+  const urlsByAW: Record<EncodeKind, string>[][] = presetInputs.map(() =>
+    woods.map(() => ({
+      pocketOverlay: '', plugOverlay: '', pocketDepth: '', plugDepth: '',
+    })),
+  );
+  for (let i = 0; i < encodeJobs.length; i++) {
+    const j = encodeJobs[i];
+    urlsByAW[j.aIdx][j.wIdx][j.kind] = encodeResults[i];
+  }
+
+  // Pass 3: assemble PerPresetAngleResult from the collected stats + URLs.
+  for (let aIdx = 0; aIdx < presetInputs.length; aIdx++) {
+    const p = presetInputs[aIdx];
+    for (let wIdx = 0; wIdx < woods.length; wIdx++) {
+      const w = p.perWood[wIdx];
+      const u = urlsByAW[aIdx][wIdx];
+      perPresetByWood[wIdx].push({
+        angleDegrees: p.angleDegrees,
+        pocket: {
+          fullDepthPercent: w.pocketStats.fullDepthPercent,
+          problemAreaPercent: w.pocketStats.percent,
+          passed: w.pocketStats.passed,
+          hasAnyFullDepth: w.pocketStats.hasAnyFullDepth,
+          hasIsolatedUnreachableComponent: w.pocketStats.hasIsolatedComponent,
+          vbitAngleWarning: p.angleVbitWarning,
+          overlayDataUrl: u.pocketOverlay,
+          problemComponents: w.pocketComponents,
+          depthMapDataUrl: u.pocketDepth,
+        },
+        plug: {
+          fullDepthPercent: w.plugStats.fullDepthPercent,
+          problemAreaPercent: w.plugStats.percent,
+          passed: w.plugStats.passed,
+          hasAnyFullDepth: w.plugStats.hasAnyFullDepth,
+          hasIsolatedUnreachableComponent: w.plugStats.hasIsolatedComponent,
+          vbitAngleWarning: p.angleVbitWarning,
+          overlayDataUrl: u.plugOverlay,
+          problemComponents: w.plugComponents,
+          depthMapDataUrl: u.plugDepth,
+        },
+      });
+    }
   }
 
   for (let wIdx = 0; wIdx < woods.length; wIdx++) {
@@ -1197,16 +1300,21 @@ ${plugStockOutlineSvg}
         };
       }
 
-      woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
-        inp.pocketBase, canvasW, canvasH,
-        pocketDisplayProblem, inp.pocketIsThinWall, inp.pocketAlign,
-        pocketSuggestion,
-      );
-      woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
-        inp.plugBase, canvasW, canvasH,
-        plugDisplayProblem, inp.plugIsThinWall, undefined,
-        plugSuggestion,
-      );
+      // Skip the suggestion-overlay PNG encode in `produceOverlays:
+      // false` mode (guided flow). The masks above are still
+      // populated; the guided UI renders its own overlays from them.
+      if (produceOverlays) {
+        woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
+          inp.pocketBase, canvasW, canvasH,
+          pocketDisplayProblem, inp.pocketIsThinWall, inp.pocketAlign,
+          pocketSuggestion,
+        );
+        woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
+          inp.plugBase, canvasW, canvasH,
+          plugDisplayProblem, inp.plugIsThinWall, undefined,
+          plugSuggestion,
+        );
+      }
     }
   } else {
     // No feasible preset — even the sharpest v-bit fails. Display at the
@@ -1225,19 +1333,23 @@ ${plugStockOutlineSvg}
       const plugStats = problemStatsForAngle(
         inp.plugMask, inp.plugDist1, fFdrPx, canvasW, canvasH, true,
       );
-      woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
-        inp.pocketBase, canvasW, canvasH,
-        pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign,
-        undefined, // no teal suggestion — there's no upgrade path
-      );
-      woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
-        inp.plugBase, canvasW, canvasH,
-        plugStats.problemMask!, inp.plugIsThinWall, undefined,
-        undefined,
-      );
+      if (produceOverlays) {
+        woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
+          inp.pocketBase, canvasW, canvasH,
+          pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign,
+          undefined, // no teal suggestion — there's no upgrade path
+        );
+        woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
+          inp.plugBase, canvasW, canvasH,
+          plugStats.problemMask!, inp.plugIsThinWall, undefined,
+          undefined,
+        );
+      }
       // Stash the smallest-preset problem masks so the guided flow can
       // render them in red (over the board composite) and place locator
-      // badges on each connected component.
+      // badges on each connected component. Computed regardless of
+      // `produceOverlays` since the guided flow consumes these masks
+      // in the React layer to render its own overlays.
       woods[i].irreducibleProblemMask = {
         pocket: pocketStats.problemMask!,
         plug:   plugStats.problemMask!,
