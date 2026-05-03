@@ -195,6 +195,26 @@ describe('loadSessionFromFile — v2 round-trip', () => {
     s.designs[0] = { id: 'x' }; // missing vector/history/woodConfigs
     await expect(loadSessionFromFile(asFile(s))).rejects.toThrow();
   });
+
+  it('round-trips Design.side when present', async () => {
+    const s = makeV2Session();
+    (s.designs[0] as { side?: 'top' | 'bottom' }).side = 'bottom';
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].side).toBe('bottom');
+  });
+
+  it('omitted side stays undefined on load (caller treats as top)', async () => {
+    const s = makeV2Session();
+    delete (s.designs[0] as { side?: unknown }).side;
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].side).toBeUndefined();
+  });
+
+  it('rejects an invalid side value', async () => {
+    const s = makeV2Session();
+    (s.designs[0] as unknown as { side: string }).side = 'sideways';
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/side/);
+  });
 });
 
 describe('loadSessionFromFile — shared validation', () => {

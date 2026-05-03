@@ -145,8 +145,15 @@ export function computeQuote(input: QuoteInput): QuoteResult {
 
   // Per-side species totals (used for labor + machining premiums).
   const sumPerSide = top.uniqueSpeciesCount + bottom.uniqueSpeciesCount;
-  const totalCuttingMinutes = top.totalCuttingMinutes + bottom.totalCuttingMinutes;
-  const totalToolChangeMinutes = top.jointToolChangeMinutes + bottom.jointToolChangeMinutes;
+  // Defensive: a side that's entirely infeasible reports NaN cutting
+  // minutes from the optimizer. The guided caller in QuoteApp sanitizes
+  // before calling, but bound the failure mode here too so a future
+  // caller that forgets doesn't end up rendering "$NaN" in the price.
+  // The `noFeasibleAngle` flag on the optimizer aggregate is the right
+  // signal for "approximate quote"; this just keeps the math finite.
+  const safe = (n: number): number => (Number.isFinite(n) ? n : 0);
+  const totalCuttingMinutes    = safe(top.totalCuttingMinutes)    + safe(bottom.totalCuttingMinutes);
+  const totalToolChangeMinutes = safe(top.jointToolChangeMinutes) + safe(bottom.jointToolChangeMinutes);
 
   // Materials. Per-species inlay cost with packing-aware scaling
   // applied PER SIDE: a species' plug-stock OBB area on the top is

@@ -80,6 +80,12 @@ export interface ExpertDesignLike {
   historyIndex: number;
   woodConfigs: WoodConfig[];
   placement: Placement;
+  /** Which board face this design lives on. Optional because the
+   *  expert flow doesn't expose sides today; the guided flow's
+   *  per-side `Design.side` matches this when sessions ever flow
+   *  between the two flows. Loader defaults to undefined → caller
+   *  falls back to 'top'. */
+  side?: 'top' | 'bottom';
 }
 
 interface SaveSessionInput {
@@ -114,8 +120,9 @@ export function saveSessionToFile(input: SaveSessionInput): void {
       historyIndex: d.historyIndex,
       woodConfigs: d.woodConfigs,
       placement: d.placement,
-      // ExpertDesignLike doesn't carry a `side`; the guided flow's
-      // future save would. Default to 'top' is applied on load.
+      // `side` is only set by callers that track per-design faces
+      // (the guided flow's `Design.side`). Omitted means top.
+      ...(d.side !== undefined ? { side: d.side } : {}),
     })),
     activeDesignId: input.activeDesignId,
     settings: input.settings,
@@ -313,6 +320,7 @@ function deserializeDesign(d: SerializedDesign): ExpertDesignLike {
     historyIndex: d.historyIndex,
     woodConfigs: d.woodConfigs,
     placement,
+    side: d.side,
   };
 }
 
@@ -392,12 +400,23 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
         throw new Error(`Session field "designs[${i}].historyIndex" (${historyIndex}) is out of range for history of length ${history.length}.`);
       }
       const woodConfigs = validateWoodConfigs(dd.woodConfigs, `designs[${i}].woodConfigs`);
+      // `side` is optional. When present it must be 'top' or 'bottom';
+      // any other value is a malformed file and rejected. Missing → undefined,
+      // which the caller treats as 'top'.
+      let side: 'top' | 'bottom' | undefined;
+      if (dd.side !== undefined) {
+        if (dd.side !== 'top' && dd.side !== 'bottom') {
+          throw new Error(`Session field "designs[${i}].side" must be "top" or "bottom".`);
+        }
+        side = dd.side;
+      }
       return deserializeDesign({
         id: expectString(dd.id, `designs[${i}].id`),
         vector: vec,
         history,
         historyIndex,
         woodConfigs,
+        ...(side ? { side } : {}),
       });
     });
     if (top.activeDesignId !== null && typeof top.activeDesignId !== 'string') {

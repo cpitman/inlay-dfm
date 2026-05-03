@@ -239,6 +239,32 @@ describe('computeQuote — two-sided cases', () => {
     expect(q.breakdown.machineMinutes - noGroove.breakdown.machineMinutes).toBe(20);
   });
 
+  it('treats a side with NaN cutting minutes as 0 — guard against optimizer NaN leakage', () => {
+    // The optimizer marks a side infeasible by setting NaN on the
+    // aggregate. The caller is supposed to sanitize, but computeQuote
+    // bounds the failure mode itself so a forgetful caller doesn't
+    // render "$NaN" to the user.
+    const q = computeQuote({
+      boardConfig: BASE_CHERRY_BOARD,
+      perSide: {
+        top: {
+          totalCuttingMinutes: NaN,
+          jointToolChangeMinutes: NaN,
+          uniqueSpeciesCount: 1,
+          plugStockUsageBySpecies: new Map([['walnut', INLAY_SHEET_AREA_SQ_IN]]),
+        },
+        bottom: EMPTY_SIDE_AGGREGATE,
+      },
+    });
+    expect(Number.isFinite(q.breakdown.machineMinutes)).toBe(true);
+    expect(Number.isFinite(q.breakdown.totalEstimate)).toBe(true);
+    expect(Number.isFinite(q.lowDollars)).toBe(true);
+    expect(Number.isFinite(q.highDollars)).toBe(true);
+    // Per-feature premium for the 1 species still applies; cutting +
+    // tool-change minutes are 0.
+    expect(q.breakdown.machineMinutes).toBe(30);
+  });
+
   it('one-time labor blocks (setup + finishing) are NOT doubled by adding a back side', () => {
     // Single-side walnut.
     const single = computeQuote({
