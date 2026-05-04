@@ -7,7 +7,6 @@ import { runDfmAnalysis } from '@/lib/dfmAnalysis';
 import { generateComposite } from '@/lib/compositeRenderer';
 import { WOOD_SPECIES, guessSpecies } from '@/lib/woodSpecies';
 import { combineLayers } from '@/lib/svgLayers';
-import { extendForRegistration } from '@/lib/extendForRegistration';
 import { fillEnclosedHoles } from '@/lib/fillEnclosedHoles';
 import { downloadSvg } from '@/lib/svgExport';
 import { saveSessionToFile, loadSessionFromFile, looksLikeSessionFile } from '@/lib/sessionExport';
@@ -435,29 +434,6 @@ export default function Home() {
     pushSnapshot(newLayers, `Reset ${label}`);
   }, [activeDesign, vector, pushSnapshot]);
 
-  const handleExtendForRegistration = useCallback(async (colorHex: string) => {
-    if (!vector || !activeDesign) return;
-    setBusyModification(true);
-    setErrorMsg('');
-    try {
-      const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
-      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
-      const res = await extendForRegistration(vector, colorHex, settings.designWidthInches, colorOrder, canvasWidth);
-      if (res.addedPixelCount === 0) {
-        setErrorMsg('No alignment risk regions found to extend on this layer.');
-        setStatus('error');
-      } else {
-        const label = activeDesign.woodConfigs.find(w => w.colorHex === colorHex)?.label ?? colorHex;
-        pushSnapshot(res.layers, `Extend ${label} for registration (+${res.addedAreaSqInches.toFixed(3)} in²)`);
-      }
-    } catch (e) {
-      setErrorMsg((e as Error).message);
-      setStatus('error');
-    } finally {
-      setBusyModification(false);
-    }
-  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
-
   const handleFillEnclosedHoles = useCallback(async (colorHex: string) => {
     if (!vector || !activeDesign) return;
     setBusyModification(true);
@@ -475,50 +451,6 @@ export default function Home() {
           res.layers,
           `Fill ${res.filledHoleCount} hole${res.filledHoleCount !== 1 ? 's' : ''} in ${label} (+${res.filledAreaSqIn.toFixed(3)} in²)`,
         );
-      }
-    } catch (e) {
-      setErrorMsg((e as Error).message);
-      setStatus('error');
-    } finally {
-      setBusyModification(false);
-    }
-  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
-
-  const handleExtendAll = useCallback(async (colorHexes: string[]) => {
-    if (!vector || !activeDesign || colorHexes.length === 0) return;
-    setBusyModification(true);
-    setErrorMsg('');
-    try {
-      const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
-      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
-      let workingLayers = vector.layers;
-      let totalAdded = 0;
-      let appliedCount = 0;
-      for (const colorHex of colorHexes) {
-        const workingVector: VectorData = {
-          ...vector,
-          layers: workingLayers,
-          svgString: combineLayers(
-            workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-          ),
-        };
-        const res = await extendForRegistration(
-          workingVector, colorHex, settings.designWidthInches, colorOrder, canvasWidth,
-        );
-        if (res.addedPixelCount > 0) {
-          workingLayers = res.layers;
-          totalAdded += res.addedAreaSqInches;
-          appliedCount++;
-        }
-      }
-      if (appliedCount > 0) {
-        pushSnapshot(
-          workingLayers,
-          `Extend ${appliedCount} layer${appliedCount === 1 ? '' : 's'} for registration (+${totalAdded.toFixed(3)} in²)`,
-        );
-      } else {
-        setErrorMsg('No alignment risk regions found across the eligible layers.');
-        setStatus('error');
       }
     } catch (e) {
       setErrorMsg((e as Error).message);
@@ -937,9 +869,7 @@ export default function Home() {
             onOverlayModeChange={setOverlayMode}
             busyModification={busyModification}
             onAnalyze={() => { void handleAnalyze(); }}
-            onExtendForRegistration={handleExtendForRegistration}
             onFillEnclosedHoles={handleFillEnclosedHoles}
-            onExtendAll={handleExtendAll}
             onFillAll={handleFillAll}
             onResetLayer={handleResetLayer}
             onUpdateWoodConfig={updateWoodConfig}
@@ -963,7 +893,6 @@ export default function Home() {
             busyModification={busyModification}
             vbitTouched={vbitTouched}
             onVbitTouched={() => setVbitTouched(true)}
-            onExtendForRegistration={handleExtendForRegistration}
             onFillEnclosedHoles={handleFillEnclosedHoles}
             onResetLayer={handleResetLayer}
             onUpdateWoodConfig={updateWoodConfig}

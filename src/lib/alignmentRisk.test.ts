@@ -177,11 +177,12 @@ describe('Registration error detection', () => {
     expect(outerFlagged).toBe(0);
   });
 
-  it('Positive after extension: Layer 1 hole shrunken by 0.05" → no risk', () => {
-    // After running extendForRegistration on the Positive fixture, Layer 1's
-    // hole shrinks by EXTENSION_INCHES (0.05") on every side: the lower
-    // layer now extends under the upper layer, well past the threshold.
-    // 0.05" * 264.8 ppi ≈ 13 px shrinkage on each side.
+  it('Boundaries 0.05" apart on every side → no risk', () => {
+    // Variant of the Positive fixture where Layer 1's hole is 0.05"
+    // smaller on every side than Layer 2's rect — i.e., Layer 1
+    // extends well past the boundary on every side. Distance between
+    // the boundaries (0.05") is much greater than the alignment
+    // threshold (0.01"), so detection reports no risk.
     const ext = Math.round(0.05 * PIXELS_PER_INCH);
     const layer1 = makeCanvasMinusHole(
       HOLE_X1 + ext, HOLE_Y1 + ext, HOLE_X2 - ext, HOLE_Y2 - ext,

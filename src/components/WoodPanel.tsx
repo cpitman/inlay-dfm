@@ -34,7 +34,6 @@ interface WoodPanelProps {
    *  per-side ResultsPanel. Step 2 sets this because the user hasn't picked
    *  a v-bit yet — feasibility is summarized at the page level instead. */
   step2Mode?: boolean;
-  onExtendForRegistration: () => void;
   onFillEnclosedHoles: () => void;
   onResetLayer: () => void;
 }
@@ -46,7 +45,7 @@ export default function WoodPanel({
   analysis, vector, overlayMode, common, settings,
   otherWoodLabels,
   isModified, busyModification, step2Mode,
-  onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
+  onFillEnclosedHoles, onResetLayer,
 }: WoodPanelProps) {
   const overlay = (side: 'pocket' | 'plug') => {
     if (!analysis) return null;
@@ -278,19 +277,9 @@ ${outline}
           ))}
           <p className="text-xs text-fuchsia-500">
             Affected edge shown in magenta on the Threshold overlay above.
+            Adjust the design so adjacent inlay edges leave a wider gap to
+            absorb registration error.
           </p>
-          <div className="pt-1.5">
-            <button
-              onClick={onExtendForRegistration}
-              disabled={busyModification}
-              className="px-3 py-1.5 rounded text-xs font-medium bg-fuchsia-700 hover:bg-fuchsia-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {busyModification ? 'Working…' : 'Extend under later inlays (+0.05")'}
-            </button>
-            <span className="ml-2 text-xs text-fuchsia-500">
-              Re-run analysis to verify the issue is resolved.
-            </span>
-          </div>
         </div>
       )}
 

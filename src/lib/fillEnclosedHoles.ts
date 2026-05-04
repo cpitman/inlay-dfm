@@ -28,9 +28,6 @@ interface FillResult {
  * by the union of later inlay layers. The resulting design is visually
  * identical (the holes were hidden by later layers anyway) but the V-bit
  * no longer has to trace the hole perimeter on either side, saving time.
- *
- * Mirrors `extendForRegistration`'s shape — same parameters and history
- * integration so the page handler can be wired the same way.
  */
 export async function fillEnclosedHoles(
   vector: VectorData,

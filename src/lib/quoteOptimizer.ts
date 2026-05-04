@@ -1,11 +1,8 @@
-import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Placement, AlignmentIssue } from '@/types';
+import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Placement } from '@/types';
 import {
   runDfmAnalysis,
   runDfmAnalysisLite,
-  rasterizeLayerMask,
-  redetectAlignmentRisks,
 } from './dfmAnalysis';
-import { extendForRegistration } from './extendForRegistration';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
@@ -23,9 +20,8 @@ const TOOL_CHANGE_MINUTES_MANUAL = 5;
  */
 const GUIDED_PIXELS_PER_INCH = 240;
 /**
- * Resolution used by the lite-pass + fill/extend modifications. Half
- * of `GUIDED_PIXELS_PER_INCH` — the 0.01" alignment threshold is still
- * suprapixel (1.2 px) and connectivity-based fill detection is
+ * Resolution used by the lite-pass + fill modification. Half of
+ * `GUIDED_PIXELS_PER_INCH` — connectivity-based fill detection is
  * resolution-insensitive at this scale, but the per-layer rasterization
  * and per-pixel work drops to ~25% of the full-pass cost.
  */
@@ -55,8 +51,6 @@ export interface DesignOptimizationResult {
   bitPlan: PerLayerBitPlan | null;
   /** True iff a fill-holes pass ran for this design. */
   appliedFill: boolean;
-  /** True iff an extend-for-registration pass ran for this design. */
-  appliedExtend: boolean;
 }
 
 /**
@@ -119,21 +113,18 @@ export async function runQuoteOptimization(
 }
 
 /**
- * Pipeline for one design, in isolation. Five phases:
+ * Pipeline for one design, in isolation. Four phases:
  *
  *   1. Layer-order pre-pass at 60 ppi (`preAnalyzeLayerOrder`) +
  *      overlap-aware topo sort.
  *   2. Lite DFM analysis at 120 ppi — produces only fillableHoleCount
  *      and alignmentIssues per layer, plus the cached pocket masks.
- *   3. If any fillable holes → applyFillAll at 120 ppi → re-rasterize
- *      modified layers → redetectAlignmentRisks on the patched mask
- *      set so extend doesn't fire on issues fill already resolved.
- *   4. If any remaining alignment risks → applyExtendAll at 120 ppi.
- *   5. ONE full DFM analysis at 240 ppi — drives cost + bit plan.
- *   6. pickPerLayerBitPlan.
+ *   3. If any fillable holes → applyFillAll at 120 ppi.
+ *   4. ONE full DFM analysis at 240 ppi — drives cost + bit plan.
+ *   5. pickPerLayerBitPlan.
  *
- * Net analyses per design: 1 lite + 1 full, regardless of which
- * modifications applied (was 1-3 full in the previous design).
+ * Net analyses per design: 1 lite + 1 full, regardless of whether the
+ * fill modification applied.
  */
 async function runSingleDesignOptimization(
   design: Design,
@@ -193,42 +184,13 @@ async function runSingleDesignOptimization(
   // already an overapproximation (any pixel inside the hole works).
   let appliedFill = false;
   const fillTargets = lite.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
-  let alignmentByColor: Map<string, AlignmentIssue[]> = new Map(
-    lite.woods.map(w => [w.colorHex, w.alignmentIssues] as const),
-  );
   if (fillTargets.length > 0) {
     onProgress?.(`Filling enclosed holes${suffix}…`);
     workingVector = await applyFillAll(workingVector, fillTargets, designWidthInches, order, liteCanvasWidth);
     appliedFill = true;
-
-    // Re-rasterize ONLY the modified layers — unmodified layers'
-    // masks are still valid from the lite pass. Then re-run alignment
-    // detection on the patched mask set so an alignment issue that
-    // fill resolved (by removing an interior boundary) doesn't trip
-    // extend on the next phase.
-    const updatedMasks = new Map(lite.pocketMasks);
-    for (const colorHex of fillTargets) {
-      updatedMasks.set(
-        colorHex,
-        await rasterizeLayerMask(workingVector, colorHex, lite.canvasW, lite.canvasH),
-      );
-    }
-    alignmentByColor = redetectAlignmentRisks(
-      updatedMasks, order, lite.canvasW, lite.canvasH, lite.alignThresholdPx,
-    );
   }
 
-  // Phase 3: extend regions for registration. Targets come from the
-  // post-fill alignment map.
-  let appliedExtend = false;
-  const extendTargets = order.filter(c => (alignmentByColor.get(c)?.length ?? 0) > 0);
-  if (extendTargets.length > 0) {
-    onProgress?.(`Extending registration borders${suffix}…`);
-    workingVector = await applyExtendAll(workingVector, extendTargets, designWidthInches, order, liteCanvasWidth);
-    appliedExtend = true;
-  }
-
-  // Phase 4: ONE full DFM analysis at the production resolution. This
+  // Phase 3: ONE full DFM analysis at the production resolution. This
   // is the only run whose output reaches the cost model + bit-plan
   // picker. Two `runDfmAnalysis` shortcuts apply here, both saving
   // wall-time the guided flow can't observe:
@@ -250,7 +212,7 @@ async function runSingleDesignOptimization(
     { produceOverlays: false, useBinarySearchFeasibility: true },
   );
 
-  // Phase 5: pick the per-layer bit plan.
+  // Phase 4: pick the per-layer bit plan.
   onProgress?.(`Picking optimal cutting bits${suffix}…`);
   const perLayerPresetAnalysis = result.woods.map(w => w.perPresetAnalysis);
   const bitPlan = pickPerLayerBitPlan(
@@ -268,7 +230,6 @@ async function runSingleDesignOptimization(
     result,
     bitPlan,
     appliedFill,
-    appliedExtend,
   };
 }
 
@@ -329,37 +290,8 @@ function aggregateSide(designs: DesignOptimizationResult[]): SideAggregate {
   };
 }
 
-/**
- * Apply extendForRegistration to every layer in `colorHexes` sequentially,
- * threading the modified layers through each call so the next iteration
- * sees the previous's output. Mirrors the page-level handleExtendAll
- * pattern but pure (no React state).
- */
-async function applyExtendAll(
-  vector: VectorData,
-  colorHexes: string[],
-  designWidthInches: number,
-  colorOrder: string[],
-  canvasWidth: number,
-): Promise<VectorData> {
-  let workingLayers = vector.layers;
-  for (const colorHex of colorHexes) {
-    const workingVector: VectorData = {
-      ...vector,
-      layers: workingLayers,
-      svgString: combineLayers(workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
-    };
-    const res = await extendForRegistration(workingVector, colorHex, designWidthInches, colorOrder, canvasWidth);
-    if (res.addedPixelCount > 0) workingLayers = res.layers;
-  }
-  return {
-    ...vector,
-    layers: workingLayers,
-    svgString: combineLayers(workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
-  };
-}
-
-/** Same pattern as applyExtendAll but for fillEnclosedHoles. */
+/** Apply fillEnclosedHoles to every layer in `colorHexes` sequentially,
+ *  threading the modified layers through each call. */
 async function applyFillAll(
   vector: VectorData,
   colorHexes: string[],

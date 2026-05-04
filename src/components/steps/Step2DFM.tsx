@@ -26,9 +26,7 @@ interface Step2DFMProps {
   busyModification: boolean;
 
   onAnalyze: () => void;
-  onExtendForRegistration: (colorHex: string) => void;
   onFillEnclosedHoles: (colorHex: string) => void;
-  onExtendAll: (colorHexes: string[]) => void;
   onFillAll: (colorHexes: string[]) => void;
   onResetLayer: (colorHex: string) => void;
   onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
@@ -57,8 +55,8 @@ function Divider() {
  * Step 2 — DFM (Design for Manufacturability).
  *
  * For PR 1 this is a re-housing of the existing analysis UI — geometry
- * stats, overlay toggle, per-wood panels with their built-in extend /
- * fill / alignment / fillable-hole cards. PR 2 polishes this with an
+ * stats, overlay toggle, per-wood panels with their built-in fill /
+ * alignment / fillable-hole cards. PR 2 polishes this with an
  * AutoImprovementsPanel + StaticTipsPanel + a new "regions only reachable
  * by an infeasible smaller v-bit" canvas overlay color.
  */
@@ -66,8 +64,8 @@ export default function Step2DFM({
   vector, originalLayers, settings, woodConfigs, result,
   analysisStale, status, errorMsg, overlayMode, onOverlayModeChange,
   busyModification,
-  onAnalyze, onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
-  onExtendAll, onFillAll,
+  onAnalyze, onFillEnclosedHoles, onResetLayer,
+  onFillAll,
   onUpdateWoodConfig, onMoveWood,
   canAdvance, onBack, onNext,
 }: Step2DFMProps) {
@@ -202,7 +200,6 @@ export default function Step2DFM({
             result={result}
             woodConfigs={woodConfigs}
             busy={busyModification}
-            onExtendAll={onExtendAll}
             onFillAll={onFillAll}
           />
         )}
@@ -239,7 +236,6 @@ export default function Step2DFM({
                   isModified={isModified}
                   busyModification={busyModification}
                   step2Mode={true}
-                  onExtendForRegistration={() => onExtendForRegistration(wc.colorHex)}
                   onFillEnclosedHoles={() => onFillEnclosedHoles(wc.colorHex)}
                   onResetLayer={() => onResetLayer(wc.colorHex)}
                 />

@@ -54,8 +54,8 @@ async function rasterizeLayerToMask(
  * Build a clean export SVG: every layer's geometry is unioned into a single
  * traced polygon path. CAM tools expect contiguous, non-overlapping geometry
  * per cut — our in-app layers can contain multiple overlapping <path> elements
- * after fillEnclosedHoles / extendForRegistration appended new regions, and
- * those overlaps confuse CAM toolpath generators even though they render
+ * after fillEnclosedHoles appended new regions, and those overlaps confuse
+ * CAM toolpath generators even though they render
  * identically in the browser.
  *
  * The round-trip (Bezier → mask → marching squares + Douglas-Peucker → polygon)

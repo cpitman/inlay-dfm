@@ -24,7 +24,6 @@ interface Step3VbitProps {
   vbitTouched: boolean;
   onVbitTouched: () => void;
 
-  onExtendForRegistration: (colorHex: string) => void;
   onFillEnclosedHoles: (colorHex: string) => void;
   onResetLayer: (colorHex: string) => void;
   onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
@@ -51,7 +50,7 @@ export default function Step3Vbit({
   vector, originalLayers, settings, onSettingsChange,
   woodConfigs, result, overlayMode, onOverlayModeChange,
   busyModification, vbitTouched, onVbitTouched,
-  onExtendForRegistration, onFillEnclosedHoles, onResetLayer,
+  onFillEnclosedHoles, onResetLayer,
   onUpdateWoodConfig, onMoveWood,
   canAdvance, onBack, onNext,
 }: Step3VbitProps) {
@@ -240,7 +239,6 @@ export default function Step3Vbit({
                       otherWoodLabels={otherWoodLabels}
                       isModified={isModified}
                       busyModification={busyModification}
-                      onExtendForRegistration={() => onExtendForRegistration(wc.colorHex)}
                       onFillEnclosedHoles={() => onFillEnclosedHoles(wc.colorHex)}
                       onResetLayer={() => onResetLayer(wc.colorHex)}
                     />

@@ -32,9 +32,9 @@ For each design layer (and its corresponding plug), at every selectable v-bit an
 2. **Isolated unreachable components.** A connected piece of the carve with no full-depth pixel anywhere inside it — same blocker as above, but called out as a topological failure (the bit physically can't seat anywhere in that region).
 3. **Thin walls** (side grain only). Short runs of *un*-carved material perpendicular to the grain that are at risk of splitting. Below a 0.25 in² noise floor, ignored.
 4. **V-bit angle** (side grain only). Angles below 60° increase tearout risk across wood fibres.
-5. **Alignment risk between adjacent inlays.** Two layers whose edges sit within a small registration tolerance — they'll fight for the same v-cut wall when carved sequentially. The optimizer's auto-improvement pass tries to fix this by extending one layer's boundary into the other; remaining cases surface as warnings.
+5. **Alignment risk between adjacent inlays.** Two layers whose edges sit within a small registration tolerance — they'll fight for the same v-cut wall when carved sequentially. Surfaced as a warning so you can adjust the design.
 
-The guided flow runs an automatic optimization pass on top: it fills enclosed holes, extends registration borders, and picks a per-layer v-bit + clearance-bit plan that minimizes total machining time. The expert flow lets you drive every choice manually.
+The guided flow runs an automatic optimization pass on top: it fills enclosed holes (invisible in the final composite, saving v-bit perimeter time) and picks a per-layer v-bit + clearance-bit plan that minimizes total machining time. The expert flow lets you drive every choice manually.
 
 ## Visualizations
 
