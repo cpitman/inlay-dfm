@@ -265,6 +265,48 @@ describe('carvedHasComponentWithoutFullDepth', () => {
     const dist1 = new Float32Array(w * h);
     expect(carvedHasComponentWithoutFullDepth(mask, dist1, 5, w, h)).toBe(false);
   });
+
+  // ---------------------------------------------------------------
+  // outsideIsFullDepth flag (plug analysis on a tightly-sized canvas).
+  //
+  // A thin carved component anchored to the canvas edge has small
+  // dist1 throughout — by the default rule, no full-depth pixel,
+  // so it's flagged as isolated (= unmanufacturable). Physically,
+  // that's a false positive: the actual stock board extends beyond
+  // the analysis canvas, giving the v-bit plenty of room to reach
+  // full depth. The flag opts in to treating off-canvas as full-
+  // depth for the plug, which makes any canvas-edge pixel an
+  // implicit full-depth seed.
+  // ---------------------------------------------------------------
+  it('canvas-edge component without an interior full-depth pixel: default flag = true (isolated)', () => {
+    const w = 12, h = 12;
+    const mask = new Uint8Array(w * h);
+    // A 4×3 strip in the top-left corner — touches y=0 and x=0.
+    stamp(mask, w, 0, 0, 4, 3);
+    const dist1 = new Float32Array(w * h); // all zeros — nowhere reaches fdr=5
+    expect(carvedHasComponentWithoutFullDepth(mask, dist1, 5, w, h)).toBe(true);
+  });
+
+  it('canvas-edge component with outsideIsFullDepth: false (not isolated — edge counts as full-depth)', () => {
+    const w = 12, h = 12;
+    const mask = new Uint8Array(w * h);
+    stamp(mask, w, 0, 0, 4, 3);
+    const dist1 = new Float32Array(w * h);
+    expect(
+      carvedHasComponentWithoutFullDepth(mask, dist1, 5, w, h, true),
+    ).toBe(false);
+  });
+
+  it('outsideIsFullDepth does NOT rescue an interior-only component (canvas-edge fix is edge-only)', () => {
+    const w = 12, h = 12;
+    const mask = new Uint8Array(w * h);
+    // Component sits entirely in the canvas interior — no edge pixel.
+    stamp(mask, w, 4, 4, 3, 3);
+    const dist1 = new Float32Array(w * h);
+    expect(
+      carvedHasComponentWithoutFullDepth(mask, dist1, 5, w, h, true),
+    ).toBe(true);
+  });
 });
 
 /** Stamp a filled axis-aligned rectangle into a w×h mask, in place. */

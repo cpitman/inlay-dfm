@@ -179,6 +179,35 @@ interface ProblemStatsForAngle {
   problemMask?: Uint8Array;
 }
 
+/**
+ * For a carved mask, mark every pixel on the canvas perimeter as
+ * full-depth. Used by **plug** analysis to model the physical
+ * reality that the actual stock board extends beyond the (tightly-
+ * sized) analysis canvas: a thin background strip at the canvas
+ * edge has plenty of v-bit clearance "off-canvas," so we treat the
+ * canvas perimeter as if it bordered an unconstrained full-depth
+ * region. Pocket analysis is bounded by the design's outline (its
+ * EDT seeds), not by the canvas, so this doesn't apply there.
+ */
+function applyOutsideFullDepthSeeds(
+  isFullDepth: Uint8Array,
+  carvedMask: Uint8Array,
+  w: number,
+  h: number,
+): void {
+  for (let x = 0; x < w; x++) {
+    if (carvedMask[x])                             isFullDepth[x] = 1;
+    const bot = (h - 1) * w + x;
+    if (h > 1 && carvedMask[bot])                  isFullDepth[bot] = 1;
+  }
+  for (let y = 1; y < h - 1; y++) {
+    const left  = y * w;
+    const right = left + w - 1;
+    if (carvedMask[left])               isFullDepth[left]  = 1;
+    if (w > 1 && carvedMask[right])     isFullDepth[right] = 1;
+  }
+}
+
 function problemStatsForAngle(
   carvedMask: Uint8Array,
   dist1: Float32Array,
@@ -186,6 +215,7 @@ function problemStatsForAngle(
   canvasW: number,
   canvasH: number,
   returnMask: boolean = false,
+  outsideIsFullDepth: boolean = false,
 ): ProblemStatsForAngle {
   const n = canvasW * canvasH;
   const isFullDepth = new Uint8Array(n);
@@ -207,6 +237,10 @@ function problemStatsForAngle(
     };
   }
 
+  if (outsideIsFullDepth) {
+    applyOutsideFullDepthSeeds(isFullDepth, carvedMask, canvasW, canvasH);
+  }
+
   const reachable = monotonicAscentReachable(carvedMask, dist1, isFullDepth, canvasW, canvasH);
   let problemCount = 0;
   const problemMask = returnMask ? new Uint8Array(n) : undefined;
@@ -218,7 +252,7 @@ function problemStatsForAngle(
   }
 
   const hasIsolatedComponent = carvedHasComponentWithoutFullDepth(
-    carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH,
+    carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH, outsideIsFullDepth,
   );
   const percent = (problemCount / carvedCount) * 100;
 
@@ -288,6 +322,7 @@ export function carvedHasComponentWithoutFullDepth(
   fullDepthRadiusPx: number,
   canvasW: number,
   canvasH: number,
+  outsideIsFullDepth: boolean = false,
 ): boolean {
   const n = canvasW * canvasH;
   const visited = new Uint8Array(n);
@@ -299,9 +334,20 @@ export function carvedHasComponentWithoutFullDepth(
     let head = 0;
     while (head < queue.length) {
       const k = queue[head++];
-      if (!hasFullDepth && dist1[k] >= fullDepthRadiusPx) hasFullDepth = true;
       const x = k % canvasW;
       const y = (k - x) / canvasW;
+      if (!hasFullDepth) {
+        if (dist1[k] >= fullDepthRadiusPx) {
+          hasFullDepth = true;
+        } else if (outsideIsFullDepth
+            && (x === 0 || y === 0 || x === canvasW - 1 || y === canvasH - 1)) {
+          // Plug analysis on a tightly-sized canvas: any carved
+          // pixel touching the canvas perimeter has an implicit
+          // off-canvas full-depth neighbor (the actual stock board
+          // extends past the rasterized area).
+          hasFullDepth = true;
+        }
+      }
       for (let dy = -CONNECTIVITY_RADIUS_PX; dy <= CONNECTIVITY_RADIUS_PX; dy++) {
         const ny = y + dy;
         if (ny < 0 || ny >= canvasH) continue;
@@ -336,6 +382,7 @@ function analyzeMask(
   thinWallThresholdPx: number,
   grainDirection: GrainDirection,
   vbitAngleDegrees: number,
+  outsideIsFullDepth: boolean = false,
 ): {
   isProblem: Uint8Array;
   isThinWall: Uint8Array;
@@ -360,6 +407,9 @@ function analyzeMask(
     if (!carvedMask[i]) continue;
     carvedCount++;
     if (dist1[i] >= fullDepthRadiusPx) { isFullDepth[i] = 1; fullDepthCount++; }
+  }
+  if (outsideIsFullDepth) {
+    applyOutsideFullDepthSeeds(isFullDepth, carvedMask, canvasW, canvasH);
   }
 
   // Topological reachability through the carved region. A non-full-depth
@@ -467,7 +517,7 @@ function analyzeMask(
   // contains no full-depth pixel at all means the V-bit literally cannot
   // carve that piece — disqualifies regardless of the percentage threshold.
   const hasIsolatedUnreachableComponent = carvedHasComponentWithoutFullDepth(
-    carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH,
+    carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH, outsideIsFullDepth,
   );
   const problemAreaPercent = carvedCount > 0 ? (problemCount / carvedCount) * 100 : 0;
 
@@ -884,7 +934,13 @@ export async function runDfmAnalysis(
     for (let i = 0; i < n; i++) plugMaskForDfm[i] = pocketMask[i] ? 0 : 1;
 
     const pocketAnalysis = analyzeMask(pocketMask,        ...args);
-    const plugAnalysis   = analyzeMask(plugMaskForDfm,    ...args);
+    // Plug analysis: tell `analyzeMask` to treat the canvas
+    // perimeter as full-depth. The plug's carved region is the
+    // background around the design, and the actual inlay stock
+    // extends beyond the (tightly-sized) analysis canvas, so a
+    // thin background strip touching the canvas edge isn't really
+    // a hard-to-carve sliver — it just looks that way to the EDT.
+    const plugAnalysis   = analyzeMask(plugMaskForDfm,    ...args, true);
 
     // Plug stock for *machining-time* purposes: convex hull of the plug
     // shape dilated by the user's margin. The carved area is stock − plug.
@@ -1132,8 +1188,10 @@ ${plugStockOutlineSvg}
       const pocketStats = problemStatsForAngle(
         inp.pocketMask, inp.pocketDist1, angleFdrPx, canvasW, canvasH, true,
       );
+      // Plug analysis: outsideIsFullDepth = true. See `analyzeMask`
+      // call site for the rationale.
       const plugStats = problemStatsForAngle(
-        inp.plugMask, inp.plugDist1, angleFdrPx, canvasW, canvasH, true,
+        inp.plugMask, inp.plugDist1, angleFdrPx, canvasW, canvasH, true, true,
       );
       if (pocketStats.percent > maxProblem) maxProblem = pocketStats.percent;
       if (plugStats.percent   > maxProblem) maxProblem = plugStats.percent;
