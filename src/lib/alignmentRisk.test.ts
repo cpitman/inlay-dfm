@@ -177,6 +177,30 @@ describe('Registration error detection', () => {
     expect(outerFlagged).toBe(0);
   });
 
+  it('Cross intersection: perpendicular tangents → no false-positive flags at intersection corners', () => {
+    // Layer 1: a wide horizontal stripe.
+    // Layer 2: a tall vertical stripe.
+    // They cross at the canvas center, forming a + sign. The 4
+    // intersection corners have boundaries within alignThresholdPx
+    // of each other (in fact coincident at one pixel each), so the
+    // distance-only check would flag them. But layer 1's edges run
+    // east–west while layer 2's run north–south — perpendicular —
+    // so the parallel-tangent check correctly suppresses every
+    // intersection-corner candidate.
+    const layer1 = makeRect(100, 300, 1224, 400);  // horizontal: 1124 × 100
+    const layer2 = makeRect(600, 100, 700,  600);  // vertical:    100 × 500
+
+    const result = detectAlignmentRisk(
+      layer1, layer2, CANVAS_W, CANVAS_H, ALIGN_THRESHOLD_PX,
+    );
+
+    // Sanity: layer 1's perimeter is non-empty (so the test is
+    // actually exercising the boundary-walker path).
+    expect(result.totalBoundaryCount).toBeGreaterThan(0);
+    // The crossing is incidental, not a shared seam — no flags.
+    expect(result.affectedCount).toBe(0);
+  });
+
   it('Boundaries 0.05" apart on every side → no risk', () => {
     // Variant of the Positive fixture where Layer 1's hole is 0.05"
     // smaller on every side than Layer 2's rect — i.e., Layer 1
