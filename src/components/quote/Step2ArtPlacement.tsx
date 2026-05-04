@@ -39,6 +39,10 @@ interface Step2ArtPlacementProps {
   onRemoveDesign: (id: string) => void;
   onUpdateDesignPlacement: (id: string, next: Placement) => void;
   onUpdateDesignWoodConfig: (designId: string, colorHex: string, patch: Partial<WoodConfig>) => void;
+  /** Open the text-design dialog in "create" mode. */
+  onRequestAddText: () => void;
+  /** Open the text-design dialog in "edit" mode for the given design. */
+  onRequestEditText: (designId: string) => void;
   onBack: () => void;
   onNext: () => void;
   canAdvance: boolean;
@@ -79,6 +83,7 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     boardConfig, designs, compositeUrls, parsing, errorMsg, overlapping,
     currentSide, onChangeSide,
     onAddDesign, onRemoveDesign, onUpdateDesignPlacement, onUpdateDesignWoodConfig,
+    onRequestAddText, onRequestEditText,
     onBack, onNext, canAdvance,
   } = props;
 
@@ -474,7 +479,14 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
             </div>
 
             {sideDesigns.length === 0 && (
-              <FileUpload onFile={onAddDesign} fileName={undefined} />
+              <div className="space-y-2">
+                <FileUpload onFile={onAddDesign} fileName={undefined} />
+                <button
+                  type="button"
+                  onClick={onRequestAddText}
+                  className="w-full px-3 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
+                >+ Add text</button>
+              </div>
             )}
 
             <div className="space-y-3">
@@ -484,13 +496,19 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                   design={d}
                   onRemove={() => onRemoveDesign(d.id)}
                   onUpdateWoodConfig={(colorHex, patch) => onUpdateDesignWoodConfig(d.id, colorHex, patch)}
+                  onEditText={d.textSpec ? () => onRequestEditText(d.id) : undefined}
                 />
               ))}
             </div>
 
             {sideDesigns.length > 0 && (
-              <div className="mt-3">
+              <div className="mt-3 space-y-2">
                 <FileUpload onFile={onAddDesign} fileName={undefined} />
+                <button
+                  type="button"
+                  onClick={onRequestAddText}
+                  className="w-full px-3 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
+                >+ Add text</button>
               </div>
             )}
 
@@ -552,28 +570,51 @@ function DesignCard({
   design,
   onRemove,
   onUpdateWoodConfig,
+  onEditText,
 }: {
   design: Design;
   onRemove: () => void;
   onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
+  /** Defined for text designs only — opens the edit dialog. */
+  onEditText?: () => void;
 }) {
+  const isTextDesign = !!design.textSpec;
+  const displayName = isTextDesign && design.textSpec
+    ? `“${design.textSpec.content}”`
+    : design.vector.fileName;
   return (
     <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/40 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium text-slate-200 truncate" title={design.vector.fileName}>
-          {design.vector.fileName}
+        <p className="text-sm font-medium text-slate-200 truncate" title={displayName}>
+          {displayName}
         </p>
-        <button
-          onClick={onRemove}
-          className="shrink-0 w-6 h-6 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center text-lg leading-none"
-          aria-label={`Remove ${design.vector.fileName}`}
-          title="Remove design"
-        >×</button>
+        <div className="shrink-0 flex items-center gap-1">
+          {onEditText && (
+            <button
+              onClick={onEditText}
+              className="text-xs px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-600"
+              title="Edit text"
+            >Edit</button>
+          )}
+          <button
+            onClick={onRemove}
+            className="w-6 h-6 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center text-lg leading-none"
+            aria-label={`Remove ${displayName}`}
+            title="Remove design"
+          >×</button>
+        </div>
       </div>
-      <InlayColorPicker
-        woodConfigs={design.woodConfigs}
-        onUpdate={onUpdateWoodConfig}
-      />
+      {!isTextDesign && (
+        <InlayColorPicker
+          woodConfigs={design.woodConfigs}
+          onUpdate={onUpdateWoodConfig}
+        />
+      )}
+      {isTextDesign && design.textSpec && (
+        <p className="text-[11px] text-slate-500">
+          {design.textSpec.fontFamily} · {design.textSpec.fontStyle} · {design.woodConfigs[0]?.label ?? '—'}
+        </p>
+      )}
     </div>
   );
 }

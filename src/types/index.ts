@@ -150,6 +150,16 @@ export interface Design {
    *  for back-compat with files / sessions written before sides
    *  existed. Each side is analyzed and costed independently. */
   side: 'top' | 'bottom';
+  /**
+   * When present, this is a *text design* — `vector` was synthesized
+   * from this spec via `textToVectorData`. Preserved through save/load
+   * so the user can re-open and edit the text/font/style/color later.
+   * Absent on uploaded SVG/DXF designs.
+   *
+   * Imported here from `@/lib/textVector` to avoid a circular type
+   * dependency — see the `import type` re-export below.
+   */
+  textSpec?: import('@/lib/textVector').TextSpec;
 }
 
 /** A snapshot of all layers at one point in history. */

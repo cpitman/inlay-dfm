@@ -3,6 +3,7 @@ import type {
 } from '@/types';
 import { combineLayers } from './svgLayers';
 import { isValidRotation } from './rotation';
+import type { TextSpec, TextFontFamily, TextFontStyle } from './textVector';
 
 /**
  * Bump when the session schema changes in a backward-incompatible way.
@@ -45,6 +46,10 @@ export interface SerializedDesign {
   /** Which face the design lives on. Optional — older v2 files written
    *  before two-sided support default to `'top'` on load. */
   side?: 'top' | 'bottom';
+  /** When present, the design is a text element. The serialized
+   *  `vector` is the rendered version at save time; loaders preserve
+   *  it as-is and use `textSpec` only when the user edits the text. */
+  textSpec?: TextSpec;
 }
 
 export interface SessionFile {
@@ -87,6 +92,8 @@ export interface ExpertDesignLike {
    *  between the two flows. Loader defaults to undefined → caller
    *  falls back to 'top'. */
   side?: 'top' | 'bottom';
+  /** Present iff this is a text design. Mirrors `Design.textSpec`. */
+  textSpec?: TextSpec;
 }
 
 interface SaveSessionInput {
@@ -124,6 +131,9 @@ export function saveSessionToFile(input: SaveSessionInput): void {
       // `side` is only set by callers that track per-design faces
       // (the guided flow's `Design.side`). Omitted means top.
       ...(d.side !== undefined ? { side: d.side } : {}),
+      // `textSpec` is only set on text designs; omitted on uploaded
+      // SVG/DXF designs. JSON serializes naturally.
+      ...(d.textSpec !== undefined ? { textSpec: d.textSpec } : {}),
     })),
     activeDesignId: input.activeDesignId,
     settings: input.settings,
@@ -322,7 +332,29 @@ function deserializeDesign(d: SerializedDesign): ExpertDesignLike {
     woodConfigs: d.woodConfigs,
     placement,
     side: d.side,
+    ...(d.textSpec ? { textSpec: d.textSpec } : {}),
   };
+}
+
+const TEXT_FONT_FAMILIES: ReadonlyArray<TextFontFamily> = ['Inter', 'Lora', 'PlayfairDisplay'];
+const TEXT_FONT_STYLES:   ReadonlyArray<TextFontStyle>  = ['regular', 'bold', 'italic', 'boldItalic'];
+
+function validateTextSpec(value: unknown, path: string): TextSpec {
+  if (!value || typeof value !== 'object') {
+    throw new Error(`Session field "${path}" must be an object.`);
+  }
+  const t = value as Partial<TextSpec>;
+  const content = expectString(t.content,  `${path}.content`);
+  const species = expectString(t.species,  `${path}.species`) as TextSpec['species'];
+  const family  = expectString(t.fontFamily, `${path}.fontFamily`) as TextFontFamily;
+  if (!TEXT_FONT_FAMILIES.includes(family)) {
+    throw new Error(`Session field "${path}.fontFamily" must be one of ${TEXT_FONT_FAMILIES.join(', ')}.`);
+  }
+  const style = expectString(t.fontStyle, `${path}.fontStyle`) as TextFontStyle;
+  if (!TEXT_FONT_STYLES.includes(style)) {
+    throw new Error(`Session field "${path}.fontStyle" must be one of ${TEXT_FONT_STYLES.join(', ')}.`);
+  }
+  return { content, fontFamily: family, fontStyle: style, species };
 }
 
 /**
@@ -434,6 +466,13 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
           ...(rotationDegrees !== undefined ? { rotationDegrees } : {}),
         };
       }
+      // `textSpec` optional. Only present when the design was added
+      // via the guided flow's "Add text" path. When absent, the
+      // design is treated as a regular uploaded design.
+      let textSpec: TextSpec | undefined;
+      if (dd.textSpec !== undefined) {
+        textSpec = validateTextSpec(dd.textSpec, `designs[${i}].textSpec`);
+      }
       return deserializeDesign({
         id: expectString(dd.id, `designs[${i}].id`),
         vector: vec,
@@ -442,6 +481,7 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
         woodConfigs,
         ...(placement ? { placement } : {}),
         ...(side ? { side } : {}),
+        ...(textSpec ? { textSpec } : {}),
       });
     });
     if (top.activeDesignId !== null && typeof top.activeDesignId !== 'string') {

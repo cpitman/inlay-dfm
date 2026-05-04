@@ -17,11 +17,13 @@ import { INLAY_WOOD_OPTIONS, computeQuote, type QuoteResult } from '@/lib/pricin
 import { runQuoteOptimization, type MultiDesignOptimizationResult } from '@/lib/quoteOptimizer';
 import { boxesOverlap, findFreeSpot, type AABB } from '@/lib/aabb';
 import { effectivePlacementAabb } from '@/lib/rotation';
+import { textToVectorData, type TextSpec } from '@/lib/textVector';
 import Step1BoardForm from './Step1BoardForm';
 import Step2ArtPlacement from './Step2ArtPlacement';
 import Step3QuoteDisplay from './Step3QuoteDisplay';
 import OptimizingOverlay from './OptimizingOverlay';
 import RequestManufacturingDialog from './RequestManufacturingDialog';
+import TextDesignDialog from './TextDesignDialog';
 
 const QUOTE_STEPS: StepDef[] = [
   { n: 1, label: 'Board',      subtitle: 'Pick your cutting board' },
@@ -226,6 +228,93 @@ export default function QuoteApp() {
     invalidateQuote();
   }, [invalidateQuote]);
 
+  // -----------------------------------------------------------------
+  // Text designs: dialog state + add / edit / save handlers.
+  // The dialog lives at the QuoteApp level so it overlays both Step 2
+  // and Step 3 cleanly. `dialogState` is `null` when closed,
+  // `'new'` for the create flow, or `{ id, spec }` when editing an
+  // existing design.
+  // -----------------------------------------------------------------
+  type DialogState = null | 'new' | { id: string; spec: TextSpec };
+  const [textDialog, setTextDialog] = useState<DialogState>(null);
+
+  const handleSaveTextDesign = useCallback(async (spec: TextSpec) => {
+    if (textDialog === null) return;
+    setErrorMsg('');
+    try {
+      const vector = await textToVectorData(spec);
+      if (textDialog === 'new') {
+        // Create a new text design — same default-placement logic as
+        // file uploads but with a single woodConfigs entry derived
+        // from the picked species.
+        const aspect = vector.naturalHeight / vector.naturalWidth;
+        const bounds = placeableRect(boardConfig, currentSide);
+        const sameSideAabbs = designs.filter(d => d.side === currentSide).map(designAabb);
+        const fixedFeatureAabbs = currentSide === 'bottom' ? backSideFeatureAabbs(boardConfig) : [];
+        const obstacles = [...sameSideAabbs, ...fixedFeatureAabbs];
+        const isFirstOnSide = sameSideAabbs.length === 0 && fixedFeatureAabbs.length === 0;
+        const defaultW = Math.min(bounds.w * 0.5, bounds.h / aspect * 0.5);
+
+        let offsetX: number, offsetY: number, designWidthInches: number;
+        if (isFirstOnSide) {
+          designWidthInches = Math.min(bounds.w, bounds.h / aspect);
+          const designHeightInches = designWidthInches * aspect;
+          offsetX = bounds.x + (bounds.w - designWidthInches)  / 2;
+          offsetY = bounds.y + (bounds.h - designHeightInches) / 2;
+        } else {
+          const defaultH = defaultW * aspect;
+          const spot = findFreeSpot(defaultW, defaultH, bounds, obstacles);
+          offsetX = spot?.x ?? bounds.x;
+          offsetY = spot?.y ?? bounds.y;
+          designWidthInches = defaultW;
+        }
+
+        const colorHex = vector.detectedColors[0];
+        const newDesign: Design = {
+          id: crypto.randomUUID(),
+          vector,
+          woodConfigs: [{
+            colorHex,
+            label: WOOD_SPECIES[spec.species].name,
+            species: spec.species,
+          }],
+          placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches },
+          side: currentSide,
+          textSpec: spec,
+        };
+        setDesigns(prev => [...prev, newDesign]);
+      } else {
+        // Edit: replace vector + textSpec + woodConfigs on the design;
+        // preserve placement.
+        const id = textDialog.id;
+        const colorHex = vector.detectedColors[0];
+        setDesigns(prev => prev.map(d => {
+          if (d.id !== id) return d;
+          return {
+            ...d,
+            vector,
+            woodConfigs: [{
+              colorHex,
+              label: WOOD_SPECIES[spec.species].name,
+              species: spec.species,
+            }],
+            textSpec: spec,
+          };
+        }));
+      }
+      invalidateQuote();
+      setTextDialog(null);
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+    }
+  }, [textDialog, boardConfig, designs, currentSide, invalidateQuote]);
+
+  const requestAddText  = useCallback(() => setTextDialog('new'), []);
+  const requestEditText = useCallback((id: string) => {
+    const d = designs.find(x => x.id === id);
+    if (d?.textSpec) setTextDialog({ id, spec: d.textSpec });
+  }, [designs]);
+
   // Board changes invalidate the quote too — every cost lever depends on it.
   const updateBoardConfig = useCallback((next: BoardConfig) => {
     setBoardConfig(next);
@@ -349,6 +438,8 @@ export default function QuoteApp() {
             onRemoveDesign={removeDesign}
             onUpdateDesignPlacement={updateDesignPlacement}
             onUpdateDesignWoodConfig={updateDesignWoodConfig}
+            onRequestAddText={requestAddText}
+            onRequestEditText={requestEditText}
             onBack={() => goToStep(1)}
             onNext={runOptimizationAndQuote}
             canAdvance={step2Valid}
@@ -379,6 +470,14 @@ export default function QuoteApp() {
           quote={quote}
         />
       )}
+
+      <TextDesignDialog
+        initial={textDialog === null
+          ? null
+          : textDialog === 'new' ? 'new' : textDialog.spec}
+        onCancel={() => setTextDialog(null)}
+        onSave={handleSaveTextDesign}
+      />
     </div>
   );
 }

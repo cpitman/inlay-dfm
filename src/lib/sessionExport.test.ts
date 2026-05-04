@@ -264,6 +264,52 @@ describe('loadSessionFromFile — v2 round-trip', () => {
     expect(loaded.designs[0].placement.offsetYInches).toBe(8.5);
     expect(loaded.designs[0].placement.designWidthInches).toBe(9.75);
   });
+
+  it('round-trips a textSpec on a text design', async () => {
+    const s = makeV2Session();
+    s.designs[0].textSpec = {
+      content: 'Hello',
+      fontFamily: 'Inter',
+      fontStyle: 'bold',
+      species: 'cherry',
+    };
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].textSpec).toEqual({
+      content: 'Hello',
+      fontFamily: 'Inter',
+      fontStyle: 'bold',
+      species: 'cherry',
+    });
+  });
+
+  it('omitted textSpec stays undefined on load (regular uploaded designs)', async () => {
+    const s = makeV2Session();
+    delete (s.designs[0] as { textSpec?: unknown }).textSpec;
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].textSpec).toBeUndefined();
+  });
+
+  it('rejects an invalid textSpec.fontFamily', async () => {
+    const s = makeV2Session();
+    s.designs[0].textSpec = {
+      content: 'X',
+      fontFamily: 'Comic Sans' as unknown as 'Inter',
+      fontStyle: 'regular',
+      species: 'walnut',
+    };
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/fontFamily/);
+  });
+
+  it('rejects an invalid textSpec.fontStyle', async () => {
+    const s = makeV2Session();
+    s.designs[0].textSpec = {
+      content: 'X',
+      fontFamily: 'Inter',
+      fontStyle: 'extra-bold' as unknown as 'regular',
+      species: 'walnut',
+    };
+    await expect(loadSessionFromFile(asFile(s))).rejects.toThrow(/fontStyle/);
+  });
 });
 
 describe('loadSessionFromFile — shared validation', () => {
