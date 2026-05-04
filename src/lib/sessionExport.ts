@@ -3,7 +3,7 @@ import type {
 } from '@/types';
 import { combineLayers } from './svgLayers';
 import { isValidRotation } from './rotation';
-import type { TextSpec, TextFontFamily, TextFontStyle } from './textVector';
+import type { TextSpec, TextFontStyle } from './textVector';
 
 /**
  * Bump when the session schema changes in a backward-incompatible way.
@@ -336,19 +336,22 @@ function deserializeDesign(d: SerializedDesign): ExpertDesignLike {
   };
 }
 
-const TEXT_FONT_FAMILIES: ReadonlyArray<TextFontFamily> = ['Inter', 'Lora', 'PlayfairDisplay'];
-const TEXT_FONT_STYLES:   ReadonlyArray<TextFontStyle>  = ['regular', 'bold', 'italic', 'boldItalic'];
+const TEXT_FONT_STYLES: ReadonlyArray<TextFontStyle> = ['regular', 'bold', 'italic', 'boldItalic'];
 
 function validateTextSpec(value: unknown, path: string): TextSpec {
   if (!value || typeof value !== 'object') {
     throw new Error(`Session field "${path}" must be an object.`);
   }
   const t = value as Partial<TextSpec>;
-  const content = expectString(t.content,  `${path}.content`);
-  const species = expectString(t.species,  `${path}.species`) as TextSpec['species'];
-  const family  = expectString(t.fontFamily, `${path}.fontFamily`) as TextFontFamily;
-  if (!TEXT_FONT_FAMILIES.includes(family)) {
-    throw new Error(`Session field "${path}.fontFamily" must be one of ${TEXT_FONT_FAMILIES.join(', ')}.`);
+  const content = expectString(t.content,    `${path}.content`);
+  const species = expectString(t.species,    `${path}.species`) as TextSpec['species'];
+  // `fontFamily` is any non-empty string — runtime resolution against
+  // `TEXT_FONT_FAMILIES` happens lazily in `loadFont`. Keeping this
+  // permissive lets future catalog additions or removals load older
+  // sessions without error.
+  const family = expectString(t.fontFamily, `${path}.fontFamily`);
+  if (family.length === 0) {
+    throw new Error(`Session field "${path}.fontFamily" must be a non-empty string.`);
   }
   const style = expectString(t.fontStyle, `${path}.fontStyle`) as TextFontStyle;
   if (!TEXT_FONT_STYLES.includes(style)) {

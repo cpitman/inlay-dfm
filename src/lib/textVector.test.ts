@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { textToVectorData, TEXT_FONT_CATALOG } from './textVector';
+import { textToVectorData, TEXT_FONT_FAMILIES } from './textVector';
 
 // Mock opentype.js with a tiny stub: parse() returns a Font whose
 // getPath returns a Path with a bounding box and a toSVG output —
@@ -24,14 +24,6 @@ vi.mock('opentype.js', () => {
         for (const y of ys) { if (y < y1) y1 = y; if (y > y2) y2 = y; }
       }
       return { x1, y1, x2, y2 };
-    }
-    toPathData() {
-      return this.commands.map(c => {
-        if (c.type === 'M') return `M${c.x} ${c.y}`;
-        if (c.type === 'L') return `L${c.x} ${c.y}`;
-        if (c.type === 'Z') return 'Z';
-        return '';
-      }).join(' ');
     }
   }
   const makeGlyph = () => ({
@@ -68,19 +60,20 @@ beforeEach(() => {
   })) as unknown as typeof fetch);
 });
 
-describe('TEXT_FONT_CATALOG', () => {
-  it('lists all 3 families × 4 styles = 12 entries', () => {
-    expect(TEXT_FONT_CATALOG).toHaveLength(12);
+describe('TEXT_FONT_FAMILIES', () => {
+  it('contains the 3 bundled defaults at the top of the list', () => {
+    const bundled = TEXT_FONT_FAMILIES.filter(f => f.bundled).map(f => f.family);
+    expect(bundled).toEqual(['Inter', 'Lora', 'Playfair Display']);
   });
-  it('every entry has a unique (family, style) pair', () => {
-    const keys = new Set(TEXT_FONT_CATALOG.map(d => `${d.family}/${d.style}`));
-    expect(keys.size).toBe(12);
-  });
-  it('every entry points to a /fonts/*.ttf URL', () => {
-    for (const d of TEXT_FONT_CATALOG) {
-      expect(d.url.startsWith('/fonts/')).toBe(true);
-      expect(d.url.endsWith('.ttf')).toBe(true);
+  it('every entry has a unique family and a non-empty slug', () => {
+    const families = new Set(TEXT_FONT_FAMILIES.map(f => f.family));
+    expect(families.size).toBe(TEXT_FONT_FAMILIES.length);
+    for (const f of TEXT_FONT_FAMILIES) {
+      expect(f.slug).toMatch(/^[a-z0-9-]+$/);
     }
+  });
+  it('catalog has at least 100 entries (Google Fonts CDN expansion)', () => {
+    expect(TEXT_FONT_FAMILIES.length).toBeGreaterThanOrEqual(100);
   });
 });
 

@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { WoodSpeciesKey } from '@/types';
 import { WOOD_SPECIES } from '@/lib/woodSpecies';
 import { INLAY_WOOD_OPTIONS, INLAY_WOOD_PRICE } from '@/lib/pricing';
 import {
-  TEXT_FONT_CATALOG,
-  type TextFontFamily,
+  TEXT_FONT_FAMILIES,
   type TextFontStyle,
   type TextSpec,
 } from '@/lib/textVector';
@@ -20,12 +19,7 @@ interface TextDesignDialogProps {
   onSave: (spec: TextSpec) => void;
 }
 
-const FONT_FAMILIES: TextFontFamily[] = ['Inter', 'Lora', 'PlayfairDisplay'];
-const FAMILY_LABELS: Record<TextFontFamily, string> = {
-  Inter: 'Inter (Sans)',
-  Lora: 'Lora (Serif)',
-  PlayfairDisplay: 'Playfair Display (Serif Display)',
-};
+const DEFAULT_FAMILY = 'Inter';
 
 /** Compose a (family, bold, italic) selection into the catalog's
  *  `TextFontStyle` enum. */
@@ -53,20 +47,31 @@ export default function TextDesignDialog({ initial, onCancel, onSave }: TextDesi
 
   const initSpec: TextSpec = editing
     ? initial
-    : { content: '', fontFamily: 'Inter', fontStyle: 'regular', species: 'cherry' };
+    : { content: '', fontFamily: DEFAULT_FAMILY, fontStyle: 'regular', species: 'cherry' };
 
   const [content, setContent] = useState(initSpec.content);
-  const [family, setFamily] = useState<TextFontFamily>(initSpec.fontFamily);
+  const [family, setFamily] = useState<string>(initSpec.fontFamily);
   const initToggles = togglesFromStyle(initSpec.fontStyle);
   const [bold, setBold] = useState(initToggles.bold);
   const [italic, setItalic] = useState(initToggles.italic);
   const [species, setSpecies] = useState<WoodSpeciesKey>(initSpec.species);
 
+  // Datalist needs a stable per-instance id so multiple dialogs (or
+  // re-mounts) don't collide.
+  const fontListId = useId();
+
+  // Picker options: every catalog family with a category-tagged label
+  // shown next to the family name in the datalist dropdown.
+  const fontOptions = useMemo(() => TEXT_FONT_FAMILIES.map(f => ({
+    family: f.family,
+    label: `${f.category}${f.bundled ? ' · bundled' : ''}`,
+  })), []);
+
   // Re-initialize when the dialog reopens for a different design.
   useEffect(() => {
     if (initial === null) return;
     const fresh: TextSpec = initial === 'new'
-      ? { content: '', fontFamily: 'Inter', fontStyle: 'regular', species: 'cherry' }
+      ? { content: '', fontFamily: DEFAULT_FAMILY, fontStyle: 'regular', species: 'cherry' }
       : initial;
     setContent(fresh.content);
     setFamily(fresh.fontFamily);
@@ -136,15 +141,26 @@ export default function TextDesignDialog({ initial, onCancel, onSave }: TextDesi
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5 block">
               Font
             </span>
-            <select
+            {/*
+              Native combobox. The browser handles search-as-you-type
+              filtering, accessibility, and keyboard nav for free.
+              ~290 catalog entries — bigger than what'd be reasonable
+              in a `<select>` but well within `<datalist>` UX bounds.
+              Bundled families are listed first, then the rest sorted
+              alphabetically (see `textFontCatalog.ts`).
+            */}
+            <input
+              list={fontListId}
               value={family}
-              onChange={e => setFamily(e.target.value as TextFontFamily)}
+              onChange={e => setFamily(e.target.value)}
+              placeholder="Type to filter…"
               className="w-full bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded px-2 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              {FONT_FAMILIES.map(f => (
-                <option key={f} value={f}>{FAMILY_LABELS[f]}</option>
+            />
+            <datalist id={fontListId}>
+              {fontOptions.map(opt => (
+                <option key={opt.family} value={opt.family} label={opt.label} />
               ))}
-            </select>
+            </datalist>
           </label>
           <div className="flex gap-1">
             <button

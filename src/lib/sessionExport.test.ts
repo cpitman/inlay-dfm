@@ -289,11 +289,33 @@ describe('loadSessionFromFile — v2 round-trip', () => {
     expect(loaded.designs[0].textSpec).toBeUndefined();
   });
 
-  it('rejects an invalid textSpec.fontFamily', async () => {
+  it('round-trips a non-default textSpec.fontFamily (catalog-expanded)', async () => {
+    // The validator no longer pins family to a fixed enum — any
+    // non-empty string is accepted and resolved against the runtime
+    // catalog by loadFont. This test asserts a Roboto-style entry
+    // round-trips so the load path doesn't accidentally re-tighten
+    // the check.
+    const s = makeV2Session();
+    s.designs[0].textSpec = {
+      content: 'Hello',
+      fontFamily: 'Roboto Slab',
+      fontStyle: 'regular',
+      species: 'walnut',
+    };
+    const loaded = await loadSessionFromFile(asFile(s));
+    expect(loaded.designs[0].textSpec).toEqual({
+      content: 'Hello',
+      fontFamily: 'Roboto Slab',
+      fontStyle: 'regular',
+      species: 'walnut',
+    });
+  });
+
+  it('rejects an empty textSpec.fontFamily', async () => {
     const s = makeV2Session();
     s.designs[0].textSpec = {
       content: 'X',
-      fontFamily: 'Comic Sans' as unknown as 'Inter',
+      fontFamily: '',
       fontStyle: 'regular',
       species: 'walnut',
     };

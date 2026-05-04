@@ -1,8 +1,15 @@
 import * as opentype from 'opentype.js';
 import type { VectorData, WoodSpeciesKey } from '@/types';
 import { WOOD_SPECIES } from './woodSpecies';
+import { TEXT_FONT_FAMILIES } from './textFontCatalog';
 
-export type TextFontFamily = 'Inter' | 'Lora' | 'PlayfairDisplay';
+/**
+ * Catalog family display name (`Inter`, `Roboto`, `Playfair Display`,
+ * etc.). Validated at runtime against `TEXT_FONT_FAMILIES`; storing
+ * as an unrestricted `string` lets us expand the catalog without
+ * type-system migrations.
+ */
+export type TextFontFamily = string;
 export type TextFontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic';
 
 export interface TextSpec {
@@ -21,34 +28,53 @@ export function textColorHexFromSpec(spec: TextSpec): string {
   return WOOD_SPECIES[spec.species].baseHex.toLowerCase();
 }
 
-interface FontDescriptor {
-  family: TextFontFamily;
-  style: TextFontStyle;
-  /** Public path (relative to the site root) of the .ttf file. */
-  url: string;
-  /** Human-readable label for UI pickers. */
-  label: string;
+/** A single font family in the catalog. URLs are synthesized at use
+ *  time from `slug` + style — see `fontUrl` below. */
+export interface FontFamilyEntry {
+  /** URL slug used to construct the font's CDN / local path. */
+  slug: string;
+  /** Display name; also the canonical `TextSpec.fontFamily` value. */
+  family: string;
+  /** Google Fonts category — drives a small grouping hint in the picker. */
+  category: 'sans-serif' | 'serif' | 'monospace' | 'display' | 'handwriting';
+  /** When `true`, `fontUrl` returns the local `/fonts/...` path
+   *  instead of the Fontsource CDN URL. Set on the 3 .ttf families
+   *  shipped in `public/fonts/`. */
+  bundled?: boolean;
+}
+
+export { TEXT_FONT_FAMILIES };
+
+/**
+ * Legacy family-name aliases. The prior 3-font catalog used
+ * `'PlayfairDisplay'` (camelCase, no space) as the canonical name
+ * because the type was a literal union. The expanded catalog uses
+ * the Google Fonts display name (`'Playfair Display'`, with the
+ * space). Saved sessions from the prior code path use the legacy
+ * form; this map normalizes them on the way into the catalog.
+ */
+const FAMILY_ALIASES: Record<string, string> = {
+  PlayfairDisplay: 'Playfair Display',
+};
+
+function familyEntry(family: TextFontFamily): FontFamilyEntry | undefined {
+  const canonical = FAMILY_ALIASES[family] ?? family;
+  return TEXT_FONT_FAMILIES.find(f => f.family === canonical);
 }
 
 /**
- * Bundled font catalog. Three families × four styles, all SIL OFL,
- * served from `public/fonts/`. Naming `family-weight-style.ttf` —
- * 400 = regular, 700 = bold, normal/italic = slope.
+ * URL of the `.ttf` for `(entry, style)`. Bundled families load from
+ * `public/fonts/{slug}-{weight}-{slope}.ttf`; everything else fetches
+ * from the Fontsource jsDelivr CDN at the same naming convention.
  */
-export const TEXT_FONT_CATALOG: ReadonlyArray<FontDescriptor> = [
-  { family: 'Inter',           style: 'regular',    url: '/fonts/inter-400-normal.ttf',            label: 'Inter Regular' },
-  { family: 'Inter',           style: 'bold',       url: '/fonts/inter-700-normal.ttf',            label: 'Inter Bold' },
-  { family: 'Inter',           style: 'italic',     url: '/fonts/inter-400-italic.ttf',            label: 'Inter Italic' },
-  { family: 'Inter',           style: 'boldItalic', url: '/fonts/inter-700-italic.ttf',            label: 'Inter Bold Italic' },
-  { family: 'Lora',            style: 'regular',    url: '/fonts/lora-400-normal.ttf',             label: 'Lora Regular' },
-  { family: 'Lora',            style: 'bold',       url: '/fonts/lora-700-normal.ttf',             label: 'Lora Bold' },
-  { family: 'Lora',            style: 'italic',     url: '/fonts/lora-400-italic.ttf',             label: 'Lora Italic' },
-  { family: 'Lora',            style: 'boldItalic', url: '/fonts/lora-700-italic.ttf',             label: 'Lora Bold Italic' },
-  { family: 'PlayfairDisplay', style: 'regular',    url: '/fonts/playfair-display-400-normal.ttf', label: 'Playfair Display Regular' },
-  { family: 'PlayfairDisplay', style: 'bold',       url: '/fonts/playfair-display-700-normal.ttf', label: 'Playfair Display Bold' },
-  { family: 'PlayfairDisplay', style: 'italic',     url: '/fonts/playfair-display-400-italic.ttf', label: 'Playfair Display Italic' },
-  { family: 'PlayfairDisplay', style: 'boldItalic', url: '/fonts/playfair-display-700-italic.ttf', label: 'Playfair Display Bold Italic' },
-];
+function fontUrl(entry: FontFamilyEntry, style: TextFontStyle): string {
+  const weight = (style === 'bold' || style === 'boldItalic') ? 700 : 400;
+  const slope  = (style === 'italic' || style === 'boldItalic') ? 'italic' : 'normal';
+  if (entry.bundled) {
+    return `/fonts/${entry.slug}-${weight}-${slope}.ttf`;
+  }
+  return `https://cdn.jsdelivr.net/fontsource/fonts/${entry.slug}@latest/latin-${weight}-${slope}.ttf`;
+}
 
 const fontCache = new Map<string, Promise<opentype.Font>>();
 
@@ -57,8 +83,11 @@ function fontKey(family: TextFontFamily, style: TextFontStyle): string {
 }
 
 /**
- * Fetch and parse a bundled font file. Promise-cached per (family,
- * style) so repeat calls return the same `Font` without refetching.
+ * Fetch and parse a font file. Promise-cached per (family, style) so
+ * repeat calls return the same `Font` without refetching. Bundled
+ * families resolve to a local path (always works offline); the rest
+ * fetch from the Fontsource jsDelivr CDN on first use and rely on
+ * the browser HTTP cache thereafter.
  */
 export async function loadFont(
   family: TextFontFamily,
@@ -67,14 +96,15 @@ export async function loadFont(
   const key = fontKey(family, style);
   const cached = fontCache.get(key);
   if (cached) return cached;
-  const descriptor = TEXT_FONT_CATALOG.find(d => d.family === family && d.style === style);
-  if (!descriptor) {
-    throw new Error(`Unknown font: ${family} / ${style}`);
+  const entry = familyEntry(family);
+  if (!entry) {
+    throw new Error(`Unknown font family: ${family}`);
   }
+  const url = fontUrl(entry, style);
   const promise = (async () => {
-    const res = await fetch(descriptor.url);
+    const res = await fetch(url);
     if (!res.ok) {
-      throw new Error(`Failed to load font ${descriptor.url}: HTTP ${res.status}`);
+      throw new Error(`Failed to load font ${url}: HTTP ${res.status}`);
     }
     const buffer = await res.arrayBuffer();
     return opentype.parse(buffer);
@@ -88,6 +118,46 @@ export async function loadFont(
 /** Short slug derived from text content for default file naming. */
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'text';
+}
+
+/**
+ * Serialize a list of opentype.js path commands to an SVG path-data
+ * string at `decimalPlaces` precision. Replaces opentype.js's
+ * `Path.toPathData`, which mishandles values whose decimal part
+ * stringifies to scientific notation (e.g. `7e-15`) and emits NaN.
+ *
+ * Supports M/L/Q/C/Z — the only command types `glyph.getPath`
+ * produces.
+ */
+function serializePath(commands: ReadonlyArray<opentype.PathCommand>, decimalPlaces: number): string {
+  const factor = Math.pow(10, decimalPlaces);
+  const fmt = (v: number): string => {
+    const r = Math.round(v * factor) / factor;
+    // Avoid leading "0." for integers (matches opentype.js's compact form).
+    return Number.isInteger(r) ? String(r) : r.toFixed(decimalPlaces);
+  };
+  // Insert a separator before non-negative values that don't already
+  // have a sign. The minus sign on negatives acts as a separator.
+  const join = (...vs: number[]): string => {
+    let s = '';
+    for (let i = 0; i < vs.length; i++) {
+      const part = fmt(vs[i]);
+      if (i > 0 && part[0] !== '-') s += ' ';
+      s += part;
+    }
+    return s;
+  };
+  const out: string[] = [];
+  for (const cmd of commands) {
+    switch (cmd.type) {
+      case 'M': out.push('M' + join(cmd.x, cmd.y)); break;
+      case 'L': out.push('L' + join(cmd.x, cmd.y)); break;
+      case 'Q': out.push('Q' + join(cmd.x1, cmd.y1, cmd.x, cmd.y)); break;
+      case 'C': out.push('C' + join(cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x, cmd.y)); break;
+      case 'Z': out.push('Z'); break;
+    }
+  }
+  return out.join('');
 }
 
 /**
@@ -152,18 +222,23 @@ export async function textToVectorData(spec: TextSpec): Promise<VectorData> {
     for (const cmd of gp.commands) finalCommands.push(cmd);
     advance += (glyph.advanceWidth ?? 0) * FONT_SIZE / font.unitsPerEm;
   }
-  const path = new opentype.Path();
-  path.commands = finalCommands;
-  // Note: opentype.js's `Path.toSVG()` returns the full `<path d=…/>`
-  // element (and its types lie about the signature). We want just
-  // the `d` attribute, so call `toPathData(opts)` and wrap with our
-  // own element below. `flipY: false` is critical: our commands are
-  // already in SVG-down-Y coordinates (because `glyph.getPath`
-  // negates each `cmd.y`), and `toPathData`'s default `flipY: true`
-  // would flip them a second time and render the text upside down.
-  const pathD = (path as unknown as {
-    toPathData(opts?: { decimalPlaces?: number; flipY?: boolean }): string;
-  }).toPathData({ decimalPlaces: 2, flipY: false });
+  // Serialize the path data ourselves rather than going through
+  // opentype.js's `Path.toPathData` / `Path.toSVG`. Two reasons:
+  //
+  // 1. `toPathData`'s `roundDecimal` helper does
+  //    `Number(decimalPart + "e+" + places)`, which produces NaN
+  //    when `decimalPart` already serializes to scientific notation
+  //    (e.g. `6.000000000000007 - 6` ≈ 7e-15 stringifies to
+  //    `"7e-15"`, and `"7e-15" + "e+2"` is not a valid number).
+  //    Many Google Fonts hit this — including Comic Neue and others
+  //    — and the resulting `<path d="…NaN…">` renders as nothing.
+  // 2. `toSVG` returns a full `<path d=…/>` element (the @types lie),
+  //    and we need just the `d` attribute string to wrap in our own
+  //    element with the inlay-color fill.
+  //
+  // Our inline serializer rounds with `Math.round(v * 10^p) / 10^p`,
+  // which is robust to floating-point residuals.
+  const pathD = serializePath(finalCommands, 2);
 
   const colorHex = textColorHexFromSpec(spec);
   const svgFragment = `<path d="${pathD}" fill="${colorHex}"/>`;
