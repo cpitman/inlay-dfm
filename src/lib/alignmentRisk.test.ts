@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectAlignmentRisk } from './alignmentRisk';
+import { computeBoundary } from './morphology';
 
 // These tests model the geometry of the test fixtures in test-fixtures/:
 //   - RegistrationErrorTestPositive.svg
@@ -47,6 +48,42 @@ function makeCanvasMinusHole(hx1: number, hy1: number, hx2: number, hy2: number)
   return mask;
 }
 
+function stampDisk(mask: Uint8Array, cx: number, cy: number, r: number) {
+  const r2 = r * r;
+  const xa = Math.max(0, Math.floor(cx - r));
+  const xb = Math.min(CANVAS_W, Math.ceil(cx + r) + 1);
+  const ya = Math.max(0, Math.floor(cy - r));
+  const yb = Math.min(CANVAS_H, Math.ceil(cy + r) + 1);
+  for (let y = ya; y < yb; y++) {
+    const dy = y - cy;
+    const row = y * CANVAS_W;
+    for (let x = xa; x < xb; x++) {
+      const dx = x - cx;
+      if (dx * dx + dy * dy <= r2) mask[row + x] = 1;
+    }
+  }
+}
+
+/** Disk of `rOuter` with a `rInner` disk punched out at the same center. */
+function stampAnnulus(cx: number, cy: number, rOuter: number, rInner: number): Uint8Array {
+  const mask = new Uint8Array(N);
+  stampDisk(mask, cx, cy, rOuter);
+  const r2 = rInner * rInner;
+  const xa = Math.max(0, Math.floor(cx - rInner));
+  const xb = Math.min(CANVAS_W, Math.ceil(cx + rInner) + 1);
+  const ya = Math.max(0, Math.floor(cy - rInner));
+  const yb = Math.min(CANVAS_H, Math.ceil(cy + rInner) + 1);
+  for (let y = ya; y < yb; y++) {
+    const dy = y - cy;
+    const row = y * CANVAS_W;
+    for (let x = xa; x < xb; x++) {
+      const dx = x - cx;
+      if (dx * dx + dy * dy <= r2) mask[row + x] = 0;
+    }
+  }
+  return mask;
+}
+
 describe('Registration error detection', () => {
   it('Positive fixture: Layer 2 exactly fills Layer 1\'s hole → risk detected', () => {
     // RegistrationErrorTestPositive.svg
@@ -79,6 +116,65 @@ describe('Registration error detection', () => {
     );
 
     expect(result.affectedCount).toBe(0);
+  });
+
+  it('Circular seam: inner-circle exactly fills the annular hole → full ring detected', () => {
+    // Layer 1 (earlier color) is an annulus: outer radius 250 px, hole
+    // radius 120 px. Layer 2 (later color) is a filled disk of radius
+    // 120 px at the same center, so its outer boundary is exactly the
+    // layer-1 hole boundary. The inner ring of layer 1 should be
+    // flagged in full; the outer ring (130 px from layer 2 — well
+    // past the ~2.65 px threshold) must stay clear.
+    //
+    // We verify the *full ring* by partitioning layer-1's boundary
+    // pixels into inner-ring vs outer-ring via radial distance from
+    // the circle center, then asserting every inner-ring pixel is
+    // flagged. The aggregate `affectedCount/totalBoundaryCount` ratio
+    // alone wouldn't catch a sparse / spotty arc.
+    const cx = CANVAS_W / 2, cy = CANVAS_H / 2;
+    const R_OUTER = 250, R_HOLE = 120;
+    const layer1 = stampAnnulus(cx, cy, R_OUTER, R_HOLE);
+    const layer2 = new Uint8Array(N);
+    stampDisk(layer2, cx, cy, R_HOLE);
+
+    const { riskMask } = detectAlignmentRisk(
+      layer1, layer2, CANVAS_W, CANVAS_H, ALIGN_THRESHOLD_PX,
+    );
+
+    const boundary = computeBoundary(layer1, CANVAS_W, CANVAS_H);
+    let innerTotal = 0, innerFlagged = 0;
+    let outerTotal = 0, outerFlagged = 0;
+    for (let y = 0; y < CANVAS_H; y++) {
+      const row = y * CANVAS_W;
+      const dy = y - cy;
+      for (let x = 0; x < CANVAS_W; x++) {
+        const k = row + x;
+        if (!boundary[k]) continue;
+        const dx = x - cx;
+        const r = Math.hypot(dx, dy);
+        if (Math.abs(r - R_HOLE)  <= 1.5) {
+          innerTotal++;
+          if (riskMask[k]) innerFlagged++;
+        } else if (Math.abs(r - R_OUTER) <= 1.5) {
+          outerTotal++;
+          if (riskMask[k]) outerFlagged++;
+        }
+      }
+    }
+
+    // Sanity: the partition actually found a reasonable seam length —
+    // guards against a future stampAnnulus regression silently
+    // producing an empty mask. The digitized boundary set is somewhat
+    // shorter than the ideal circumference (2π × radius), so use a
+    // conservative floor.
+    expect(innerTotal).toBeGreaterThan(500);
+    expect(outerTotal).toBeGreaterThan(1000);
+    // Every inner-ring boundary pixel must be flagged — no spotty /
+    // partial detection along the curve.
+    expect(innerFlagged).toBe(innerTotal);
+    // The outer ring is far from layer 2; no boundary pixel there
+    // should be flagged.
+    expect(outerFlagged).toBe(0);
   });
 
   it('Positive after extension: Layer 1 hole shrunken by 0.05" → no risk', () => {
