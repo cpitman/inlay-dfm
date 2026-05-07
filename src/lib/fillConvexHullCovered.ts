@@ -1,33 +1,26 @@
 import type { Layer, VectorData } from '@/types';
-import { parseViewBox, rasterizeLayerToBinaryMask } from './svgLayers';
-import { findMaskComponents } from './maskComponents';
-import { computeBoundary } from './morphology';
-import { convexHull, rasterizeConvexPolygon } from './plugStock';
-import { maskToSvgPath } from './maskToPath';
-import { distanceTransform } from './distanceTransform';
-import { constrainedDistanceTransform } from './constrainedDistance';
-import { dilateMask } from './maskOps';
-
-const DEFAULT_RASTER_WIDTH = 1200;
-const TRACE_OVERSHOOT_PX = 2;
-/**
- * Clearance-bit margin to keep around earlier-layer (lower-z, drawn-
- * first) boundaries. Hull-fill pixels are excluded from a 0.3"-wide
- * band around every earlier-layer edge so the bit cutting the
- * extended pocket has clearance against earlier-layer wood. See
- * `fillEnclosedHoles.ts` for the full rationale.
- */
-const EARLIER_BOUNDARY_MARGIN_INCHES = 0.3;
-/**
- * Skip per-component fills smaller than this many covered hull-added
- * pixels. Tuned for a 120 ppi lite raster — at that scale, 16 pixels
- * is roughly a 0.13" × 0.13" square. Smaller fills aren't worth the
- * boundary complexity they introduce.
- */
-const MIN_FILL_PIXELS = 16;
+import {
+  multiPolygonComponents,
+  componentsToMultiPolygon,
+  multiPolygonUnion,
+  multiPolygonUnionAll,
+  multiPolygonIntersection,
+  multiPolygonDifference,
+  type PolygonComponent,
+} from './clipperOps';
+import {
+  multiPolygonArea,
+  multiPolygonIsEmpty,
+  type MultiPolygon,
+} from './polygon';
+import { convexHull } from './plugStock';
+import {
+  svgFragmentToMultiPolygon,
+  multiPolygonToSvgFragment,
+} from './polygonParser';
 
 interface FillResult {
-  /** New layers array with the target layer's fragment extended (fill path appended). */
+  /** New layers array with the target layer's fragment replaced. */
   layers: Layer[];
   /** Number of layer components that received a fill. */
   filledHoleCount: number;
@@ -37,30 +30,48 @@ interface FillResult {
 
 /**
  * Aggressive companion to `fillEnclosedHoles`: for each connected
- * component of the target layer's mask, compute the convex hull and
- * fill any "added" pixels (hull − component) that are covered by the
- * union of later inlay layers. Generalizes the simple closed-hole
- * case `fillEnclosedHoles` handles to *open concavities* —
- * U-shapes, C-shapes, etc. — where the original layer has no
- * enclosed hole at all but later layers still cover the concavity.
+ * component of the target layer's polygon, compute its convex hull
+ * and fill any hull-added region that is covered by the union of
+ * later inlay layers. Generalizes the simple closed-hole case to
+ * *open concavities* — U-, C-shapes, etc. — where the original
+ * layer has no enclosed hole at all but later layers still cover
+ * the concavity.
  *
  * The visual result is unchanged (added pixels are by construction
  * covered by later layers and therefore invisible) but the layer's
  * carved geometry simplifies dramatically — a thin C-shape becomes
- * a near-disk, a stroke layer's outlines becomes a solid blob,
- * and the V-bit no longer has to trace each concavity's perimeter.
+ * a near-disk where the inner concavity is covered, and the V-bit
+ * no longer has to trace each concavity's perimeter.
  *
- * Mirrors `fillEnclosedHoles` end-to-end: same rasterize-then-trace
- * shape, same per-color call, same APPEND-to-svgFragment policy
- * (preserves Bezier fidelity for the original geometry).
+ * Polygon-native implementation:
+ *   1. Parse target + every later layer to a MultiPolygon.
+ *   2. Build `laterUnion`.
+ *   3. Decompose target into per-component (outer + holes).
+ *   4. For each component:
+ *      - Build the component's polygon.
+ *      - Compute the outer ring's convex hull.
+ *      - `added = (hull − component) ∩ laterUnion` — the hull-added
+ *        region restricted to where later layers cover it.
+ *      - Merge component with `added`, decompose, and KEEP ONLY
+ *        merged-components that overlap the original component.
+ *        Disjoint fillable pieces (not adjacent to the original
+ *        component) are dropped — they'd otherwise form a new
+ *        isolated mass on the layer that the bit can't reach
+ *        without crossing target.
+ *   5. Reassemble target and emit the new svgFragment.
+ *
+ * No AA tolerance, no danger zone, no trace overshoot, no separate
+ * "isolated region" filter — polygon ops produce valid topology
+ * directly, and the merged-components check above handles isolation.
  */
 export async function fillConvexHullCovered(
   vector: VectorData,
   targetColorHex: string,
   designWidthInches: number,
   colorOrder?: string[],
-  rasterWidth: number = DEFAULT_RASTER_WIDTH,
+  _rasterWidth?: number,
 ): Promise<FillResult> {
+  void _rasterWidth;
   const order = colorOrder ?? vector.detectedColors;
   const targetIndex = order.indexOf(targetColorHex);
   if (targetIndex < 0) {
@@ -70,219 +81,119 @@ export async function fillConvexHullCovered(
     return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
   }
 
-  const aspect = vector.naturalHeight / vector.naturalWidth;
-  const canvasW = rasterWidth;
-  const canvasH = Math.max(1, Math.round(rasterWidth * aspect));
-  const pixelsPerInch = canvasW / designWidthInches;
-  const n = canvasW * canvasH;
+  const inchesPerUnit = designWidthInches / vector.naturalWidth;
+  const sqInchesPerSqUnit = inchesPerUnit * inchesPerUnit;
 
-  // Rasterize EVERY layer — earlier-layer masks feed the boundary
-  // danger-zone check; later-layer masks feed the convex-hull
-  // coverage check.
-  const masksByIndex: Uint8Array[] = [];
-  for (let i = 0; i < order.length; i++) {
-    const layer = vector.layers.find(l => l.colorHex === order[i]);
-    if (!layer) { masksByIndex.push(new Uint8Array(n)); continue; }
-    const mask = await rasterizeLayerToBinaryMask(
-      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-      canvasW, canvasH,
-    );
-    masksByIndex.push(mask);
+  const targetLayer = vector.layers.find(l => l.colorHex === targetColorHex);
+  if (!targetLayer) {
+    return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
   }
-
-  const targetMask = masksByIndex[targetIndex];
-  const laterUnion = new Uint8Array(n);
-  for (let i = targetIndex + 1; i < masksByIndex.length; i++) {
-    const m = masksByIndex[i];
-    for (let k = 0; k < n; k++) if (m[k]) laterUnion[k] = 1;
-  }
-  // Danger source: earlier-layer union (intact wood the bit must
-  // clear) ∪ background-visible pixels (raw board the bit must
-  // clear). Background-visible is computed against `dilateMask(
-  // allLayers, 1)` rather than allLayers directly so 1-pixel
-  // boundary stragglers between adjacent layers don't seed
-  // separate danger zones. See `fillEnclosedHoles.ts` for the
-  // longer rationale.
-  const allLayers = new Uint8Array(n);
-  for (const m of masksByIndex) {
-    for (let k = 0; k < n; k++) if (m[k]) allLayers[k] = 1;
-  }
-  const allLayersDilated = dilateMask(allLayers, canvasW, canvasH, 1);
-
-  const dangerSource = new Uint8Array(n);
-  for (let i = 0; i < targetIndex; i++) {
-    const m = masksByIndex[i];
-    for (let k = 0; k < n; k++) if (m[k]) dangerSource[k] = 1;
-  }
-  for (let k = 0; k < n; k++) {
-    if (!dangerSource[k] && !allLayersDilated[k]) dangerSource[k] = 1;
-  }
-
-  const fillMask = computeHullFillMask(targetMask, laterUnion, canvasW, canvasH);
-  let filledPixelCount = popcount(fillMask);
-  if (filledPixelCount === 0) {
+  const target = svgFragmentToMultiPolygon(targetLayer.svgFragment);
+  if (multiPolygonIsEmpty(target)) {
     return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
   }
 
-  // Subtract the danger zone from the fill so the hull extension
-  // doesn't extend layer K's pocket to within a clearance bit's
-  // diameter of any boundary the bit must clear. Constrained
-  // distance transform with `target.mask` as a barrier evaluates
-  // each NOT-target connected component independently — danger
-  // sources on the opposite side of target.mask from a hull-fill
-  // candidate are physically unreachable to the bit at that
-  // position, so they don't pull the candidate into the danger zone.
-  const marginPx = EARLIER_BOUNDARY_MARGIN_INCHES * pixelsPerInch;
-  if (marginPx > 0) {
-    const seeds = new Uint8Array(n);
-    for (let k = 0; k < n; k++) {
-      if (dangerSource[k] && !targetMask[k]) seeds[k] = 1;
+  const laterParts: MultiPolygon[] = [];
+  for (let i = targetIndex + 1; i < order.length; i++) {
+    const layer = vector.layers.find(l => l.colorHex === order[i]);
+    if (!layer) continue;
+    const mp = svgFragmentToMultiPolygon(layer.svgFragment);
+    if (!multiPolygonIsEmpty(mp)) laterParts.push(mp);
+  }
+  const laterUnion = multiPolygonUnionAll(laterParts);
+  if (multiPolygonIsEmpty(laterUnion)) {
+    return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
+  }
+
+  const components = multiPolygonComponents(target);
+  let filledHoleCount = 0;
+  let filledAreaSqUnits = 0;
+
+  const newComponents: PolygonComponent[] = [];
+  for (const c of components) {
+    const componentMp: MultiPolygon = [c.outer, ...c.holes.map(h => h.ring)];
+    const componentArea = multiPolygonArea(componentMp);
+
+    // Hull of the component's outer ring. Holes are concavities
+    // that hull-fill is supposed to FILL, so we ignore them when
+    // computing the hull.
+    const hullPts = convexHull(c.outer);
+    if (hullPts.length < 3) {
+      newComponents.push(c);
+      continue;
     }
-    const distFromDanger = constrainedDistanceTransform(seeds, targetMask, canvasW, canvasH);
-    let dangerExcluded = 0;
-    for (let k = 0; k < n; k++) {
-      if (fillMask[k] && distFromDanger[k] <= marginPx) {
-        fillMask[k] = 0;
-        dangerExcluded++;
+    const hullMp: MultiPolygon = [hullPts];
+
+    // Hull-added pixels = hull − component. Then restrict to
+    // later-covered region.
+    const added = multiPolygonDifference(hullMp, componentMp);
+    const fillable = multiPolygonIntersection(added, laterUnion);
+
+    if (multiPolygonIsEmpty(fillable)) {
+      newComponents.push(c);
+      continue;
+    }
+
+    // Merge component + fillable. Decompose. Keep ALL merged
+    // components that overlap the original component (= are inside
+    // its outer ring's interior). Disjoint fill pieces fully
+    // outside c.outer are dropped (they'd create new isolated
+    // mass on the layer).
+    //
+    // Multiple kept components are common: when `fillable` consists
+    // of disconnected pieces inside c's holes (because the holes
+    // contain uncovered material like layer-1 stroke islands that
+    // separate the covered portion), the union with c's mass keeps
+    // those fillable pieces as separate components inside c's
+    // outer extent. They all belong to c — keeping only the first
+    // (or only the largest) would silently drop the bulk of c's
+    // post-fill geometry, including the original c's outer mass
+    // when fillable inside holes happens to be discovered first.
+    const merged = multiPolygonUnion(componentMp, fillable);
+    const mergedComponents = multiPolygonComponents(merged);
+
+    const kept: PolygonComponent[] = [];
+    for (const mc of mergedComponents) {
+      const mcMp: MultiPolygon = [mc.outer, ...mc.holes.map(h => h.ring)];
+      const overlap = multiPolygonIntersection(mcMp, [c.outer]);
+      if (multiPolygonArea(overlap) > 0) {
+        kept.push(mc);
       }
     }
-    filledPixelCount -= dangerExcluded;
-    if (filledPixelCount <= 0) {
-      return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
+
+    if (kept.length === 0) {
+      // No merged component overlaps c — every fillable piece was
+      // disjoint from c. Keep c unchanged.
+      newComponents.push(c);
+      continue;
+    }
+
+    let keptArea = 0;
+    for (const mc of kept) {
+      keptArea += multiPolygonArea([mc.outer, ...mc.holes.map(h => h.ring)]);
+      newComponents.push(mc);
+    }
+    const fillArea = keptArea - componentArea;
+    if (fillArea > 0) {
+      filledHoleCount++;
+      filledAreaSqUnits += fillArea;
     }
   }
 
-  // Drop fill pixels that form NEW isolated mask regions — fragments
-  // disconnected from the original target geometry. Per-component
-  // hull-fill produces hull(A) ∖ A pixels which are bordered by A
-  // and merge with A on append; but laterUnion + danger-zone
-  // filtering can split that fill into pieces, some of which lose
-  // their adjacency to A. A floating fill blob in pixel space adds
-  // a separate carved island the bit must reach without crossing
-  // target.mask, so it's not a useful concavity extension. Find
-  // components of (target ∪ fill) and remove any component whose
-  // pixels are entirely fill.
-  const combined = new Uint8Array(n);
-  for (let k = 0; k < n; k++) {
-    if (targetMask[k] || fillMask[k]) combined[k] = 1;
-  }
-  const combinedComponents = findMaskComponents(combined, canvasW, canvasH);
-  let isolatedDropped = 0;
-  for (const comp of combinedComponents) {
-    let touchesTarget = false;
-    for (const k of comp.pixels) {
-      if (targetMask[k]) { touchesTarget = true; break; }
-    }
-    if (touchesTarget) continue;
-    for (const k of comp.pixels) {
-      if (fillMask[k]) { fillMask[k] = 0; isolatedDropped++; }
-    }
-  }
-  filledPixelCount -= isolatedDropped;
-  if (filledPixelCount <= 0) {
+  if (filledHoleCount === 0) {
     return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
   }
 
-  // Dilate by TRACE_OVERSHOOT_PX so the appended polygon overshoots into
-  // the original mask (and into the covering later layers, which is
-  // hidden by z-order). Bridges marching-squares half-pixel inset.
-  const fillSeeds = new Uint8Array(n);
-  for (let k = 0; k < n; k++) fillSeeds[k] = fillMask[k] ? 0 : 1;
-  const distFromFill = distanceTransform(fillSeeds, canvasW, canvasH);
-  const tracedMask = new Uint8Array(n);
-  for (let k = 0; k < n; k++) {
-    if (distFromFill[k] <= TRACE_OVERSHOOT_PX) tracedMask[k] = 1;
-  }
+  const filledTarget = componentsToMultiPolygon(newComponents);
+  const newFragment = multiPolygonToSvgFragment(filledTarget, targetColorHex);
 
-  const scaleX = vector.naturalWidth  / canvasW;
-  const scaleY = vector.naturalHeight / canvasH;
-  const vb = parseViewBox(vector.viewBox);
-  const fillPath = maskToSvgPath(tracedMask, canvasW, canvasH, {
-    fill: targetColorHex,
-    scaleX,
-    scaleY,
-    offsetX: vb.x,
-    offsetY: vb.y,
-    simplifyEpsilonPx: 1,
-    minAreaPx: 4,
-  });
-
-  const newLayers = vector.layers.map(l => {
-    if (l.colorHex !== targetColorHex) return l;
-    const sep = l.svgFragment ? '\n' : '';
-    return { ...l, svgFragment: `${l.svgFragment}${sep}${fillPath}` };
-  });
-
-  // Count how many components actually contributed — for the optimizer log.
-  // Recomputing via `findMaskComponents` on `fillMask` returns one component
-  // per filled patch, the equivalent number to `filledHoleCount` in
-  // `fillEnclosedHoles`.
-  const filledComponents = findMaskComponents(fillMask, canvasW, canvasH);
+  const newLayers = vector.layers.map(l =>
+    l.colorHex === targetColorHex ? { ...l, svgFragment: newFragment } : l,
+  );
 
   return {
     layers: newLayers,
-    filledHoleCount: filledComponents.length,
-    filledAreaSqIn: filledPixelCount / (pixelsPerInch * pixelsPerInch),
+    filledHoleCount,
+    filledAreaSqIn: filledAreaSqUnits * sqInchesPerSqUnit,
   };
-}
-
-/**
- * Pure mask-only stage: given the target layer's mask and the union
- * of later layers' masks, returns a mask of pixels that should be
- * added to the target. Exported for unit testing — exercising this
- * without the canvas/SVG pipeline lets us assert the geometric
- * behavior cleanly.
- */
-export function computeHullFillMask(
-  targetMask: Uint8Array,
-  laterUnion: Uint8Array,
-  w: number,
-  h: number,
-): Uint8Array {
-  const n = w * h;
-  const fillMask = new Uint8Array(n);
-
-  const components = findMaskComponents(targetMask, w, h);
-  for (const comp of components) {
-    // Build a per-component mask so computeBoundary returns ONLY this
-    // component's boundary, not interior boundaries between components.
-    const compMask = new Uint8Array(n);
-    for (const k of comp.pixels) compMask[k] = 1;
-
-    const boundary = computeBoundary(compMask, w, h);
-    const points: { x: number; y: number }[] = [];
-    for (let k = 0; k < n; k++) {
-      if (boundary[k]) {
-        const x = k % w;
-        points.push({ x, y: (k - x) / w });
-      }
-    }
-    if (points.length < 3) continue;
-
-    const hullVertices = convexHull(points);
-    if (hullVertices.length < 3) continue;
-
-    const hullMask = rasterizeConvexPolygon(hullVertices, w, h);
-
-    // added = hullMask AND NOT componentMask. Filter by laterUnion.
-    let coveredCount = 0;
-    const compFill = new Uint8Array(n);
-    for (let k = 0; k < n; k++) {
-      if (hullMask[k] && !compMask[k] && laterUnion[k]) {
-        compFill[k] = 1;
-        coveredCount++;
-      }
-    }
-    if (coveredCount < MIN_FILL_PIXELS) continue;
-
-    for (let k = 0; k < n; k++) if (compFill[k]) fillMask[k] = 1;
-  }
-
-  return fillMask;
-}
-
-function popcount(mask: Uint8Array): number {
-  let c = 0;
-  for (let k = 0; k < mask.length; k++) if (mask[k]) c++;
-  return c;
 }

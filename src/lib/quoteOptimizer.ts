@@ -4,7 +4,10 @@ import {
   runDfmAnalysisLite,
 } from './dfmAnalysis';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
-import { fillConvexHullCovered } from './fillConvexHullCovered';
+// fillConvexHullCovered is currently deferred (see comment in
+// applyFillAll). Import retained for future re-enablement.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { fillConvexHullCovered as _fillConvexHullCovered } from './fillConvexHullCovered';
 import { removeFullyOccludedRegions } from './removeOccludedRegions';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
@@ -358,7 +361,14 @@ async function applyFillAll(
   colorOrder: string[],
   canvasWidth: number,
 ): Promise<VectorData> {
-  const ENABLE_HULL_FILL = true;
+  // Pass 2 (convex-hull fill) is currently DEFERRED. Its previous
+  // partial-fill semantics (= absorb the covered fraction of a
+  // hole, leaving the uncovered fraction as a thin sliver) produced
+  // ragged geometry on the synthesized stroke layer's ear-area
+  // hole. The user explicitly wants partial-fill paused pending a
+  // smarter strategy. The new BFS-based fillEnclosedHoles handles
+  // the fully-covered-with-islands case (= the "biggest square"
+  // rule) cleanly, which was the main thing pass 2 was bridging.
   const ENABLE_OCCLUDED_REMOVAL = true;
 
   let workingLayers = vector.layers;
@@ -369,24 +379,27 @@ async function applyFillAll(
     svgString: combineLayers(workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
   });
 
-  // Pass 1: closed-hole fill. Limited to layers the lite analysis
-  // already flagged — a precise, fast win.
+  // Pass 1: closed-hole fill. The polygon-native implementation
+  // BFS-walks each layer's PolyTree and fills any hole whose
+  // exposed area (= ring interior minus same-layer islands inside)
+  // is fully covered by some later layer. Holes that are only
+  // partially covered are left intact. Limited to layers the lite
+  // analysis already flagged.
   for (const colorHex of holeFillTargets) {
     const res = await fillEnclosedHoles(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
-    if (res.filledHoleCount > 0) workingLayers = res.layers;
-  }
-
-  // Pass 2: convex-hull fill. Run for every non-final color; the lite
-  // analysis doesn't surface a "hull-fillable" hint, and the per-layer
-  // rasterization the function does internally is cheap relative to
-  // the screening canvas it operates on.
-  if (ENABLE_HULL_FILL) {
-    for (let i = 0; i < colorOrder.length - 1; i++) {
-      const colorHex = colorOrder[i];
-      const res = await fillConvexHullCovered(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
-      if (res.filledHoleCount > 0) workingLayers = res.layers;
+    if (res.filledHoleCount > 0 || res.partiallyFilledHoleCount > 0) {
+      workingLayers = res.layers;
     }
   }
+
+  // Pass 2 (convex-hull fill / partial-fill of concavities) is
+  // currently DEFERRED. Its previous polygon-native implementation
+  // absorbed only the laterUnion-covered fraction of a concavity,
+  // leaving thin uncovered slivers as visible artifacts on the
+  // synthesized stroke layer. The strategy needs reworking before
+  // it can be safely re-enabled. fillEnclosedHoles handles the
+  // full-coverage case (= the "biggest square" rule with island
+  // absorption), which is what most designs need.
 
   // Pass 3: remove fully-occluded regions. Runs LAST so any
   // components grown or merged by passes 1–2 have the chance to

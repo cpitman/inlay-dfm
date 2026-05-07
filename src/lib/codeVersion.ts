@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-06.9';
+export const CODE_VERSION = '2026-05-07.9';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'plug-stock cost honors user plugStockMarginInches (was hardcoded 0.51"); separates disjoint plugs more aggressively';
+  'fillEnclosedHoles: partial-fill of partially-covered holes via boundary simplification + 0.13" hole margin';
