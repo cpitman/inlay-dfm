@@ -185,6 +185,100 @@ export function multiPolygonOffset(
 }
 
 /**
+ * Offset an OPEN polyline by `delta` design units, producing a
+ * closed polygon (= the bit's "stroke band"). Used by polygon-
+ * native stroke extraction: a stroked SVG element with width `w`
+ * occupies the band `multiPolygonOffsetOpenPolyline(points, w/2)`.
+ *
+ * `endType` controls the cap shape ('butt' | 'square' | 'round')
+ * — same as SVG's `stroke-linecap`. `joinType` mirrors
+ * `multiPolygonOffset`'s convex-corner handling.
+ */
+export function multiPolygonOffsetOpenPolyline(
+  points: Ring,
+  delta: number,
+  options?: {
+    endType?: 'butt' | 'square' | 'round';
+    joinType?: 'round' | 'square' | 'miter';
+    arcTolerance?: number;
+    miterLimit?: number;
+  },
+): MultiPolygon {
+  if (points.length < 2 || delta <= 0) return [];
+
+  const path = points.map(p => ({
+    X: Math.round(p.x * CLIPPER_SCALE),
+    Y: Math.round(p.y * CLIPPER_SCALE),
+  }));
+
+  const arcToleranceDesign = options?.arcTolerance ?? Math.max(Math.abs(delta) / 100, 1e-4);
+  const co = new ClipperLib.ClipperOffset(
+    options?.miterLimit ?? 2.0,
+    arcToleranceDesign * CLIPPER_SCALE,
+  );
+
+  const endType = options?.endType ?? 'round';
+  const et = endType === 'butt'   ? ClipperLib.EndType.etOpenButt
+           : endType === 'square' ? ClipperLib.EndType.etOpenSquare
+           :                        ClipperLib.EndType.etOpenRound;
+
+  const joinType = options?.joinType ?? 'round';
+  const jt = joinType === 'square' ? ClipperLib.JoinType.jtSquare
+           : joinType === 'miter'  ? ClipperLib.JoinType.jtMiter
+           :                          ClipperLib.JoinType.jtRound;
+
+  co.AddPath(path, jt, et);
+
+  const solution: { X: number; Y: number }[][] = [];
+  co.Execute(solution, delta * CLIPPER_SCALE);
+  return clipperPathsToMultiPolygon(solution);
+}
+
+/**
+ * Offset a CLOSED polyline (= a ring whose last vertex implicitly
+ * connects to the first) by `delta` design units to either side,
+ * producing a band-shaped polygon centered on the polyline. Used
+ * for stroked elements whose path data closes with `Z`.
+ *
+ * Equivalent to outward-offsetting by `delta` and inward-offsetting
+ * by `-delta` and taking the difference, but in a single Clipper
+ * operation via `EndType.etClosedLine`.
+ */
+export function multiPolygonOffsetClosedLine(
+  ring: Ring,
+  delta: number,
+  options?: {
+    joinType?: 'round' | 'square' | 'miter';
+    arcTolerance?: number;
+    miterLimit?: number;
+  },
+): MultiPolygon {
+  if (ring.length < 3 || delta <= 0) return [];
+
+  const path = ring.map(p => ({
+    X: Math.round(p.x * CLIPPER_SCALE),
+    Y: Math.round(p.y * CLIPPER_SCALE),
+  }));
+
+  const arcToleranceDesign = options?.arcTolerance ?? Math.max(Math.abs(delta) / 100, 1e-4);
+  const co = new ClipperLib.ClipperOffset(
+    options?.miterLimit ?? 2.0,
+    arcToleranceDesign * CLIPPER_SCALE,
+  );
+
+  const joinType = options?.joinType ?? 'round';
+  const jt = joinType === 'square' ? ClipperLib.JoinType.jtSquare
+           : joinType === 'miter'  ? ClipperLib.JoinType.jtMiter
+           :                          ClipperLib.JoinType.jtRound;
+
+  co.AddPath(path, jt, ClipperLib.EndType.etClosedLine);
+
+  const solution: { X: number; Y: number }[][] = [];
+  co.Execute(solution, delta * CLIPPER_SCALE);
+  return clipperPathsToMultiPolygon(solution);
+}
+
+/**
  * One inner-ring (hole) of a polygon component. Carries the ring
  * itself plus a flag indicating whether the hole contains any
  * nested rings (= islands of the same layer). A leaf hole is one

@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.11';
+export const CODE_VERSION = '2026-05-07.12';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Phase 2 alignment-risk detection polygon-native (edge-pair scan with parallel filter); risk band rasterized for the existing overlay pipeline';
+  'Stroke layer extraction polygon-native (Clipper open-polyline offset); 2-px chord-error overshoot retired; visible-stroke and fill subtraction via polygon ops';
