@@ -23,6 +23,24 @@
  *   - `visibleStrokesMP`: stroke pixels topmost in z-order. Used to
  *     punch through the fill layers when the user opts to inlay
  *     strokes (so the outline visibly pierces through fills).
+ *
+ * **Status — not currently wired into `extractStrokeLayer`.** Real-
+ * world clipart SVGs were producing offset layers and thin/missing
+ * strokes (v2026-05-07.12) because this parser ignores three SVG
+ * features the bitmap renderer handled correctly:
+ *
+ *   1. `transform="..."` attributes on individual elements.
+ *   2. `<g>` group inheritance — children inherit `stroke`,
+ *      `stroke-width`, `transform`, etc. from ancestor `<g>` tags.
+ *   3. CSS stylesheets — `<style>` blocks defining selectors that
+ *      apply to elements by class / id / tag.
+ *
+ * For typical hand-drawn clipart these three account for most of
+ * the stroke-styling. Until they're handled, this module is
+ * exported for future work but `strokeDetection.ts` keeps the
+ * bitmap path. The polygon-native helpers (
+ * `multiPolygonOffsetOpenPolyline`, `multiPolygonOffsetClosedLine`)
+ * are stable building blocks regardless.
  */
 
 import svgpath from 'svgpath';

@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.12';
+export const CODE_VERSION = '2026-05-07.13';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Stroke layer extraction polygon-native (Clipper open-polyline offset); 2-px chord-error overshoot retired; visible-stroke and fill subtraction via polygon ops';
+  'Revert strokeDetection to bitmap path: polygon parser missed transform/group/CSS attributes, producing offset layers and thin/missing strokes; polygonStrokeExtraction kept as future work';
