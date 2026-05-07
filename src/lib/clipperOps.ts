@@ -452,6 +452,37 @@ export function componentsToMultiPolygon(components: PolygonComponent[]): MultiP
 }
 
 /**
+ * Canonicalize a list of rings under an explicit SVG fill rule
+ * (`nonzero` or `evenodd`) and return a `MultiPolygon` that the
+ * polygon pipeline can interpret under its own even-odd convention.
+ *
+ *   - `nonzero`: same-direction overlapping rings UNION (matches
+ *     SVG's default behavior — two CCW circles authored as a single
+ *     `<path>` render as the union, not the symmetric difference).
+ *   - `evenodd`: overlapping rings XOR (the SVG `fill-rule="evenodd"`
+ *     interpretation).
+ *
+ * Clipper internally normalizes its output to a topology that's
+ * unambiguous under either rule (CCW outers, CW holes), so callers
+ * can treat the result as `MultiPolygon` and our existing even-odd
+ * downstream consumers will get the right answer.
+ */
+export function canonicalizeRings(
+  rings: readonly Ring[],
+  fillRule: 'nonzero' | 'evenodd' = 'nonzero',
+): MultiPolygon {
+  if (rings.length === 0) return [];
+  const c = new ClipperLib.Clipper();
+  c.AddPaths(rings.map(ringToClipperPath), ClipperLib.PolyType.ptSubject, true);
+  const solution: { X: number; Y: number }[][] = [];
+  const fr = fillRule === 'nonzero'
+    ? ClipperLib.PolyFillType.pftNonZero
+    : ClipperLib.PolyFillType.pftEvenOdd;
+  c.Execute(ClipperLib.ClipType.ctUnion, solution, fr, fr);
+  return clipperPathsToMultiPolygon(solution);
+}
+
+/**
  * Canonicalize: union the input with itself to produce a clean
  * polygon (deduplicated rings, no self-intersections, even-odd
  * topology). Used to repair source SVGs that have overlapping or

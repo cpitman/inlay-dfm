@@ -16,6 +16,7 @@
  */
 
 import svgpath from 'svgpath';
+import { canonicalizeRings, multiPolygonUnionAll } from './clipperOps';
 import type { Point, Ring, MultiPolygon } from './polygon';
 
 const DEFAULT_FLATNESS = 0.05;
@@ -173,42 +174,49 @@ export function svgPathToRings(d: string, flatness: number = DEFAULT_FLATNESS): 
 }
 
 /**
- * Extract a `MultiPolygon` from a layer's `svgFragment` (one or
- * more `<path>`, `<polygon>`, `<rect>`, etc. elements). Bezier
- * curves are adaptively flattened. Multiple paths in the fragment
- * are unioned under the even-odd rule (their rings are collected
- * into a single MultiPolygon — Clipper resolves topology when
- * boolean ops run).
+ * Extract a `MultiPolygon` from a layer's `svgFragment`.
  *
- * Regex-based attribute extraction so the parser works in both
- * Node (vitest) and browser without depending on `DOMParser`.
- * The svgFragment shape we consume is always machine-emitted
- * (by `splitSvgIntoLayers`, `maskToPath`, our own
- * `multiPolygonToSvgFragment`, etc.), so simple regexes are
- * sufficient — we don't need general-purpose XML parsing.
+ * Each `<path>` is canonicalized under its declared `fill-rule`
+ * (default: nonzero). Two CCW overlapping subpaths inside one
+ * `<path d="…">` UNION under nonzero (browser default) but XOR
+ * under evenodd — getting this wrong is what made overlapping
+ * fills appear with holes after the optimizer round-tripped them.
+ *
+ * `<rect>`, `<circle>`, `<ellipse>`, `<polygon>` produce a single
+ * ring each so the rule doesn't matter; `<polyline>` is dropped
+ * (it's not a fillable shape under nonzero or evenodd).
+ *
+ * Regex-based extraction so the parser works in both Node (vitest)
+ * and browser. Layer fragments are always machine-emitted — by
+ * `splitSvgIntoLayers` (post-flatten), `multiPolygonToSvgFragment`,
+ * etc. — so simple regexes suffice; no general-purpose XML parser.
  */
 export function svgFragmentToMultiPolygon(
   fragment: string,
   flatness: number = DEFAULT_FLATNESS,
 ): MultiPolygon {
-  const rings: Ring[] = [];
+  const parts: MultiPolygon[] = [];
 
-  // <path d="..."> — most common case for our fragments.
-  for (const m of fragment.matchAll(/<path\b[^>]*\bd\s*=\s*"([^"]*)"/gi)) {
-    rings.push(...svgPathToRings(m[1], flatness));
-  }
-  // Single-quoted variant.
-  for (const m of fragment.matchAll(/<path\b[^>]*\bd\s*=\s*'([^']*)'/gi)) {
-    rings.push(...svgPathToRings(m[1], flatness));
-  }
-
-  // <polygon points="...">, <polyline points="...">.
-  for (const m of fragment.matchAll(/<(polygon|polyline)\b[^>]*\bpoints\s*=\s*"([^"]*)"/gi)) {
-    const ring = parsePointList(m[2]);
-    if (ring.length >= 3) rings.push(ring);
+  // <path d="…"> — canonicalize per-path under its fill-rule.
+  for (const m of fragment.matchAll(/<path\b([^>]*)>/gi)) {
+    const attrs = m[1];
+    const d = getAttr(attrs, 'd');
+    if (!d) continue;
+    const ringsForPath = svgPathToRings(d, flatness);
+    if (ringsForPath.length === 0) continue;
+    const fillRule = readFillRule(attrs);
+    parts.push(canonicalizeRings(ringsForPath, fillRule));
   }
 
-  // <rect x y width height>.
+  // <polygon points="…"> — single closed ring, fill-rule irrelevant.
+  for (const m of fragment.matchAll(/<polygon\b([^>]*)>/gi)) {
+    const points = getAttr(m[1], 'points');
+    if (!points) continue;
+    const ring = parsePointList(points);
+    if (ring.length >= 3) parts.push([ring]);
+  }
+
+  // <rect x y width height> — single closed ring.
   for (const m of fragment.matchAll(/<rect\b([^>]*)\/?>/gi)) {
     const attrs = m[1];
     const x = parseFloat(getAttr(attrs, 'x') ?? '0');
@@ -216,7 +224,7 @@ export function svgFragmentToMultiPolygon(
     const w = parseFloat(getAttr(attrs, 'width') ?? '0');
     const h = parseFloat(getAttr(attrs, 'height') ?? '0');
     if (w > 0 && h > 0) {
-      rings.push([{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]);
+      parts.push([[{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]]);
     }
   }
 
@@ -226,7 +234,7 @@ export function svgFragmentToMultiPolygon(
     const cx = parseFloat(getAttr(attrs, 'cx') ?? '0');
     const cy = parseFloat(getAttr(attrs, 'cy') ?? '0');
     const r = parseFloat(getAttr(attrs, 'r') ?? '0');
-    if (r > 0) rings.push(approximateCircle(cx, cy, r, r, flatness));
+    if (r > 0) parts.push([approximateCircle(cx, cy, r, r, flatness)]);
   }
 
   // <ellipse cx cy rx ry>.
@@ -236,10 +244,31 @@ export function svgFragmentToMultiPolygon(
     const cy = parseFloat(getAttr(attrs, 'cy') ?? '0');
     const rx = parseFloat(getAttr(attrs, 'rx') ?? '0');
     const ry = parseFloat(getAttr(attrs, 'ry') ?? '0');
-    if (rx > 0 && ry > 0) rings.push(approximateCircle(cx, cy, rx, ry, flatness));
+    if (rx > 0 && ry > 0) parts.push([approximateCircle(cx, cy, rx, ry, flatness)]);
   }
 
-  return rings;
+  if (parts.length === 0) return [];
+  if (parts.length === 1) return parts[0];
+  return multiPolygonUnionAll(parts);
+}
+
+/**
+ * Read the SVG fill-rule from an element's attribute string. Checks
+ * the explicit `fill-rule="…"` attribute first, then `style="…
+ * fill-rule:…"`. Returns 'nonzero' for absent / unrecognized values
+ * (matches SVG's spec default).
+ */
+function readFillRule(attrs: string): 'nonzero' | 'evenodd' {
+  const explicit = getAttr(attrs, 'fill-rule');
+  if (explicit) {
+    return explicit.trim().toLowerCase() === 'evenodd' ? 'evenodd' : 'nonzero';
+  }
+  const style = getAttr(attrs, 'style');
+  if (style) {
+    const m = style.match(/(?:^|;)\s*fill-rule\s*:\s*([^;]+)/i);
+    if (m) return m[1].trim().toLowerCase() === 'evenodd' ? 'evenodd' : 'nonzero';
+  }
+  return 'nonzero';
 }
 
 function getAttr(attrs: string, name: string): string | null {

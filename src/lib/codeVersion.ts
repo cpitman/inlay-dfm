@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.15';
+export const CODE_VERSION = '2026-05-07.16';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'parseSvg bakes ancestor transforms into each leaf path via DOM CTM so layer fragments are self-contained in absolute coords; fixes optimizer-strip-then-shift on Pika et al.';
+  'svgFragmentToMultiPolygon respects per-path fill-rule (default nonzero); polygonStrokeExtraction canonicalizes element fills via fill-rule; bake step preserves resolved fill-rule. Fixes XOR appearance of overlapping same-fill subpaths and stroke-bleed-through.';

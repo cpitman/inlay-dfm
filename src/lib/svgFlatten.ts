@@ -130,6 +130,12 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
       const finalD = ctm
         ? svgpath(d).transform(`matrix(${ctm.a} ${ctm.b} ${ctm.c} ${ctm.d} ${ctm.e} ${ctm.f})`).toString()
         : d;
+      // Resolve inherited fill-rule via computed style. SVG default is
+      // nonzero; ancestor <g> fill-rule="evenodd" inherits to children
+      // through CSS — copying just element attrs would silently lose
+      // it after we strip the wrappers.
+      const styles = window.getComputedStyle(el);
+      const fillRuleResolved = (styles.fillRule || 'nonzero').trim().toLowerCase();
       const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       newPath.setAttribute('d', finalD);
       // Copy attributes (drop geometry-defining + transform; preserve fill/stroke/style/etc.).
@@ -137,6 +143,12 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
         const name = attr.name.toLowerCase();
         if (ATTRS_TO_DROP_AFTER_BAKE.has(name)) continue;
         newPath.setAttribute(attr.name, attr.value);
+      }
+      // Bake the resolved fill-rule explicitly so downstream
+      // canonicalization treats overlapping subpaths the same way the
+      // browser would render the original SVG.
+      if (!newPath.hasAttribute('fill-rule')) {
+        newPath.setAttribute('fill-rule', fillRuleResolved === 'evenodd' ? 'evenodd' : 'nonzero');
       }
       el.parentNode?.replaceChild(newPath, el);
     }
@@ -155,6 +167,7 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
 
 type LineCap = 'butt' | 'square' | 'round';
 type LineJoin = 'miter' | 'round' | 'bevel';
+type FillRule = 'nonzero' | 'evenodd';
 
 export interface FlattenedSvgElement {
   /** Document-order index. */
@@ -167,6 +180,8 @@ export interface FlattenedSvgElement {
   strokeLinecap: LineCap;
   strokeLinejoin: LineJoin;
   hasFill: boolean;
+  /** Resolved fill-rule (default nonzero). */
+  fillRule: FillRule;
 }
 
 /** Flatten an SVG to a list of leaf shapes with resolved styling and absolute coordinates. */
@@ -239,6 +254,7 @@ function elementToFlattened(el: SVGGraphicsElement, zIndex: number): FlattenedSv
 
   const linecap = normalizeLinecap(styles.strokeLinecap);
   const linejoin = normalizeLinejoin(styles.strokeLinejoin);
+  const fillRule: FillRule = (styles.fillRule || 'nonzero').trim().toLowerCase() === 'evenodd' ? 'evenodd' : 'nonzero';
 
   const subpathsLocal = extractElementSubpathsLocal(el);
   if (subpathsLocal.length === 0) return null;
@@ -256,6 +272,7 @@ function elementToFlattened(el: SVGGraphicsElement, zIndex: number): FlattenedSv
     strokeLinecap: linecap,
     strokeLinejoin: linejoin,
     hasFill,
+    fillRule,
   };
 }
 

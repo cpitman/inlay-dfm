@@ -30,6 +30,7 @@
 
 import svgpath from 'svgpath';
 import {
+  canonicalizeRings,
   multiPolygonOffsetClosedLine,
   multiPolygonOffsetOpenPolyline,
   multiPolygonDifference,
@@ -48,6 +49,7 @@ const FLATNESS = 0.05;
 
 type LineCap = 'butt' | 'square' | 'round';
 type LineJoin = 'miter' | 'round' | 'bevel';
+type FillRule = 'nonzero' | 'evenodd';
 
 export interface ParsedSvgElement {
   /** Document-order index. */
@@ -60,6 +62,8 @@ export interface ParsedSvgElement {
   strokeLinejoin: LineJoin;
   /** True iff the element has a non-`none` fill. */
   hasFill: boolean;
+  /** Fill-rule for canonicalizing overlapping subpaths (default nonzero). */
+  fillRule: FillRule;
 }
 
 /**
@@ -281,6 +285,8 @@ export function parseSvgStrokeElements(svgText: string): ParsedSvgElement[] {
     const strokeLinejoin: LineJoin = linejoinRaw === 'round' ? 'round'
                                    : linejoinRaw === 'bevel' ? 'bevel'
                                    : 'miter';
+    const fillRuleRaw = (readStyledAttr(attrs, style, 'fill-rule') ?? 'nonzero').toLowerCase();
+    const fillRule: FillRule = fillRuleRaw === 'evenodd' ? 'evenodd' : 'nonzero';
 
     let subpaths: { points: Point[]; closed: boolean }[] = [];
     switch (tag) {
@@ -342,6 +348,7 @@ export function parseSvgStrokeElements(svgText: string): ParsedSvgElement[] {
       strokeLinecap,
       strokeLinejoin,
       hasFill,
+      fillRule,
     });
   }
   return out;
@@ -374,14 +381,20 @@ function elementStrokeBand(el: ParsedSvgElement): MultiPolygon {
   return bands.length === 0 ? [] : multiPolygonUnionAll(bands);
 }
 
-/** Compute the fill polygon for one parsed element (closed subpaths only). */
+/**
+ * Compute the fill polygon for one parsed element (closed subpaths
+ * only). Canonicalizes via the element's fill-rule so two CCW
+ * overlapping subpaths inside one nonzero `<path>` UNION (matching
+ * the browser's render) instead of XOR-ing.
+ */
 function elementFillPolygon(el: ParsedSvgElement): MultiPolygon {
   if (!el.hasFill) return [];
   const rings: Ring[] = [];
   for (const sub of el.subpaths) {
     if (sub.closed && sub.points.length >= 3) rings.push(sub.points as Ring);
   }
-  return rings;
+  if (rings.length === 0) return [];
+  return canonicalizeRings(rings, el.fillRule);
 }
 
 export interface PolygonStrokeExtractionResult {
@@ -455,6 +468,7 @@ export async function extractStrokesPolygonViaFlatten(svgText: string): Promise<
     strokeLinecap: f.strokeLinecap,
     strokeLinejoin: f.strokeLinejoin,
     hasFill: f.hasFill,
+    fillRule: f.fillRule,
   }));
   return processStrokeElements(elements);
 }

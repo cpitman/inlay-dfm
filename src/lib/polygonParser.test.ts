@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { svgPathToRings, multiPolygonToSvgPathD, multiPolygonToSvgFragment } from './polygonParser';
+import { svgPathToRings, multiPolygonToSvgPathD, multiPolygonToSvgFragment, svgFragmentToMultiPolygon } from './polygonParser';
 import { multiPolygonArea, type MultiPolygon } from './polygon';
 
 describe('svgPathToRings: lines', () => {
@@ -145,5 +145,60 @@ describe('multiPolygonToSvgFragment', () => {
     const mp: MultiPolygon = [[{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }]];
     const out = multiPolygonToSvgFragment(mp, '#ff0000', 'stroke="black"');
     expect(out).toContain('stroke="black"');
+  });
+});
+
+describe('svgFragmentToMultiPolygon: fill-rule handling', () => {
+  // Two CCW overlapping 10×10 squares whose overlap is 5×5.
+  // Union area = 100 + 100 − 25 = 175.
+  // Symmetric difference area = 100 + 100 − 2×25 = 150.
+  const overlappingSquaresD = 'M 0 0 L 10 0 L 10 10 L 0 10 Z M 5 5 L 15 5 L 15 15 L 5 15 Z';
+
+  it('treats two CCW overlapping subpaths as UNION when fill-rule is nonzero (default)', () => {
+    const fragment = `<path d="${overlappingSquaresD}" fill="red" fill-rule="nonzero" />`;
+    const mp = svgFragmentToMultiPolygon(fragment);
+    expect(multiPolygonArea(mp)).toBeCloseTo(175, 4);
+  });
+
+  it('treats two CCW overlapping subpaths as UNION when fill-rule is unspecified (SVG default = nonzero)', () => {
+    const fragment = `<path d="${overlappingSquaresD}" fill="red" />`;
+    const mp = svgFragmentToMultiPolygon(fragment);
+    expect(multiPolygonArea(mp)).toBeCloseTo(175, 4);
+  });
+
+  it('treats two CCW overlapping subpaths as XOR when fill-rule is evenodd', () => {
+    const fragment = `<path d="${overlappingSquaresD}" fill="red" fill-rule="evenodd" />`;
+    const mp = svgFragmentToMultiPolygon(fragment);
+    expect(multiPolygonArea(mp)).toBeCloseTo(150, 4);
+  });
+
+  it('reads fill-rule from inline style attribute', () => {
+    const fragment = `<path d="${overlappingSquaresD}" style="fill: red; fill-rule: evenodd" />`;
+    const mp = svgFragmentToMultiPolygon(fragment);
+    expect(multiPolygonArea(mp)).toBeCloseTo(150, 4);
+  });
+
+  it('round-trips through multiPolygonToSvgFragment correctly', () => {
+    // Pre: two overlapping nonzero squares (area 175).
+    // Parse → canonical even-odd MultiPolygon (area 175).
+    // Re-emit via multiPolygonToSvgFragment (which writes fill-rule="evenodd").
+    // Re-parse → still area 175 (canonical rings preserve the union).
+    const before = `<path d="${overlappingSquaresD}" fill="red" fill-rule="nonzero" />`;
+    const mp1 = svgFragmentToMultiPolygon(before);
+    const after = multiPolygonToSvgFragment(mp1, '#ff0000');
+    const mp2 = svgFragmentToMultiPolygon(after);
+    expect(multiPolygonArea(mp1)).toBeCloseTo(175, 4);
+    expect(multiPolygonArea(mp2)).toBeCloseTo(175, 4);
+  });
+
+  it('multiple <path> elements in a fragment union together', () => {
+    const fragment = `
+      <path d="M 0 0 L 10 0 L 10 10 L 0 10 Z" fill="red" />
+      <path d="M 5 5 L 15 5 L 15 15 L 5 15 Z" fill="red" />
+    `;
+    const mp = svgFragmentToMultiPolygon(fragment);
+    // Two non-overlapping <path> elements, each canonicalized and unioned.
+    // Union area = 175 (same overlap geometry as the single-path case).
+    expect(multiPolygonArea(mp)).toBeCloseTo(175, 4);
   });
 });
