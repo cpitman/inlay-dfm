@@ -10,9 +10,8 @@ import { maskToSvgPath } from './maskToPath';
 import { parseViewBox } from './svgLayers';
 import { computePlugStockUsageSqIn } from './plugStockPacking';
 import { findMaskComponentCentroids } from './maskComponents';
-import { dilateMask } from './maskOps';
 import { svgFragmentToMultiPolygon } from './polygonParser';
-import { multiPolygonDifference } from './clipperOps';
+import { multiPolygonDifference, multiPolygonUnionAll } from './clipperOps';
 import type { MultiPolygon } from './polygon';
 import { polygonProblemStats, type PolygonProblemStats } from './polygonPocketStats';
 import {
@@ -20,6 +19,7 @@ import {
   renderDepthMapToContext,
   type DesignToCanvasTransform,
 } from './polygonRender';
+import { detectAlignmentRiskPolygon } from './polygonAlignmentRisk';
 
 const DEFAULT_CANVAS_WIDTH = 1200;
 const THIN_WALL_THRESHOLD_INCHES = 0.05;
@@ -900,6 +900,14 @@ export async function runDfmAnalysis(
     ));
   }
 
+  // Polygon counterpart of pocketMasks — used by the polygon-native
+  // alignment-risk detector and the per-preset pocket analysis.
+  // Parsed once up front so Phase 2 and Phase 4 share the result.
+  const pocketPolygons: MultiPolygon[] = orderedColors.map(colorHex => {
+    const layer = vector.layers.find(l => l.colorHex === colorHex);
+    return layer ? svgFragmentToMultiPolygon(layer.svgFragment) : [];
+  });
+
   // -----------------------------------------------------------------------
   // Phase 2: Cross-pair alignment check.
   //
@@ -913,37 +921,50 @@ export async function runDfmAnalysis(
   // within the inlay mask so it renders clearly. affectedPercent represents
   // the fraction of layer-i's perimeter at risk, using the un-dilated set.
   // -----------------------------------------------------------------------
-  const alignVisualPx = Math.max(5, alignThresholdPx * 3);
+  // Polygon-native alignment risk: walk each pair of polygon edges
+  // and flag A's edges within `alignThresholdUnits` of any B-edge
+  // that's within ~15° of parallel. Output is per-A union of bands
+  // along at-risk edges, rasterized once at the end for the
+  // existing buildOverlay pipeline.
+  const alignThresholdUnits = ALIGNMENT_THRESHOLD_INCHES * designUnitsPerInch;
+  const alignVisualHalfWidthUnits = Math.max(
+    5 / polygonTransform.scaleX,                  // floor the band at ~5 px wide
+    alignThresholdUnits * 1.5,                    // = 3× threshold full-width
+  );
 
-  const alignPixelsPerInlay: Uint8Array[] = orderedColors.map(() => new Uint8Array(n));
+  const alignRiskPolygonsPerInlay: MultiPolygon[] = orderedColors.map(() => []);
   const alignIssues: AlignmentIssue[][] = orderedColors.map(() => []);
 
   for (let i = 0; i < orderedColors.length; i++) {
+    const ringsForI: MultiPolygon[] = [];
     for (let j = i + 1; j < orderedColors.length; j++) {
-      const { riskMask, affectedCount, totalBoundaryCount } = detectAlignmentRisk(
-        pocketMasks[i], pocketMasks[j],
-        canvasW, canvasH, alignThresholdPx,
+      const r = detectAlignmentRiskPolygon(
+        pocketPolygons[i], pocketPolygons[j],
+        alignThresholdUnits, alignVisualHalfWidthUnits,
       );
-
-      if (affectedCount > 0) {
-        for (let k = 0; k < n; k++) if (riskMask[k]) alignPixelsPerInlay[i][k] = 1;
+      if (r.affectedPerimeter > 0) {
+        ringsForI.push(r.riskPolygon);
         alignIssues[i].push({
           otherColorHex: orderedColors[j],
-          affectedPercent: totalBoundaryCount > 0 ? (affectedCount / totalBoundaryCount) * 100 : 0,
+          affectedPercent: r.affectedFraction * 100,
         });
       }
     }
+    if (ringsForI.length > 0) {
+      alignRiskPolygonsPerInlay[i] = multiPolygonUnionAll(ringsForI);
+    }
   }
 
-  // Dilate alignment pixels within the inlay mask for visual clarity.
-  const alignVisualPerInlay: Uint8Array[] = alignPixelsPerInlay.map((raw, i) => {
-    if (!raw.some(v => v)) return raw; // no issues → skip
-    const dilated = dilateMask(raw, canvasW, canvasH, alignVisualPx);
-    // Clip to the inlay mask so the dilated band doesn't bleed into the
-    // base-board area on the rendered overlay.
+  // Rasterize the per-inlay risk polygon to a Uint8Array, clipped to
+  // the inlay's pocket mask so the band doesn't bleed into the
+  // base-board region on the rendered overlay.
+  const alignVisualPerInlay: Uint8Array[] = orderedColors.map((_, i) => {
+    const mp = alignRiskPolygonsPerInlay[i];
+    if (mp.length === 0) return new Uint8Array(n);
+    const raw = rasterizeMultiPolygonToMask(mp, canvasW, canvasH, polygonTransform);
     const clipped = new Uint8Array(n);
     const pocket = pocketMasks[i];
-    for (let k = 0; k < n; k++) if (dilated[k] && pocket[k]) clipped[k] = 1;
+    for (let k = 0; k < n; k++) if (raw[k] && pocket[k]) clipped[k] = 1;
     return clipped;
   });
 
@@ -1214,16 +1235,11 @@ ${plugStockOutlineSvg}
       layerMachineTimeMinutes,
     });
 
-    // Polygon representation for the per-preset path. The pocket
-    // comes straight from the layer's SVG (= layer mass in design
-    // units, including portions extend-for-registration may have
-    // hidden beneath later layers). The plug is the canvas frame
-    // minus the pocket — same semantics as the bitmap
-    // `plugMaskForDfm` complement, but without rasterization loss.
-    const targetLayerForMP = vector.layers.find(l => l.colorHex === colorHex);
-    const pocketMP: MultiPolygon = targetLayerForMP
-      ? svgFragmentToMultiPolygon(targetLayerForMP.svgFragment)
-      : [];
+    // Polygon representation for the per-preset path. Reuses the
+    // pre-parsed `pocketPolygons` (same source as Phase 2). The plug
+    // is the canvas frame minus the pocket — same semantics as the
+    // bitmap `plugMaskForDfm` complement, without rasterization loss.
+    const pocketMP = pocketPolygons[idx];
     const plugMP = multiPolygonDifference(canvasBoxMP, pocketMP);
 
     overlayRebuildInputs.push({
