@@ -31,6 +31,128 @@ import type { Point } from './polygon';
 /** Bezier-flattening tolerance for path conversion. Same as polygonParser. */
 const FLATNESS = 0.05;
 
+const SHAPE_TAGS_LIST = ['path', 'polyline', 'polygon', 'rect', 'circle', 'ellipse', 'line'] as const;
+
+const ATTRS_TO_DROP_AFTER_BAKE = new Set([
+  'd', 'x', 'y', 'width', 'height', 'cx', 'cy', 'r', 'rx', 'ry',
+  'x1', 'y1', 'x2', 'y2', 'points', 'transform',
+]);
+
+/**
+ * Convert one SVG shape element into an equivalent path-`d` string.
+ * Used by the transform-baking step to turn `<rect>` / `<circle>` /
+ * etc. into `<path>` so the CTM can be applied via svgpath.
+ */
+function shapeToPathD(el: SVGGraphicsElement): string {
+  const tag = el.tagName.toLowerCase();
+  switch (tag) {
+    case 'path':
+      return el.getAttribute('d') ?? '';
+    case 'polyline':
+    case 'polygon': {
+      const pts = (el.getAttribute('points') ?? '')
+        .trim()
+        .split(/[\s,]+/)
+        .filter(Boolean)
+        .map(parseFloat);
+      if (pts.length < 4) return '';
+      let d = `M ${pts[0]} ${pts[1]}`;
+      for (let i = 2; i + 1 < pts.length; i += 2) d += ` L ${pts[i]} ${pts[i + 1]}`;
+      if (tag === 'polygon') d += ' Z';
+      return d;
+    }
+    case 'line': {
+      const x1 = parseFloat(el.getAttribute('x1') ?? '0');
+      const y1 = parseFloat(el.getAttribute('y1') ?? '0');
+      const x2 = parseFloat(el.getAttribute('x2') ?? '0');
+      const y2 = parseFloat(el.getAttribute('y2') ?? '0');
+      return `M ${x1} ${y1} L ${x2} ${y2}`;
+    }
+    case 'rect': {
+      const x = parseFloat(el.getAttribute('x') ?? '0');
+      const y = parseFloat(el.getAttribute('y') ?? '0');
+      const w = parseFloat(el.getAttribute('width') ?? '0');
+      const h = parseFloat(el.getAttribute('height') ?? '0');
+      if (!(w > 0) || !(h > 0)) return '';
+      return `M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`;
+    }
+    case 'circle': {
+      const cx = parseFloat(el.getAttribute('cx') ?? '0');
+      const cy = parseFloat(el.getAttribute('cy') ?? '0');
+      const r  = parseFloat(el.getAttribute('r')  ?? '0');
+      if (!(r > 0)) return '';
+      return `M ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} Z`;
+    }
+    case 'ellipse': {
+      const cx = parseFloat(el.getAttribute('cx') ?? '0');
+      const cy = parseFloat(el.getAttribute('cy') ?? '0');
+      const rx = parseFloat(el.getAttribute('rx') ?? '0');
+      const ry = parseFloat(el.getAttribute('ry') ?? '0');
+      if (!(rx > 0) || !(ry > 0)) return '';
+      return `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy} Z`;
+    }
+  }
+  return '';
+}
+
+/**
+ * In-place: walk every leaf shape under `svg`, apply its CTM to the
+ * geometry, and replace the element with a `<path>` carrying the
+ * transformed `d`. After this runs, no `<g transform>` wrapper is
+ * needed for any descendant shape — its coordinates are absolute in
+ * the root SVG's user space.
+ *
+ * Browser-only — `getCTM()` requires `svg` to be in the live DOM.
+ * Mounts hidden, walks, restores. The original SVGSVGElement is
+ * left detached from the document but otherwise functional for
+ * subsequent DOM ops (querySelectorAll, attribute reads, etc.).
+ */
+export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
+  if (typeof document === 'undefined') {
+    throw new Error('bakeSvgTransforms requires a browser DOM');
+  }
+
+  const host = document.createElement('div');
+  host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;';
+  document.body.appendChild(host);
+
+  const originalParent = svg.parentNode;
+  const originalNext = svg.nextSibling;
+  host.appendChild(svg);
+  void svg.getBoundingClientRect();
+
+  try {
+    const shapes = Array.from(svg.querySelectorAll(SHAPE_TAGS_LIST.join(','))) as SVGGraphicsElement[];
+    for (const el of shapes) {
+      const ctm = (typeof el.getCTM === 'function' ? el.getCTM() : null);
+      const d = shapeToPathD(el);
+      if (!d) continue;
+      const finalD = ctm
+        ? svgpath(d).transform(`matrix(${ctm.a} ${ctm.b} ${ctm.c} ${ctm.d} ${ctm.e} ${ctm.f})`).toString()
+        : d;
+      const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      newPath.setAttribute('d', finalD);
+      // Copy attributes (drop geometry-defining + transform; preserve fill/stroke/style/etc.).
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (ATTRS_TO_DROP_AFTER_BAKE.has(name)) continue;
+        newPath.setAttribute(attr.name, attr.value);
+      }
+      el.parentNode?.replaceChild(newPath, el);
+    }
+    // Strip transform attributes from groups (now redundant — children have absolute coords).
+    const groups = Array.from(svg.querySelectorAll('g')) as SVGGElement[];
+    for (const g of groups) {
+      if (g.hasAttribute('transform')) g.removeAttribute('transform');
+    }
+  } finally {
+    host.removeChild(svg);
+    document.body.removeChild(host);
+    // Restore the SVG to its original parent if it had one, in case the caller cares.
+    if (originalParent) originalParent.insertBefore(svg, originalNext);
+  }
+}
+
 type LineCap = 'butt' | 'square' | 'round';
 type LineJoin = 'miter' | 'round' | 'bevel';
 

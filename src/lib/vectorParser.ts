@@ -2,6 +2,7 @@ import type { Layer, VectorData } from '@/types';
 import { combineLayers } from './svgLayers';
 import { computeTrimmedViewBox } from './trimSvg';
 import { extractStrokeLayer } from './strokeDetection';
+import { bakeSvgTransforms } from './svgFlatten';
 
 // ---------------------------------------------------------------------------
 // Color utilities
@@ -166,8 +167,10 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
       order.push(finalHex);
     }
 
-    // Clone and force the fill explicitly. We may emit this leaf without its
-    // original ancestor chain, so any inherited fill must be baked in here.
+    // Clone and force the fill explicitly. The caller has already
+    // baked all ancestor transforms into each leaf's path data
+    // (see `bakeSvgTransforms`), so the leaf is self-contained in
+    // root-SVG coordinates — no <g transform> wrapper needed.
     const clone = el.cloneNode(true) as Element;
     const inlineStyle = clone.getAttribute('style');
     if (inlineStyle) {
@@ -177,24 +180,7 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
     }
     clone.setAttribute('fill', finalHex);
 
-    // Collect ancestor transforms (outermost → innermost) so the leaf renders
-    // in the same coordinate system as in the original SVG. Authors commonly
-    // wrap content in <g transform="matrix(...)"> (Inkscape layer transforms,
-    // Illustrator artboard transforms, etc.) — losing these rotates/scales
-    // /translates the entire piece.
-    const ancestorTransforms: string[] = [];
-    let cur: Element | null = el.parentElement;
-    while (cur && cur !== svgRoot) {
-      const t = cur.getAttribute('transform');
-      if (t) ancestorTransforms.unshift(t);
-      cur = cur.parentElement;
-    }
-
-    let html = clone.outerHTML;
-    for (let i = ancestorTransforms.length - 1; i >= 0; i--) {
-      html = `<g transform="${ancestorTransforms[i]}">${html}</g>`;
-    }
-    buckets.get(finalHex)!.push(html);
+    buckets.get(finalHex)!.push(clone.outerHTML);
   });
 
   const layers: Layer[] = order.map(colorHex => ({
@@ -242,6 +228,14 @@ export async function parseSvg(file: File): Promise<VectorData> {
   if (!h) h = 500;
 
   const viewBoxOriginal = vb ?? `0 0 ${w} ${h}`;
+
+  // Bake all ancestor transforms into each leaf shape's path data
+  // so per-color layer fragments are self-contained in absolute
+  // root-SVG coordinates. Without this, the polygon-native
+  // optimizer's parse → ops → re-emit cycle drops the wrappers and
+  // shifts each layer's geometry by the (now-lost) translate.
+  await bakeSvgTransforms(svgEl);
+
   const { layers, order } = splitSvgIntoLayers(svgEl);
 
   if (order.length === 0) {

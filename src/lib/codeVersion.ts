@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.14';
+export const CODE_VERSION = '2026-05-07.15';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Polygon stroke extraction reinstated with browser-DOM pre-flatten (getCTM + getComputedStyle resolve transforms / group inheritance / CSS); 2-px overshoot retired again';
+  'parseSvg bakes ancestor transforms into each leaf path via DOM CTM so layer fragments are self-contained in absolute coords; fixes optimizer-strip-then-shift on Pika et al.';
