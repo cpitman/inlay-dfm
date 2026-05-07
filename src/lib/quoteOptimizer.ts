@@ -4,6 +4,8 @@ import {
   runDfmAnalysisLite,
 } from './dfmAnalysis';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
+import { fillConvexHullCovered } from './fillConvexHullCovered';
+import { removeFullyOccludedRegions } from './removeOccludedRegions';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
 import { pickPerLayerBitPlan, jointToolChangeOverhead, type PerLayerBitPlan } from './machiningTime';
@@ -178,15 +180,17 @@ async function runSingleDesignOptimization(
   onProgress?.(`Inspecting your design${suffix}…`);
   const lite = await runDfmAnalysisLite(workingVector, settings, order, liteCanvasWidth);
 
-  // Phase 2: fill enclosed holes where possible. Modifications run at
-  // the lite resolution — the resulting SVG geometry is rasterization-
-  // independent in shape; coarser polygons are fine since fill is
-  // already an overapproximation (any pixel inside the hole works).
+  // Phase 2: layer-mask expansion. Two passes inside `applyFillAll`:
+  // closed-hole fill on lite-flagged layers, then convex-hull fill on
+  // every non-final layer. Modifications run at the lite resolution —
+  // the resulting SVG geometry is rasterization-independent in shape;
+  // coarser polygons are fine since fill is already an over-
+  // approximation (any pixel covered by later layers works).
   let appliedFill = false;
-  const fillTargets = lite.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
-  if (fillTargets.length > 0) {
-    onProgress?.(`Filling enclosed holes${suffix}…`);
-    workingVector = await applyFillAll(workingVector, fillTargets, designWidthInches, order, liteCanvasWidth);
+  const holeFillTargets = lite.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
+  if (order.length >= 2) {
+    onProgress?.(`Optimizing layer geometry${suffix}…`);
+    workingVector = await applyFillAll(workingVector, holeFillTargets, designWidthInches, order, liteCanvasWidth);
     appliedFill = true;
   }
 
@@ -199,6 +203,11 @@ async function runSingleDesignOptimization(
   //   suggestion PNG encodes. The guided UI renders its own overlays
   //   in the React layer from the raw masks the analysis still
   //   computes (`widerBitInfeasibleMask` / `irreducibleProblemMask`).
+  //   In dev builds we flip this on so the debug panel's per-layer
+  //   ZIP can pluck the populated `overlayDataUrl` / `depthMapDataUrl`
+  //   strings out of the cached result; `process.env.NODE_ENV` is
+  //   statically inlined at build time, so production builds run with
+  //   the original `false` and skip the encode work.
   //
   //   `useBinarySearchFeasibility: true` replaces the linear 6-preset
   //   stats sweep with a binary search for the largest-feasible v-bit
@@ -209,7 +218,10 @@ async function runSingleDesignOptimization(
   onProgress?.(`Analyzing your design${suffix}…`);
   const result = await runDfmAnalysis(
     workingVector, settings, order, canvasWidth,
-    { produceOverlays: false, useBinarySearchFeasibility: true },
+    {
+      produceOverlays: process.env.NODE_ENV === 'development',
+      useBinarySearchFeasibility: true,
+    },
   );
 
   // Phase 4: pick the per-layer bit plan.
@@ -290,28 +302,76 @@ function aggregateSide(designs: DesignOptimizationResult[]): SideAggregate {
   };
 }
 
-/** Apply fillEnclosedHoles to every layer in `colorHexes` sequentially,
- *  threading the modified layers through each call. */
+/**
+ * Apply mask-expansion + mask-shrink optimizations to every layer in
+ * `colorOrder`, threading the modified layers through each call.
+ * Three passes, in this order:
+ *
+ *   1. `fillEnclosedHoles` on layers flagged by the lite analysis as
+ *      having fillable holes (`holeFillTargets`). Cheap and exact.
+ *   2. `fillConvexHullCovered` on every non-final layer. Catches open
+ *      concavities (U-, C-shapes) that pass 1 cannot — a layer
+ *      component's convex hull is filled wherever the hull-added
+ *      pixels are covered by later layers.
+ *   3. `removeFullyOccludedRegions` on every non-final layer. Drops
+ *      any connected component fully covered by the union of later
+ *      inlay layers — visible nowhere, but still costs V-bit time.
+ *
+ * Order matters: the first two passes can GROW or MERGE components,
+ * potentially creating new fully-covered ones. Pass 3 has to run
+ * last so it sees the post-fill geometry. Forward iteration order
+ * within pass 3 is provably safe — removing a covered component from
+ * layer K never invalidates an earlier layer's coverage check, since
+ * the removed pixels are by definition still in the union of layers
+ * K+1..N.
+ */
 async function applyFillAll(
   vector: VectorData,
-  colorHexes: string[],
+  holeFillTargets: string[],
   designWidthInches: number,
   colorOrder: string[],
   canvasWidth: number,
 ): Promise<VectorData> {
+  const ENABLE_HULL_FILL = true;
+  const ENABLE_OCCLUDED_REMOVAL = true;
+
   let workingLayers = vector.layers;
-  for (const colorHex of colorHexes) {
-    const workingVector: VectorData = {
-      ...vector,
-      layers: workingLayers,
-      svgString: combineLayers(workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
-    };
-    const res = await fillEnclosedHoles(workingVector, colorHex, designWidthInches, colorOrder, canvasWidth);
-    if (res.filledHoleCount > 0) workingLayers = res.layers;
-  }
-  return {
+
+  const buildVector = (): VectorData => ({
     ...vector,
     layers: workingLayers,
     svgString: combineLayers(workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
-  };
+  });
+
+  // Pass 1: closed-hole fill. Limited to layers the lite analysis
+  // already flagged — a precise, fast win.
+  for (const colorHex of holeFillTargets) {
+    const res = await fillEnclosedHoles(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
+    if (res.filledHoleCount > 0) workingLayers = res.layers;
+  }
+
+  // Pass 2: convex-hull fill. Run for every non-final color; the lite
+  // analysis doesn't surface a "hull-fillable" hint, and the per-layer
+  // rasterization the function does internally is cheap relative to
+  // the screening canvas it operates on.
+  if (ENABLE_HULL_FILL) {
+    for (let i = 0; i < colorOrder.length - 1; i++) {
+      const colorHex = colorOrder[i];
+      const res = await fillConvexHullCovered(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
+      if (res.filledHoleCount > 0) workingLayers = res.layers;
+    }
+  }
+
+  // Pass 3: remove fully-occluded regions. Runs LAST so any
+  // components grown or merged by passes 1–2 have the chance to
+  // become "fully covered by later layers" themselves.
+  if (ENABLE_OCCLUDED_REMOVAL) {
+    for (let i = 0; i < colorOrder.length - 1; i++) {
+      const colorHex = colorOrder[i];
+      const res = await removeFullyOccludedRegions(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
+      if (res.removedComponentCount > 0) workingLayers = res.layers;
+    }
+  }
+
+  return buildVector();
 }

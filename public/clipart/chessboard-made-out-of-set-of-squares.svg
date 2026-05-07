@@ -1,0 +1,659 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="190.5mm"
+   height="190.49998mm"
+   viewBox="0 0 190.5 190.49998"
+   version="1.1"
+   id="svg104112"
+   inkscape:version="1.1.1 (3bf5ae0d25, 2021-09-20)"
+   sodipodi:docname="000_squares.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview104114"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:document-units="mm"
+     showgrid="false"
+     fit-margin-top="0"
+     fit-margin-left="0"
+     fit-margin-right="0"
+     fit-margin-bottom="0"
+     inkscape:zoom="0.33852413"
+     inkscape:cx="338.23291"
+     inkscape:cy="407.65189"
+     inkscape:window-width="1024"
+     inkscape:window-height="538"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs104109" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-15.734212,-40.744741)">
+    <g
+       id="g131923"
+       transform="matrix(0.26458333,0,0,-0.26458333,15.734212,231.24473)">
+      <path
+         id="path2945"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path2947"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path2949"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path2951"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path2953"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path2955"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path2957"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path2959"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path2961"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path2963"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path2965"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path2967"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path2969"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path2971"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path2973"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path2975"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132214"
+       transform="matrix(0.26458333,0,0,-0.26458333,15.734212,167.74473)">
+      <path
+         id="path132182"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132184"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132186"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132188"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132190"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132192"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132194"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132196"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132198"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132200"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132202"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132204"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132206"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132208"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132210"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132212"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132328"
+       transform="matrix(0.26458333,0,0,-0.26458333,15.734212,104.24474)">
+      <path
+         id="path132296"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132298"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132300"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132302"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132304"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132306"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132308"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132310"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132312"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132314"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132316"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132318"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132320"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132322"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132324"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132326"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132442"
+       transform="matrix(0.26458333,0,0,-0.26458333,79.234209,231.24473)">
+      <path
+         id="path132410"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132412"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132414"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132416"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132418"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132420"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132422"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132424"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132426"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132428"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132430"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132432"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132434"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132436"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132438"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132440"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132476"
+       transform="matrix(0.26458333,0,0,-0.26458333,79.234209,167.74473)">
+      <path
+         id="path132444"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132446"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132448"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132450"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132452"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132454"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132456"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132458"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132460"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132462"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132464"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132466"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132468"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132470"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132472"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132474"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132510"
+       transform="matrix(0.26458333,0,0,-0.26458333,79.234209,104.24474)">
+      <path
+         id="path132478"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132480"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132482"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132484"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132486"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132488"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132490"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132492"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132494"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132496"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132498"
+         style="fill:#ff8080;fill-opacity:1"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132500"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132502"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132504"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132506"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132508"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132624"
+       transform="matrix(0.26458333,0,0,-0.26458333,142.73421,231.24473)">
+      <path
+         id="path132592"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132594"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132596"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132598"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132600"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132602"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132604"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132606"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132608"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132610"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132612"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132614"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132616"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132618"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132620"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132622"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132658"
+       transform="matrix(0.26458333,0,0,-0.26458333,142.73421,167.74473)">
+      <path
+         id="path132626"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132628"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132630"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132632"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132634"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132636"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132638"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132640"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132642"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132644"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132646"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132648"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132650"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132652"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132654"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132656"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+    <g
+       id="g132692"
+       transform="matrix(0.26458333,0,0,-0.26458333,142.73421,104.24474)">
+      <path
+         id="path132660"
+         style="fill:#800000"
+         d="M 0,0 H 120 V 120 H 0 Z" />
+      <path
+         id="path132662"
+         style="fill:#ffffff"
+         d="m 15,15 h 90 v 90 H 15 Z" />
+      <path
+         id="path132664"
+         style="fill:#ff8080"
+         d="M 30,30 H 90 V 90 H 30 Z" />
+      <path
+         id="path132666"
+         style="fill:#ffffff"
+         d="M 45,45 H 75 V 75 H 45 Z" />
+      <path
+         id="path132668"
+         style="fill:#ffffff"
+         d="M 120,0 H 240 V 120 H 120 Z" />
+      <path
+         id="path132670"
+         style="fill:#800000"
+         d="m 135,15 h 90 v 90 h -90 z" />
+      <path
+         id="path132672"
+         style="fill:#ffffff"
+         d="m 150,30 h 60 v 60 h -60 z" />
+      <path
+         id="path132674"
+         style="fill:#ff8080"
+         d="m 165,45 h 30 v 30 h -30 z" />
+      <path
+         id="path132676"
+         style="fill:#800000"
+         d="M 120,120 H 240 V 240 H 120 Z" />
+      <path
+         id="path132678"
+         style="fill:#ffffff"
+         d="m 135,135 h 90 v 90 h -90 z" />
+      <path
+         id="path132680"
+         style="fill:#ff8080"
+         d="m 150,150 h 60 v 60 h -60 z" />
+      <path
+         id="path132682"
+         style="fill:#ffffff"
+         d="m 165,165 h 30 v 30 h -30 z" />
+      <path
+         id="path132684"
+         style="fill:#ffffff"
+         d="M 0,120 H 120 V 240 H 0 Z" />
+      <path
+         id="path132686"
+         style="fill:#800000"
+         d="m 15,135 h 90 v 90 H 15 Z" />
+      <path
+         id="path132688"
+         style="fill:#ffffff"
+         d="m 30,150 h 60 v 60 H 30 Z" />
+      <path
+         id="path132690"
+         style="fill:#ff8080"
+         d="m 45,165 h 30 v 30 H 45 Z" />
+    </g>
+  </g>
+</svg>

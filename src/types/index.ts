@@ -104,6 +104,26 @@ export interface VectorData {
   fileType: 'svg' | 'dxf';
   /** Distinct non-white fill colors found in the file, as lowercase #rrggbb hex strings. */
   detectedColors: string[];
+  /**
+   * Pre-extracted stroke geometry as a filled polygon Layer, when the
+   * source SVG had visible strokes. Not added to `layers` automatically
+   * — the guided UI prompts the user to discard or inlay it. The
+   * synthesized layer's `colorHex` is a near-black sentinel chosen to
+   * avoid colliding with any color in `detectedColors`. Null/absent
+   * when the source had no visible strokes (text designs, DXF, plain
+   * fill-only SVG).
+   */
+  strokeLayer?: Layer | null;
+  /**
+   * Alternate `layers` rebuilt with the visible-stroke region
+   * subtracted from each fill, so the outline (when inlaid as the
+   * back-most layer) visibly pokes through wherever it was the
+   * topmost painted thing in the original SVG. Same length and color
+   * order as `layers`. Used by the guided UI on the "inlay strokes"
+   * choice; ignored on "discard strokes". Null/absent when no
+   * stroke layer was extracted.
+   */
+  fillLayersWithStrokeSubtracted?: Layer[] | null;
 }
 
 /**
@@ -160,6 +180,14 @@ export interface Design {
    * dependency — see the `import type` re-export below.
    */
   textSpec?: import('@/lib/textVector').TextSpec;
+  /**
+   * When present, this is a *clipart design* — `vector` was loaded
+   * from the bundled `/clipart/` library via `clipartToVectorData`.
+   * Preserved through save/load so the user can re-open the picker
+   * and swap wood species per color or pick a different clipart
+   * entry. Mutually exclusive with `textSpec`.
+   */
+  clipartSpec?: import('@/lib/clipartVector').ClipartSpec;
 }
 
 /** A snapshot of all layers at one point in history. */

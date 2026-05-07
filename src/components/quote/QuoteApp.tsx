@@ -9,8 +9,9 @@ import {
   backSideFeatureAabbs,
   type BoardConfig,
 } from '@/types/board';
-import type { Design, Placement, WoodConfig, WoodSpeciesKey } from '@/types';
+import type { Design, Layer, Placement, VectorData, WoodConfig, WoodSpeciesKey } from '@/types';
 import { parseVectorFile } from '@/lib/vectorParser';
+import { combineLayers } from '@/lib/svgLayers';
 import { generateComposite } from '@/lib/compositeRenderer';
 import { guessSpecies, WOOD_SPECIES } from '@/lib/woodSpecies';
 import { INLAY_WOOD_OPTIONS, computeQuote, type QuoteResult } from '@/lib/pricing';
@@ -18,12 +19,17 @@ import { runQuoteOptimization, type MultiDesignOptimizationResult } from '@/lib/
 import { boxesOverlap, findFreeSpot, type AABB } from '@/lib/aabb';
 import { effectivePlacementAabb } from '@/lib/rotation';
 import { textToVectorData, type TextSpec } from '@/lib/textVector';
+import { clipartToVectorData } from '@/lib/clipartVector';
+import type { ClipartManifestEntry } from '@/lib/clipartCatalog';
 import Step1BoardForm from './Step1BoardForm';
 import Step2ArtPlacement from './Step2ArtPlacement';
 import Step3QuoteDisplay from './Step3QuoteDisplay';
 import OptimizingOverlay from './OptimizingOverlay';
 import RequestManufacturingDialog from './RequestManufacturingDialog';
 import TextDesignDialog from './TextDesignDialog';
+import ClipartPickerDialog from './ClipartPickerDialog';
+import StrokeHandlingDialog, { type StrokeChoice } from './StrokeHandlingDialog';
+import { CODE_VERSION, CODE_VERSION_NOTE } from '@/lib/codeVersion';
 
 const QUOTE_STEPS: StepDef[] = [
   { n: 1, label: 'Board',      subtitle: 'Pick your cutting board' },
@@ -39,6 +45,35 @@ const FALLBACK_INLAY_SPECIES: WoodSpeciesKey = 'walnut';
 function pickPricedSpecies(hex: string): WoodSpeciesKey {
   const guess = guessSpecies(hex);
   return INLAY_WOOD_OPTIONS.includes(guess) ? guess : FALLBACK_INLAY_SPECIES;
+}
+
+/**
+ * Pick distinct priced species for a list of colors. Each color gets
+ * its `pickPricedSpecies` guess when possible; on a collision the
+ * loser falls back to the first still-unused species in
+ * `INLAY_WOOD_OPTIONS`. With more colors than priced species (>5),
+ * repeats are unavoidable — those slots keep their original guess.
+ *
+ * Distinct defaults make multi-color designs (uploaded SVGs and
+ * clipart) much easier to read at a glance: the user sees a unique
+ * wood per color out of the box rather than five "Cherry" rows.
+ */
+function pickDistinctPricedSpecies(colors: readonly string[]): WoodSpeciesKey[] {
+  const used = new Set<WoodSpeciesKey>();
+  const result: WoodSpeciesKey[] = [];
+  for (const hex of colors) {
+    const guess = pickPricedSpecies(hex);
+    let species: WoodSpeciesKey = guess;
+    if (used.has(species)) {
+      const fallback = INLAY_WOOD_OPTIONS.find(
+        s => !used.has(s as WoodSpeciesKey),
+      ) as WoodSpeciesKey | undefined;
+      if (fallback) species = fallback;
+    }
+    used.add(species);
+    result.push(species);
+  }
+  return result;
 }
 
 /** AABB of a design on the board, in inches — accounts for 90°-step rotation. */
@@ -117,6 +152,61 @@ export default function QuoteApp() {
   /** Per-design composite PNG dataURL, keyed by design id. */
   const [compositeUrls, setCompositeUrls] = useState<Map<string, string>>(new Map());
 
+  // Stroke-handling prompt: visible after upload/clipart parse when
+  // the source had non-trivial stroke geometry. The user picks
+  // discard or inlay; we resolve a queued Promise on either choice
+  // (or 'discard' on cancel — the safer default).
+  type StrokePrompt = {
+    fileName: string;
+    strokeLayer: Layer;
+    viewBox: string;
+    naturalWidth: number;
+    naturalHeight: number;
+    resolve: (choice: StrokeChoice) => void;
+  };
+  const [strokePrompt, setStrokePrompt] = useState<StrokePrompt | null>(null);
+
+  /**
+   * If `vector.strokeLayer` is set, prompt the user and prepend the
+   * stroke layer when they choose to inlay it. Returns a possibly-
+   * mutated `VectorData` with the stroke layer integrated as the
+   * most-in-the-background layer (index 0 of `layers` /
+   * `detectedColors`).
+   */
+  const maybePromptForStrokes = useCallback(async (vector: VectorData): Promise<VectorData> => {
+    if (!vector.strokeLayer) return vector;
+    const choice = await new Promise<StrokeChoice>(resolve => {
+      setStrokePrompt({
+        fileName: vector.fileName,
+        strokeLayer: vector.strokeLayer!,
+        viewBox: vector.viewBox,
+        naturalWidth: vector.naturalWidth,
+        naturalHeight: vector.naturalHeight,
+        resolve,
+      });
+    });
+    setStrokePrompt(null);
+    if (choice !== 'inlay') return vector;
+    // Use the pre-computed subtracted fills when the parser has them
+    // (only set for SVGs with visible strokes); falls back to the
+    // original layers if for some reason it didn't compute. The
+    // subtracted fills have a "window" wherever the outline was the
+    // topmost painted thing in the original SVG, so the back-most
+    // outline layer pokes through visibly.
+    const subtractedFills = vector.fillLayersWithStrokeSubtracted ?? vector.layers;
+    // Prepend: stroke layer renders FIRST → behind every fill layer.
+    const newLayers = [vector.strokeLayer, ...subtractedFills];
+    const newDetectedColors = [vector.strokeLayer.colorHex, ...vector.detectedColors];
+    return {
+      ...vector,
+      layers: newLayers,
+      detectedColors: newDetectedColors,
+      // Regenerate the combined svgString so the composite renderer
+      // sees the stroke layer in the same draw order.
+      svgString: combineLayers(newLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
+    };
+  }, []);
+
   // Optimization + quote state.
   const [optimizingLabel, setOptimizingLabel] = useState<string | null>(null);
   const [optimization, setOptimization] = useState<MultiDesignOptimizationResult | null>(null);
@@ -139,10 +229,12 @@ export default function QuoteApp() {
     setParsing(true);
     setErrorMsg('');
     try {
-      const parsed = await parseVectorFile(file);
+      const parsedRaw = await parseVectorFile(file);
+      const parsed = await maybePromptForStrokes(parsedRaw);
 
+      const speciesByIndex = pickDistinctPricedSpecies(parsed.detectedColors);
       const initialConfigs: WoodConfig[] = parsed.detectedColors.map((hex, i) => {
-        const species = pickPricedSpecies(hex);
+        const species = speciesByIndex[i];
         return {
           colorHex: hex,
           label: WOOD_SPECIES[species].name + (parsed.detectedColors.length > 1 ? ` ${i + 1}` : ''),
@@ -198,7 +290,7 @@ export default function QuoteApp() {
     } finally {
       setParsing(false);
     }
-  }, [boardConfig, designs, currentSide, invalidateQuote]);
+  }, [boardConfig, designs, currentSide, invalidateQuote, maybePromptForStrokes]);
 
   const removeDesign = useCallback((id: string) => {
     setDesigns(prev => prev.filter(d => d.id !== id));
@@ -315,6 +407,70 @@ export default function QuoteApp() {
     if (d?.textSpec) setTextDialog({ id, spec: d.textSpec });
   }, [designs]);
 
+  // -----------------------------------------------------------------
+  // Clipart designs: dialog state + add handler.
+  // -----------------------------------------------------------------
+  const [clipartDialogOpen, setClipartDialogOpen] = useState(false);
+
+  const handleSelectClipart = useCallback(async (entry: ClipartManifestEntry) => {
+    setClipartDialogOpen(false);
+    setErrorMsg('');
+    try {
+      const vectorRaw = await clipartToVectorData(entry);
+      const vector = await maybePromptForStrokes(vectorRaw);
+
+      // Initial wood mapping: same auto-pick as uploads, one per detected color.
+      const speciesByIndex = pickDistinctPricedSpecies(vector.detectedColors);
+      const initialConfigs: WoodConfig[] = vector.detectedColors.map((hex, i) => {
+        const species = speciesByIndex[i];
+        return {
+          colorHex: hex,
+          label: WOOD_SPECIES[species].name + (vector.detectedColors.length > 1 ? ` ${i + 1}` : ''),
+          species,
+        };
+      });
+      const selectedSpecies: Record<string, WoodSpeciesKey> = {};
+      for (const wc of initialConfigs) selectedSpecies[wc.colorHex] = wc.species;
+
+      const aspect = vector.naturalHeight / vector.naturalWidth;
+      const bounds = placeableRect(boardConfig, currentSide);
+      const sameSideAabbs = designs.filter(d => d.side === currentSide).map(designAabb);
+      const fixedFeatureAabbs = currentSide === 'bottom' ? backSideFeatureAabbs(boardConfig) : [];
+      const obstacles = [...sameSideAabbs, ...fixedFeatureAabbs];
+      const isFirstOnSide = sameSideAabbs.length === 0 && fixedFeatureAabbs.length === 0;
+      const defaultW = Math.min(bounds.w * 0.5, bounds.h / aspect * 0.5);
+
+      let offsetX: number, offsetY: number, designWidthInches: number;
+      if (isFirstOnSide) {
+        designWidthInches = Math.min(bounds.w, bounds.h / aspect);
+        const designHeightInches = designWidthInches * aspect;
+        offsetX = bounds.x + (bounds.w - designWidthInches)  / 2;
+        offsetY = bounds.y + (bounds.h - designHeightInches) / 2;
+      } else {
+        const defaultH = defaultW * aspect;
+        const spot = findFreeSpot(defaultW, defaultH, bounds, obstacles);
+        offsetX = spot?.x ?? bounds.x;
+        offsetY = spot?.y ?? bounds.y;
+        designWidthInches = defaultW;
+      }
+
+      const newDesign: Design = {
+        id: crypto.randomUUID(),
+        vector,
+        woodConfigs: initialConfigs,
+        placement: { offsetXInches: offsetX, offsetYInches: offsetY, designWidthInches },
+        side: currentSide,
+        clipartSpec: { id: entry.id, selectedSpecies },
+      };
+      setDesigns(prev => [...prev, newDesign]);
+      invalidateQuote();
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+    }
+  }, [boardConfig, designs, currentSide, invalidateQuote, maybePromptForStrokes]);
+
+  const requestAddClipart = useCallback(() => setClipartDialogOpen(true), []);
+
   // Board changes invalidate the quote too — every cost lever depends on it.
   const updateBoardConfig = useCallback((next: BoardConfig) => {
     setBoardConfig(next);
@@ -406,6 +562,14 @@ export default function QuoteApp() {
         <Link href="/" className="text-blue-400 hover:text-blue-300 text-sm">← Home</Link>
         <h1 className="font-semibold text-slate-100 text-lg ml-2">Get a quote</h1>
         <span className="text-slate-500 text-sm hidden md:block">— inlaid cutting board, custom art</span>
+        {process.env.NODE_ENV === 'development' && (
+          <span
+            className="ml-auto font-mono text-xs text-slate-400 bg-slate-700/50 border border-slate-600 rounded px-2 py-0.5"
+            title={CODE_VERSION_NOTE}
+          >
+            v{CODE_VERSION}
+          </span>
+        )}
       </header>
 
       <StepperBar
@@ -440,6 +604,7 @@ export default function QuoteApp() {
             onUpdateDesignWoodConfig={updateDesignWoodConfig}
             onRequestAddText={requestAddText}
             onRequestEditText={requestEditText}
+            onRequestAddClipart={requestAddClipart}
             onBack={() => goToStep(1)}
             onNext={runOptimizationAndQuote}
             canAdvance={step2Valid}
@@ -448,6 +613,7 @@ export default function QuoteApp() {
         {currentStep === 3 && optimization && quote && (
           <Step3QuoteDisplay
             boardConfig={boardConfig}
+            designs={designs}
             optimization={optimization}
             quote={quote}
             compositeUrls={compositeUrls}
@@ -477,6 +643,18 @@ export default function QuoteApp() {
           : textDialog === 'new' ? 'new' : textDialog.spec}
         onCancel={() => setTextDialog(null)}
         onSave={handleSaveTextDesign}
+      />
+
+      <ClipartPickerDialog
+        open={clipartDialogOpen}
+        onCancel={() => setClipartDialogOpen(false)}
+        onSelect={handleSelectClipart}
+      />
+
+      <StrokeHandlingDialog
+        prompt={strokePrompt}
+        onChoose={(choice) => strokePrompt?.resolve(choice)}
+        onCancel={() => strokePrompt?.resolve('discard')}
       />
     </div>
   );

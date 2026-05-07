@@ -1,6 +1,7 @@
 import type { Layer, VectorData } from '@/types';
 import { combineLayers } from './svgLayers';
 import { computeTrimmedViewBox } from './trimSvg';
+import { extractStrokeLayer } from './strokeDetection';
 
 // ---------------------------------------------------------------------------
 // Color utilities
@@ -14,13 +15,34 @@ const NAMED_COLORS: Record<string, string> = {
   maroon: '#800000', olive: '#808000', silver: '#c0c0c0',
 };
 
-/** Normalize any CSS color string to lowercase #rrggbb, or null for white/none. */
+/**
+ * Synthetic non-white hex used to represent originally near-white fills.
+ *
+ * The mask-extraction pipeline thresholds at luma < 220 — pure-white
+ * fills (luma 255) wouldn't register as a layer mask, so a "white"
+ * region in the source SVG would silently disappear from the inlay.
+ * That's the wrong default for art that uses white as a *fill color*
+ * (Pika's eyes, snowflakes, sclera, etc.). We substitute white-and-
+ * near-white fills with this dark sentinel so they flow through the
+ * inlay pipeline as a normal color. The composite renderer's per-
+ * pixel match against `WoodConfig.colorHex` finds the sentinel and
+ * paints the user-picked wood texture there — the sentinel value is
+ * never visible to the user.
+ *
+ * Designs whose white is a *background* (a full-canvas rect) become
+ * a layer the user can `×` from the design list; the visual cost of
+ * the false positive is small compared to silently dropping the eye
+ * whites.
+ */
+export const WHITE_SENTINEL = '#bbbbbb';
+
+/** Normalize any CSS color string to lowercase #rrggbb, or null for unrecognized / transparent. */
 function normalizeHex(color: string): string | null {
   const c = color.trim().toLowerCase();
   if (!c || c === 'none' || c === 'transparent') return null;
-  if (c === 'white' || c === '#fff' || c === '#ffffff') return null;
+  if (c === 'white' || c === '#fff' || c === '#ffffff') return '#ffffff';
   if (c in NAMED_COLORS) {
-    return NAMED_COLORS[c] === '#ffffff' ? null : NAMED_COLORS[c];
+    return NAMED_COLORS[c];
   }
   if (c.startsWith('#')) {
     if (c.length === 4) return '#' + c[1]+c[1]+c[2]+c[2]+c[3]+c[3];
@@ -133,11 +155,15 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
     const raw = resolveFill(el, classFills);
     if (!raw) return;
     const hex = normalizeHex(raw);
-    if (!hex || isNearWhite(hex)) return;
+    if (!hex) return;
+    // Substitute near-white fills with a dark sentinel so the
+    // mask-extraction luma threshold catches them. See `WHITE_SENTINEL`
+    // for the full rationale.
+    const finalHex = isNearWhite(hex) ? WHITE_SENTINEL : hex;
 
-    if (!buckets.has(hex)) {
-      buckets.set(hex, []);
-      order.push(hex);
+    if (!buckets.has(finalHex)) {
+      buckets.set(finalHex, []);
+      order.push(finalHex);
     }
 
     // Clone and force the fill explicitly. We may emit this leaf without its
@@ -149,7 +175,7 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
       if (cleaned) clone.setAttribute('style', cleaned);
       else clone.removeAttribute('style');
     }
-    clone.setAttribute('fill', hex);
+    clone.setAttribute('fill', finalHex);
 
     // Collect ancestor transforms (outermost → innermost) so the leaf renders
     // in the same coordinate system as in the original SVG. Authors commonly
@@ -168,7 +194,7 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
     for (let i = ancestorTransforms.length - 1; i >= 0; i--) {
       html = `<g transform="${ancestorTransforms[i]}">${html}</g>`;
     }
-    buckets.get(hex)!.push(html);
+    buckets.get(finalHex)!.push(html);
   });
 
   const layers: Layer[] = order.map(colorHex => ({
@@ -219,13 +245,29 @@ export async function parseSvg(file: File): Promise<VectorData> {
   const { layers, order } = splitSvgIntoLayers(svgEl);
 
   if (order.length === 0) {
-    throw new Error('No non-white colors detected in this SVG. The file appears to have no inlay regions to analyze.');
+    throw new Error('No fill colors detected in this SVG. The file appears to have no inlay regions to analyze.');
   }
 
   // Trim away whitespace around the actual content. The original layer
   // fragments are kept; the viewBox window selects only the content area.
   const initialSvg = combineLayers(layers, viewBoxOriginal, w, h);
   const trimmed = await computeTrimmedViewBox(initialSvg, w, h);
+
+  // Stroke detection runs against the original SVG source so it sees
+  // the user's stroke styling intact (the per-color buckets only
+  // capture fills). The synthesized layer's polygon coords + the
+  // subtracted-fill polygon coords all land in the *original* SVG
+  // coordinate system — same space as the per-color fill layers —
+  // so combining them into the final trimmed-viewBox SVG works
+  // without a coordinate fix-up.
+  const strokeExtraction = await extractStrokeLayer(
+    text,
+    viewBoxOriginal,
+    w,
+    h,
+    layers,
+    order,
+  );
 
   return {
     svgString: combineLayers(layers, trimmed.viewBox, trimmed.naturalWidth, trimmed.naturalHeight),
@@ -236,6 +278,8 @@ export async function parseSvg(file: File): Promise<VectorData> {
     fileName: file.name,
     fileType: 'svg',
     detectedColors: order,
+    strokeLayer: strokeExtraction?.strokeLayer ?? null,
+    fillLayersWithStrokeSubtracted: strokeExtraction?.fillLayersWithStrokeSubtracted ?? null,
   };
 }
 
@@ -301,9 +345,11 @@ interface DxfArc extends DxfEntity { center: DxfVertex; radius: number; startAng
 interface DxfSpline extends DxfEntity { controlPoints: DxfVertex[]; closed?: boolean }
 interface Bounds { minX: number; maxX: number; minY: number; maxY: number }
 
-/** Render a single DXF entity to an SVG element string. Returns "" for unsupported types. */
-function entityToSvg(e: DxfEntity, bounds: Bounds, strokeW: number): string {
-  const color = e.colorHex ?? '#000000';
+/** Render a single DXF entity to an SVG element string. Returns "" for unsupported types.
+ *  `color` is the resolved fill/stroke for emission — caller may pass a sentinel
+ *  (`WHITE_SENTINEL`) for white-equivalent entities so the mask-extraction pipeline
+ *  catches them. */
+function entityToSvg(e: DxfEntity, bounds: Bounds, strokeW: number, color: string): string {
   const tx = (x: number) => x - bounds.minX;
   const ty = (y: number) => bounds.maxY - y;
 
@@ -440,18 +486,21 @@ export async function parseDxf(file: File): Promise<VectorData> {
   const order: string[] = [];
   for (const e of entities) {
     const colorHex = e.colorHex ?? '#000000';
-    if (isNearWhite(colorHex)) continue;
-    const svg = entityToSvg(e, bounds, strokeW);
+    // Substitute near-white DXF entity colors with the dark sentinel
+    // for parity with the SVG path — keeps white regions visible as
+    // their own layer instead of dropping them.
+    const finalHex = isNearWhite(colorHex) ? WHITE_SENTINEL : colorHex;
+    const svg = entityToSvg(e, bounds, strokeW, finalHex);
     if (!svg) continue;
-    if (!buckets.has(colorHex)) {
-      buckets.set(colorHex, []);
-      order.push(colorHex);
+    if (!buckets.has(finalHex)) {
+      buckets.set(finalHex, []);
+      order.push(finalHex);
     }
-    buckets.get(colorHex)!.push(svg);
+    buckets.get(finalHex)!.push(svg);
   }
 
   if (order.length === 0) {
-    throw new Error('No non-white colors detected in this DXF. The file appears to have no inlay regions to analyze.');
+    throw new Error('No fill colors detected in this DXF. The file appears to have no inlay regions to analyze.');
   }
 
   const layers: Layer[] = order.map(colorHex => ({

@@ -1,54 +1,10 @@
-import type { Layer, VectorData } from '@/types';
-import { layerToStandaloneSvg, parseViewBox } from './svgLayers';
+import type { VectorData } from '@/types';
+import { parseViewBox, rasterizeLayerToBinaryMask } from './svgLayers';
 import { maskToSvgPath } from './maskToPath';
 
 // Higher than the analysis canvas (1200): export is a one-shot, and finer
 // detail makes for cleaner CAM toolpaths. Linear cost in pixel count.
 const EXPORT_RASTER_WIDTH = 2400;
-// Mirror of the per-layer mask threshold used elsewhere — luma < 220 is "in layer".
-const MASK_BRIGHTNESS_MAX = 220;
-
-/**
- * Rasterize one layer to a binary mask. Same approach used by the analysis
- * pipeline: render the layer's fragment alone over a white background, then
- * threshold by luminance.
- */
-async function rasterizeLayerToMask(
-  layer: Layer,
-  viewBox: string,
-  naturalWidth: number,
-  naturalHeight: number,
-  rasterW: number,
-  rasterH: number,
-): Promise<Uint8Array> {
-  const oc = new OffscreenCanvas(rasterW, rasterH);
-  const ctx = oc.getContext('2d')!;
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, rasterW, rasterH);
-
-  const layerSvg = layerToStandaloneSvg(layer, viewBox, naturalWidth, naturalHeight);
-  const blob = new Blob([layerSvg], { type: 'image/svg+xml' });
-  const url = URL.createObjectURL(blob);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => { ctx.drawImage(img, 0, 0, rasterW, rasterH); resolve(); };
-      img.onerror = reject;
-      img.src = url;
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-
-  const { data } = ctx.getImageData(0, 0, rasterW, rasterH);
-  const n = rasterW * rasterH;
-  const mask = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const luma = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
-    if (luma < MASK_BRIGHTNESS_MAX) mask[i] = 1;
-  }
-  return mask;
-}
 
 /**
  * Build a clean export SVG: every layer's geometry is unioned into a single
@@ -72,7 +28,7 @@ export async function buildUnionedSvgString(vector: VectorData): Promise<string>
 
   const fragments: string[] = [];
   for (const layer of vector.layers) {
-    const mask = await rasterizeLayerToMask(
+    const mask = await rasterizeLayerToBinaryMask(
       layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight, rasterW, rasterH,
     );
     const path = maskToSvgPath(mask, rasterW, rasterH, {

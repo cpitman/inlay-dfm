@@ -1,0 +1,87 @@
+# NSFW keyword blocklist for clipart filtering. One term per line.
+# Lines starting with # are comments and ignored.
+# Matched case-insensitively as substrings against title + tags.
+# Keep this list small and auditable; over-blocking is acceptable
+# for a curated CC0 cutting-board library.
+
+# Sexual / nudity
+nude
+naked
+nudity
+porn
+erotic
+sexy
+sexual
+breast
+breasts
+nipple
+nipples
+genital
+genitals
+penis
+vulva
+vagina
+phallus
+buttocks
+cleavage
+underwear
+lingerie
+bikini
+bra
+panties
+
+# Body parts (commonly tagged on suggestive art)
+butt
+booty
+
+# Profanity
+fuck
+shit
+bitch
+cunt
+asshole
+
+# Drugs
+marijuana
+cannabis
+cocaine
+heroin
+meth
+syringe
+needle
+joint
+weed
+bong
+
+# Violence (light filter — silhouettes of weapons are common in CC0 libraries
+# but may not be appropriate for cutting boards in family settings)
+gun
+pistol
+rifle
+shotgun
+weapon
+knife
+dagger
+sword
+blade
+bullet
+ammo
+ammunition
+grenade
+
+# Death imagery
+corpse
+gore
+blood
+bloody
+
+# Hate symbols
+swastika
+nazi
+
+# Alcohol-adjacent (allowable but flagged for review)
+# (left commented; the user can uncomment if cutting-board context demands it)
+# beer
+# wine
+# whiskey
+# alcohol

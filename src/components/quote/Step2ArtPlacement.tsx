@@ -43,6 +43,8 @@ interface Step2ArtPlacementProps {
   onRequestAddText: () => void;
   /** Open the text-design dialog in "edit" mode for the given design. */
   onRequestEditText: (designId: string) => void;
+  /** Open the clipart picker. */
+  onRequestAddClipart: () => void;
   onBack: () => void;
   onNext: () => void;
   canAdvance: boolean;
@@ -83,7 +85,7 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     boardConfig, designs, compositeUrls, parsing, errorMsg, overlapping,
     currentSide, onChangeSide,
     onAddDesign, onRemoveDesign, onUpdateDesignPlacement, onUpdateDesignWoodConfig,
-    onRequestAddText, onRequestEditText,
+    onRequestAddText, onRequestEditText, onRequestAddClipart,
     onBack, onNext, canAdvance,
   } = props;
 
@@ -486,6 +488,11 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                   onClick={onRequestAddText}
                   className="w-full px-3 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
                 >+ Add text</button>
+                <button
+                  type="button"
+                  onClick={onRequestAddClipart}
+                  className="w-full px-3 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
+                >+ Add clipart</button>
               </div>
             )}
 
@@ -509,6 +516,11 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                   onClick={onRequestAddText}
                   className="w-full px-3 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
                 >+ Add text</button>
+                <button
+                  type="button"
+                  onClick={onRequestAddClipart}
+                  className="w-full px-3 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600"
+                >+ Add clipart</button>
               </div>
             )}
 

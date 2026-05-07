@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisResult } from '@/types';
+import type { AnalysisResult, Design } from '@/types';
 import type { BoardConfig } from '@/types/board';
 import type { QuoteResult } from '@/lib/pricing';
 import {
@@ -20,9 +20,13 @@ import HoverMagnifier from '../HoverMagnifier';
 import IssueLocatorBadges, { type IssueVariant } from '../IssueLocatorBadges';
 import BoardFlipView from '../BoardFlipView';
 import { StepNav } from '../StepperBar';
+import DebugInfoPanel from './DebugInfoPanel';
 
 interface Step3QuoteDisplayProps {
   boardConfig: BoardConfig;
+  /** Original input designs (pre-optimization) — used by the dev debug
+   *  panel to compare original vs post-fill layer geometry. */
+  designs: Design[];
   optimization: MultiDesignOptimizationResult;
   quote: QuoteResult;
   /** Per-design composite PNG dataURL, keyed by design id. */
@@ -46,7 +50,7 @@ interface Step3QuoteDisplayProps {
  * splashes on the first and teal on the second.
  */
 export default function Step3QuoteDisplay({
-  boardConfig, optimization, quote, compositeUrls,
+  boardConfig, designs, optimization, quote, compositeUrls,
   currentSide, onChangeSide,
   onBack, onRequestManufacturing,
 }: Step3QuoteDisplayProps) {
@@ -224,6 +228,13 @@ export default function Step3QuoteDisplay({
               We'll email back with confirmation and next steps.
             </p>
           </section>
+
+          <DebugInfoPanel
+            boardConfig={boardConfig}
+            designs={designs}
+            optimization={optimization}
+            quote={quote}
+          />
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import type {
 import { combineLayers } from './svgLayers';
 import { isValidRotation } from './rotation';
 import type { TextSpec, TextFontStyle } from './textVector';
+import type { ClipartSpec } from './clipartVector';
 
 /**
  * Bump when the session schema changes in a backward-incompatible way.
@@ -50,6 +51,11 @@ export interface SerializedDesign {
    *  `vector` is the rendered version at save time; loaders preserve
    *  it as-is and use `textSpec` only when the user edits the text. */
   textSpec?: TextSpec;
+  /** When present, the design is a clipart element from the bundled
+   *  library. Like `textSpec`, the serialized `vector` is the rendered
+   *  version at save time — `clipartSpec` records the user's catalog
+   *  selection so the picker can re-open with the same entry. */
+  clipartSpec?: ClipartSpec;
 }
 
 export interface SessionFile {
@@ -94,6 +100,8 @@ export interface ExpertDesignLike {
   side?: 'top' | 'bottom';
   /** Present iff this is a text design. Mirrors `Design.textSpec`. */
   textSpec?: TextSpec;
+  /** Present iff this is a clipart design. Mirrors `Design.clipartSpec`. */
+  clipartSpec?: ClipartSpec;
 }
 
 interface SaveSessionInput {
@@ -134,6 +142,8 @@ export function saveSessionToFile(input: SaveSessionInput): void {
       // `textSpec` is only set on text designs; omitted on uploaded
       // SVG/DXF designs. JSON serializes naturally.
       ...(d.textSpec !== undefined ? { textSpec: d.textSpec } : {}),
+      // `clipartSpec` is only set on clipart-library designs.
+      ...(d.clipartSpec !== undefined ? { clipartSpec: d.clipartSpec } : {}),
     })),
     activeDesignId: input.activeDesignId,
     settings: input.settings,
@@ -333,10 +343,30 @@ function deserializeDesign(d: SerializedDesign): ExpertDesignLike {
     placement,
     side: d.side,
     ...(d.textSpec ? { textSpec: d.textSpec } : {}),
+    ...(d.clipartSpec ? { clipartSpec: d.clipartSpec } : {}),
   };
 }
 
 const TEXT_FONT_STYLES: ReadonlyArray<TextFontStyle> = ['regular', 'bold', 'italic', 'boldItalic'];
+
+function validateClipartSpec(value: unknown, path: string): ClipartSpec {
+  if (!value || typeof value !== 'object') {
+    throw new Error(`Session field "${path}" must be an object.`);
+  }
+  const c = value as Partial<ClipartSpec>;
+  const id = expectString(c.id, `${path}.id`);
+  if (id.length === 0) {
+    throw new Error(`Session field "${path}.id" must be a non-empty string.`);
+  }
+  if (!c.selectedSpecies || typeof c.selectedSpecies !== 'object') {
+    throw new Error(`Session field "${path}.selectedSpecies" must be an object.`);
+  }
+  const selectedSpecies: ClipartSpec['selectedSpecies'] = {};
+  for (const [hex, species] of Object.entries(c.selectedSpecies)) {
+    selectedSpecies[hex] = expectString(species, `${path}.selectedSpecies.${hex}`) as ClipartSpec['selectedSpecies'][string];
+  }
+  return { id, selectedSpecies };
+}
 
 function validateTextSpec(value: unknown, path: string): TextSpec {
   if (!value || typeof value !== 'object') {
@@ -476,6 +506,12 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
       if (dd.textSpec !== undefined) {
         textSpec = validateTextSpec(dd.textSpec, `designs[${i}].textSpec`);
       }
+      // `clipartSpec` optional. Only present when the design was added
+      // via the guided flow's "Add clipart" path.
+      let clipartSpec: ClipartSpec | undefined;
+      if (dd.clipartSpec !== undefined) {
+        clipartSpec = validateClipartSpec(dd.clipartSpec, `designs[${i}].clipartSpec`);
+      }
       return deserializeDesign({
         id: expectString(dd.id, `designs[${i}].id`),
         vector: vec,
@@ -485,6 +521,7 @@ export async function loadSessionFromFile(file: File): Promise<LoadedSession> {
         ...(placement ? { placement } : {}),
         ...(side ? { side } : {}),
         ...(textSpec ? { textSpec } : {}),
+        ...(clipartSpec ? { clipartSpec } : {}),
       });
     });
     if (top.activeDesignId !== null && typeof top.activeDesignId !== 'string') {

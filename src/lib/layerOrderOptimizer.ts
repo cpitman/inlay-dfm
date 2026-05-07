@@ -1,5 +1,5 @@
 import type { VectorData } from '@/types';
-import { layerToStandaloneSvg, renderSvgToCanvas } from './svgLayers';
+import { rasterizeLayerToBinaryMask } from './svgLayers';
 import { erodeMask } from './maskOps';
 
 /**
@@ -46,8 +46,8 @@ export async function preAnalyzeLayerOrder(
   const canvasH = Math.max(1, Math.round(canvasW * aspect));
   const ppiSq   = PRE_ANALYSIS_PIXELS_PER_INCH * PRE_ANALYSIS_PIXELS_PER_INCH;
 
-  // Rasterize each layer in `initialOrder` to a binary mask. Same
-  // pattern as dfmAnalysis: per-layer SVG → canvas → luma threshold.
+  // Rasterize each layer in `initialOrder` to a binary mask via the
+  // shared transparent-canvas + alpha-threshold helper.
   const masks = new Map<string, Uint8Array>();
   for (const colorHex of initialOrder) {
     const layer = vector.layers.find(l => l.colorHex === colorHex);
@@ -55,15 +55,10 @@ export async function preAnalyzeLayerOrder(
       masks.set(colorHex, new Uint8Array(canvasW * canvasH));
       continue;
     }
-    const svg = layerToStandaloneSvg(layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight);
-    const oc  = await renderSvgToCanvas(svg, canvasW, canvasH);
-    const ctx = oc.getContext('2d')!;
-    const data = ctx.getImageData(0, 0, canvasW, canvasH).data;
-    const mask = new Uint8Array(canvasW * canvasH);
-    for (let i = 0; i < canvasW * canvasH; i++) {
-      const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-      if (0.299 * r + 0.587 * g + 0.114 * b < 220) mask[i] = 1;
-    }
+    const mask = await rasterizeLayerToBinaryMask(
+      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
+      canvasW, canvasH,
+    );
     masks.set(colorHex, mask);
   }
 

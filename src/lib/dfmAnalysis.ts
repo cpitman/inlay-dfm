@@ -1,6 +1,6 @@
 import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, PerPresetSingleSide, MachiningTimeMatrix } from '@/types';
 import { distanceTransform } from './distanceTransform';
-import { layerToStandaloneSvg, renderSvgToCanvas } from './svgLayers';
+import { layerToStandaloneSvg, rasterizeLayerToBinaryMask, renderSvgToCanvas } from './svgLayers';
 import { detectAlignmentRisk } from './alignmentRisk';
 import { CLEARANCE_BIT_MRR, CLEARANCE_BIT_OPTIONS, getVbitRates, VBIT_PRESET_ANGLES, VBIT_RATES } from './machiningRates';
 import { buildMachiningTimeMatrix, machiningTimeForMask } from './machiningTime';
@@ -790,23 +790,21 @@ export async function runDfmAnalysis(
   // we need each layer's *physical* extent — including any portion that the
   // extend-for-registration algorithm has placed under a later layer.
   //
-  // Brightness threshold (< 220 luma) over the per-layer canvas captures the
-  // colored region; antialiased edge pixels at adjacent boundaries can fall
-  // into both layers' masks by ~1 px, which is harmless because the boundary
-  // detector picks them up on both sides equally.
+  // Each layer rasterizes through `rasterizeLayerToBinaryMask` (transparent
+  // canvas + alpha threshold) so antialiased edge pixels register in both
+  // adjacent layers' masks consistently — independent of layer color, so
+  // adjacent layers don't leave the boundary gaps that color-dependent
+  // luma thresholding produces.
   // -----------------------------------------------------------------------
-  const pocketMasks: Uint8Array[] = orderedColors.map(colorHex => {
-    const layerCanvas = perLayerBases.get(colorHex);
-    if (!layerCanvas) return new Uint8Array(n);
-    const lctx = layerCanvas.getContext('2d')!;
-    const layerData = lctx.getImageData(0, 0, canvasW, canvasH).data;
-    const mask = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-      const r = layerData[i * 4], g = layerData[i * 4 + 1], b = layerData[i * 4 + 2];
-      if (0.299 * r + 0.587 * g + 0.114 * b < 220) mask[i] = 1;
-    }
-    return mask;
-  });
+  const pocketMasks: Uint8Array[] = [];
+  for (const colorHex of orderedColors) {
+    const layer = vector.layers.find(l => l.colorHex === colorHex);
+    if (!layer) { pocketMasks.push(new Uint8Array(n)); continue; }
+    pocketMasks.push(await rasterizeLayerToBinaryMask(
+      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
+      canvasW, canvasH,
+    ));
+  }
 
   // -----------------------------------------------------------------------
   // Phase 2: Cross-pair alignment check.
@@ -1575,9 +1573,11 @@ export interface LiteAnalysisResult {
 
 /**
  * Rasterize one layer's standalone SVG to a pocket mask at the given
- * canvas dimensions. Uses the same brightness-threshold convention
- * (luma < 220) as Phase 1 of the full analysis. Returns an empty
- * mask if the layer isn't found in `vector.layers`.
+ * canvas dimensions. Returns an empty mask if the layer isn't found
+ * in `vector.layers`. Thin wrapper over the shared
+ * `rasterizeLayerToBinaryMask` helper (transparent canvas + alpha
+ * threshold) so adjacent layers' masks overlap consistently at
+ * shared boundaries.
  */
 export async function rasterizeLayerMask(
   vector: VectorData,
@@ -1586,20 +1586,11 @@ export async function rasterizeLayerMask(
   canvasH: number,
 ): Promise<Uint8Array> {
   const layer = vector.layers.find(l => l.colorHex === colorHex);
-  const n = canvasW * canvasH;
-  if (!layer) return new Uint8Array(n);
-  const layerSvg = layerToStandaloneSvg(
+  if (!layer) return new Uint8Array(canvasW * canvasH);
+  return rasterizeLayerToBinaryMask(
     layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
+    canvasW, canvasH,
   );
-  const oc = await renderSvgToCanvas(layerSvg, canvasW, canvasH);
-  const ctx = oc.getContext('2d')!;
-  const data = ctx.getImageData(0, 0, canvasW, canvasH).data;
-  const mask = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-    if (0.299 * r + 0.587 * g + 0.114 * b < 220) mask[i] = 1;
-  }
-  return mask;
 }
 
 /**
@@ -1696,12 +1687,18 @@ export async function runDfmAnalysisLite(
     if (idx < colorOrder.length - 1) {
       const holes = findEnclosedHoles(mask, canvasW, canvasH);
       const laterUnion = laterUnions[idx];
+      // Mirror `fillEnclosedHoles`'s 99.5% coverage threshold so the
+      // optimizer's `holeFillTargets` includes layers whose holes
+      // are mostly-covered (sub-pixel stragglers tolerated). A
+      // strict all-or-nothing here would flag layer 0 as having
+      // zero fillable holes and skip running `fillEnclosedHoles`
+      // on it entirely, even when 99.9%+ of every hole is covered.
       for (const hole of holes) {
-        let covered = true;
+        let coveredPx = 0;
         for (const k of hole.pixels) {
-          if (!laterUnion[k]) { covered = false; break; }
+          if (laterUnion[k]) coveredPx++;
         }
-        if (covered) fillableHoleCount++;
+        if (coveredPx / hole.pixels.length >= 0.995) fillableHoleCount++;
       }
     }
     return {

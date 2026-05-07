@@ -1,0 +1,125 @@
+<svg id="etmain" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" width="480" height="480"> <defs mode="0" rotatestep="0" rotatestart="0" stepvalue="60" snapto="0" displaywait="1">   <g id="tile0" frontfill="#ffffff" backfill="#2691c0"><path display="none" d="M 48.99,0 L 24.495,42.427 L -24.495,42.427 L -48.99,0 L -24.495,-42.427 L 24.495,-42.427 Z"></path>
+
+<path stroke="black" stroke-width="3" d="
+M -57.955,15.529
+A 60 60 0 0 0 -15.530,-57.955
+A 60 60 0 0 1 15.530,-57.955
+A 60 60 0 0 0 57.955,15.529
+A 60 60 0 0 1 42.426,42.426
+A 60 60 0 0 0 -42.426,42.426
+A 60 60 0 0 1 -57.955,15.529
+Z
+"></path>
+
+<animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0;120;120;120;120;120;120;0;0;0;0;0;0;-120;-120;-120;-120;-120;-120;0;0;0;0;0;0" dur="36s" repeatCount="indefinite"></animateTransform>
+
+</g><g id="tile1" frontfill="#ffffff" backfill="#2691c0"><path display="none" d="M 48.99,0 L 24.495,42.427 L -24.495,42.427 L -48.99,0 L -24.495,-42.427 L 24.495,-42.427 Z"></path>
+
+<path stroke="black" stroke-width="3" d="
+M -57.955,15.529
+A 60 60 0 0 0 -15.530,-57.955
+A 60 60 0 0 1 15.530,-57.955
+A 60 60 0 0 0 57.955,15.529
+A 60 60 0 0 1 42.426,42.426
+A 60 60 0 0 0 -42.426,42.426
+A 60 60 0 0 1 -57.955,15.529
+Z
+"></path>
+
+<animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0;0;0;120;120;120;120;120;120;0;0;0;0;0;0;-120;-120;-120;-120;-120;-120;0;0;0;0" dur="36s" repeatCount="indefinite"></animateTransform>
+
+</g><g id="tile2" frontfill="#ffffff" backfill="#2691c0"><path display="none" d="M 48.99,0 L 24.495,42.427 L -24.495,42.427 L -48.99,0 L -24.495,-42.427 L 24.495,-42.427 Z"></path>
+
+<path stroke="black" stroke-width="3" d="
+M -57.955,15.529
+A 60 60 0 0 0 -15.530,-57.955
+A 60 60 0 0 1 15.530,-57.955
+A 60 60 0 0 0 57.955,15.529
+A 60 60 0 0 1 42.426,42.426
+A 60 60 0 0 0 -42.426,42.426
+A 60 60 0 0 1 -57.955,15.529
+Z
+"></path>
+
+<animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0;0;0;0;0;120;120;120;120;120;120;0;0;0;0;0;0;-120;-120;-120;-120;-120;-120;0;0" dur="36s" repeatCount="indefinite"></animateTransform>
+
+</g></defs> <g class="etdrop" stroke="#777" stroke-width="2" stroke-linejoin="round" transform="translate(240,240) scale(1)"><g class="etboard">
+<path d="M 240,240 L 240,-240 L -240,-240 L -240,240 Z" stroke="#000" stroke-width="4" fill="#000" class="boardsnap0"></path></g>
+
+<g id="tile0s">
+<use href="#tile0" fill="#ffffff" transform="translate(-240,-240) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-240,14.562) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-240,269.124) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-166.515,-112.719) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-166.515,141.843) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-93.03,-240) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-93.03,14.562) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-93.03,269.124) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-19.545,-112.719) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(-19.545,141.843) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(53.94,-240) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(53.94,14.562) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(53.94,269.124) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(127.425,-112.719) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(127.425,141.843) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(200.91,-240) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(200.91,14.562) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(200.91,269.124) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(274.395,-112.719) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile0" fill="#ffffff" transform="translate(274.395,141.843) scale(1,1) rotate(0)" class="tiledropped"></use>
+</g>
+
+<g id="tile1s">
+<use href="#tile1" fill="#ffffff" transform="translate(-240,-155.146) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-240,99.416) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-166.515,-282.427) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-166.515,-27.865) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-166.515,226.697) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-93.03,-155.146) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-93.03,99.416) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-19.545,-282.427) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-19.545,-27.865) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(-19.545,226.697) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(53.94,-155.146) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(53.94,99.416) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(127.425,-282.427) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(127.425,-27.865) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(127.425,226.697) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(200.91,-155.146) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(200.91,99.416) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(274.395,-282.427) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(274.395,-27.865) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile1" fill="#ffffff" transform="translate(274.395,226.697) scale(1,1) rotate(0)" class="tiledropped"></use>
+</g>
+
+<g id="tile2s">
+<use href="#tile2" fill="#ffffff" transform="translate(-240,-70.292) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-240,184.27) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-166.515,-197.573) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-166.515,56.989) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-93.03,-70.292) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-93.03,184.27) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-19.545,-197.573) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(-19.545,56.989) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(53.94,-70.292) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(53.94,184.27) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(127.425,-197.573) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(127.425,56.989) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(200.91,-70.292) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(200.91,184.27) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(274.395,-197.573) scale(1,1) rotate(0)" class="tiledropped"></use>
+<use href="#tile2" fill="#ffffff" transform="translate(274.395,56.989) scale(1,1) rotate(0)" class="tiledropped"></use>
+</g>
+
+<use href="#tile0s">
+<animate attributeName="opacity" values="1;1;0;0;0;0;1;1;0;0;0;0;1;1;0;0;0;0;1;1;0;0;0;0;1" dur="36s" repeatCount="indefinite"></animate>
+</use>
+
+<use href="#tile1s">
+<animate attributeName="opacity" values="0;0;1;1;0;0;0;0;1;1;0;0;0;0;1;1;0;0;0;0;1;1;1;0;0" dur="36s" repeatCount="indefinite"></animate>
+</use>
+
+</g>
+
+
+</svg>

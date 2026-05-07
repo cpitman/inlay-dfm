@@ -23,6 +23,8 @@ npx vitest run -t "binary search"   # filter by `it(...)` description
 
 The standard verification gate before committing: `npx tsc --noEmit && npm test -- --run && npx next build` clean, plus a smoke check of `/quote` and `/expert` (HTTP 200).
 
+After every meaningful source edit, bump `CODE_VERSION` in `src/lib/codeVersion.ts` (and update `CODE_VERSION_NOTE` to a one-line description of the change). The version stamps into the debug archive's `manifest.json` so the user can validate which build is actually running — a stale dev server / cached bundle is otherwise indistinguishable from "the change had no effect."
+
 ## High-level architecture
 
 Browser-only Next.js app — every CNC analysis stage runs in the user's tab via `OffscreenCanvas` and a separable 4-pass approximate EDT. There is no server logic.

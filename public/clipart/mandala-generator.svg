@@ -1,0 +1,144 @@
+<svg width="850" height="600" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+
+    <style>
+        /* Styles for elements *outside* the foreignObject */
+        svg { background-color: #f0f0f0; font-family: sans-serif; }
+        .mandala-bg { /* CSS fill is a fallback, direct attribute is primary */ stroke: #ccc; }
+
+        /* Styles for the HTML controls *inside* the foreignObject */
+        body { margin: 0; padding: 0; font-family: sans-serif; font-size: 13px; background-color: #e8e8e8; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+        .controls-scrollable-area { padding: 10px; flex-grow: 1; overflow-y: auto; box-sizing: border-box; }
+        .controls-scrollable-area h3 { margin-top: 0; margin-bottom: 10px; color: #333; text-align: center; font-size: 16px; }
+        .control-group { margin-bottom: 8px; }
+        label { display: block; margin-bottom: 2px; color: #555; font-weight: bold; }
+        input[type="range"], select, input[type="color"] { width: calc(100% - 45px); margin-right: 5px; vertical-align: middle; box-sizing: border-box; }
+        input[type="color"] { width: 45px; height: 22px; padding: 0 1px; vertical-align: middle; border: 1px solid #a0a0a0; cursor: pointer; }
+        .value-display { display: inline-block; width: 35px; text-align: right; font-family: monospace; font-size: 12px; vertical-align: middle; color: #111; }
+        select { width: 100%; padding: 3px; margin-top: 1px; }
+        hr { border: 0; height: 1px; background-color: #ccc; margin: 10px 0; }
+        .save-button-container { flex-shrink: 0; padding: 10px; border-top: 1px solid #ccc; background-color: #e8e8e8; }
+        button#saveButton { display: block; width: 100%; text-align: center; margin-bottom: 8px; padding: 8px 15px; font-size: 14px; font-weight: bold; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 4px; }
+        button#saveButton:hover { background-color: #45a049; }
+        button#saveButton:active { background-color: #3e8e41; }
+        #svgOutputContainer { text-align: left; margin-top: 5px; }
+        #svgOutputCode { width: 100%; height: 80px; font-family: monospace; font-size: 10px; white-space: pre; overflow: auto; box-sizing: border-box; margin-bottom: 5px; border: 1px solid #aaa; background-color: #fdfdfd; }
+        #saveInstructions { font-size: 11px; color: #444; margin: 0 0 5px 0; text-align: center; }
+        button#closeSvgOutputButton { display: block; margin: 5px auto 0 auto; padding: 3px 8px; font-size: 11px; background-color: #f1f1f1; border: 1px solid #bbb; border-radius: 3px; cursor: pointer; }
+        button#closeSvgOutputButton:hover { background-color: #e1e1e1; }
+        .hidden { display: none; }
+
+        /* --- FIXED: CSS Rule for color/bg/stroke labels --- */
+        label[for^="color"],
+        label[for="bgColor"],
+        label[for="strokeColor"] {
+             display: inline-block; /* Make label and input inline */
+             width: auto; /* Allow label to size naturally */
+             margin-right: 5px;
+             margin-bottom: 0; /* Remove bottom margin for inline */
+             vertical-align: middle;
+             font-weight: normal; /* Make less bold */
+        }
+        label[for^="color"] + input[type="color"],
+        label[for="bgColor"] + input[type="color"],
+        label[for="strokeColor"] + input[type="color"] {
+            width: 45px; /* Ensure color input width stays small */
+            display: inline-block; /* Keep it inline */
+            vertical-align: middle;
+        }
+        /* --- End Fixed CSS --- */
+
+    </style>
+
+    <defs></defs>
+
+    <rect x="1" y="1" width="598" height="598" class="mandala-bg" stroke="#ccc" fill="#FFFFFF" />
+    {/* --- FIXED: Corrected transform attribute --- */}
+    <g id="mandalaContainer" transform="translate(300, 300)"></g>
+
+    <foreignObject x="610" y="10" width="230" height="580">
+        <body xmlns="http://www.w3.org/1999/xhtml">
+            <div class="controls-scrollable-area">
+                <h3>Mandala Controls!</h3>
+                <em>(Made by j4p4n)</em><p></p> <div class="control-group"> <label for="segments">Segments:</label> <input type="range" id="segments" min="3" max="48" value="12" step="1" oninput="drawMandala()" /> <span class="value-display" id="segmentsValue">12</span> </div> <div class="control-group"> <label for="polygonSides">Polygon/Star Sides:</label> <input type="range" id="polygonSides" min="3" max="12" value="5" step="1" oninput="drawMandala()" /> <span class="value-display" id="polygonSidesValue">5</span> </div> <div class="control-group"> <label for="strokeWidth">Stroke Width:</label> <input type="range" id="strokeWidth" min="0" max="10" value="1" step="0.5" oninput="drawMandala()" /> <span class="value-display" id="strokeWidthValue">1.0</span> </div> <hr /> <div class="control-group"><label for="shapeType1">Shape 1 Type:</label><select id="shapeType1" onchange="drawMandala()"><option value="circle" selected="selected">Circle</option><option value="polygon">Polygon</option><option value="petal">Petal</option><option value="star">Star</option><option value="none">None</option></select></div> <div class="control-group"><label for="distance1">S1 Distance:</label><input type="range" id="distance1" min="0" max="280" value="40" step="1" oninput="drawMandala()" /><span class="value-display" id="distance1Value">40</span></div> <div class="control-group"><label for="size1">S1 Size:</label><input type="range" id="size1" min="1" max="100" value="20" step="1" oninput="drawMandala()" /><span class="value-display" id="size1Value">20</span></div> <div class="control-group"><label for="shapeType2">Shape 2 Type:</label><select id="shapeType2" onchange="drawMandala()"><option value="circle">Circle</option><option value="polygon">Polygon</option><option value="petal" selected="selected">Petal</option><option value="star">Star</option><option value="none">None</option></select></div> <div class="control-group"><label for="distance2">S2 Distance:</label><input type="range" id="distance2" min="0" max="280" value="80" step="1" oninput="drawMandala()" /><span class="value-display" id="distance2Value">80</span></div> <div class="control-group"><label for="size2">S2 Size:</label><input type="range" id="size2" min="1" max="100" value="25" step="1" oninput="drawMandala()" /><span class="value-display" id="size2Value">25</span></div> <div class="control-group"><label for="shapeType3">Shape 3 Type:</label><select id="shapeType3" onchange="drawMandala()"><option value="circle" selected="selected">Circle</option><option value="polygon">Polygon</option><option value="petal">Petal</option><option value="star">Star</option><option value="none">None</option></select></div> <div class="control-group"><label for="distance3">S3 Distance:</label><input type="range" id="distance3" min="0" max="280" value="120" step="1" oninput="drawMandala()" /><span class="value-display" id="distance3Value">120</span></div> <div class="control-group"><label for="size3">S3 Size:</label><input type="range" id="size3" min="1" max="100" value="15" step="1" oninput="drawMandala()" /><span class="value-display" id="size3Value">15</span></div> <div class="control-group"><label for="shapeType4">Shape 4 Type:</label><select id="shapeType4" onchange="drawMandala()"><option value="circle">Circle</option><option value="polygon" selected="selected">Polygon</option><option value="petal">Petal</option><option value="star">Star</option><option value="none">None</option></select></div> <div class="control-group"><label for="distance4">S4 Distance:</label><input type="range" id="distance4" min="0" max="280" value="170" step="1" oninput="drawMandala()" /><span class="value-display" id="distance4Value">170</span></div> <div class="control-group"><label for="size4">S4 Size:</label><input type="range" id="size4" min="1" max="100" value="20" step="1" oninput="drawMandala()" /><span class="value-display" id="size4Value">20</span></div> <div class="control-group"><label for="shapeType5">Shape 5 Type:</label><select id="shapeType5" onchange="drawMandala()"><option value="circle">Circle</option><option value="polygon">Polygon</option><option value="petal">Petal</option><option value="star" selected="selected">Star</option><option value="none">None</option></select></div> <div class="control-group"><label for="distance5">S5 Distance:</label><input type="range" id="distance5" min="0" max="280" value="220" step="1" oninput="drawMandala()" /><span class="value-display" id="distance5Value">220</span></div> <div class="control-group"><label for="size5">S5 Size:</label><input type="range" id="size5" min="1" max="100" value="18" step="1" oninput="drawMandala()" /><span class="value-display" id="size5Value">18</span></div>
+                <hr />
+                --- Color Controls --- 
+                <div class="control-group"> <label for="color1">Color 1</label><input type="color" id="color1" value="#FF6B6B" oninput="drawMandala()" /> </div>
+                <div class="control-group"> <label for="color2">Color 2</label><input type="color" id="color2" value="#4ECDC4" oninput="drawMandala()" /> </div>
+                <div class="control-group"> <label for="color3">Color 3</label><input type="color" id="color3" value="#FFE66D" oninput="drawMandala()" /> </div>
+                <div class="control-group"> <label for="color4">Color 4</label><input type="color" id="color4" value="#45B7D1" oninput="drawMandala()" /> </div>
+                <div class="control-group"> <label for="color5">Color 5</label><input type="color" id="color5" value="#F7B2AD" oninput="drawMandala()" /> </div>
+                <div class="control-group"> <label for="strokeColor">Stroke</label><input type="color" id="strokeColor" value="#333333" oninput="drawMandala()" /> </div>
+                <div class="control-group"> <label for="bgColor">BG</label><input type="color" id="bgColor" value="#FFFFFF" oninput="updateBgColor()" /> </div>
+            </div>
+            <div class="save-button-container">
+                 <button id="saveButton" type="button">Show SVG Code to Save</button>
+                 <div id="svgOutputContainer" class="hidden">
+                     <textarea id="svgOutputCode" readonly="readonly"></textarea>
+                     <p id="saveInstructions">Copy the code above (Ctrl+C or Cmd+C) and paste it into a text file. Save the file with an `.svg` extension.</p>
+                     <button id="closeSvgOutputButton" type="button">Close</button>
+                 </div>
+            </div>
+        </body>
+    </foreignObject>
+
+    <script type="text/javascript">
+    <![CDATA[
+        const svgNS = "http://www.w3.org/2000/svg";
+        const mandalaContainer = document.getElementById('mandalaContainer');
+        const mandalaBgRect = document.querySelector('.mandala-bg');
+        const cx = 0;
+        const cy = 0;
+
+        // Control Element References
+        const controls = {
+            // General
+            segments: document.getElementById('segments'), segmentsValue: document.getElementById('segmentsValue'), polygonSides: document.getElementById('polygonSides'), polygonSidesValue: document.getElementById('polygonSidesValue'), strokeWidth: document.getElementById('strokeWidth'), strokeWidthValue: document.getElementById('strokeWidthValue'),
+            // Shape 1-5 Params
+            shapeType1: document.getElementById('shapeType1'), distance1: document.getElementById('distance1'), distance1Value: document.getElementById('distance1Value'), size1: document.getElementById('size1'), size1Value: document.getElementById('size1Value'),
+            shapeType2: document.getElementById('shapeType2'), distance2: document.getElementById('distance2'), distance2Value: document.getElementById('distance2Value'), size2: document.getElementById('size2'), size2Value: document.getElementById('size2Value'),
+            shapeType3: document.getElementById('shapeType3'), distance3: document.getElementById('distance3'), distance3Value: document.getElementById('distance3Value'), size3: document.getElementById('size3'), size3Value: document.getElementById('size3Value'),
+            shapeType4: document.getElementById('shapeType4'), distance4: document.getElementById('distance4'), distance4Value: document.getElementById('distance4Value'), size4: document.getElementById('size4'), size4Value: document.getElementById('size4Value'),
+            shapeType5: document.getElementById('shapeType5'), distance5: document.getElementById('distance5'), distance5Value: document.getElementById('distance5Value'), size5: document.getElementById('size5'), size5Value: document.getElementById('size5Value'),
+            // Colors
+            color1: document.getElementById('color1'), color2: document.getElementById('color2'), color3: document.getElementById('color3'), color4: document.getElementById('color4'), color5: document.getElementById('color5'),
+            strokeColor: document.getElementById('strokeColor'), bgColor: document.getElementById('bgColor'),
+            // Save/Output Area
+            saveButton: document.getElementById('saveButton'), svgOutputContainer: document.getElementById('svgOutputContainer'), svgOutputCode: document.getElementById('svgOutputCode'), closeSvgOutputButton: document.getElementById('closeSvgOutputButton')
+        };
+
+        // --- Helper Functions ---
+        function generatePolygonPoints(sides, radius, centerX, centerY) { let points = ''; const angleStep = (Math.PI * 2) / sides; for (let i = 0; i < sides; i++) { const angle = i * angleStep - Math.PI / 2; const x = centerX + radius * Math.cos(angle); const y = centerY + radius * Math.sin(angle); points += `${x.toFixed(3)},${y.toFixed(3)} `; } return points.trim(); }
+        function generatePetalPath(distance, size) { const halfWidth = size * 0.4; const length = size * 1.2; const tipX = distance + length; const baseX = distance; const controlX = distance + length * 0.5; return `M ${baseX.toFixed(3)},0 Q ${controlX.toFixed(3)},${halfWidth.toFixed(3)} ${tipX.toFixed(3)},0 Q ${controlX.toFixed(3)},${(-halfWidth).toFixed(3)} ${baseX.toFixed(3)},0 Z`; }
+        function generateStarPoints(points, outerRadius, innerRadius, centerX, centerY) { let pointsStr = ''; const angleStep = Math.PI / points; for (let i = 0; i < 2 * points; i++) { const radius = (i % 2 === 0) ? outerRadius : innerRadius; const angle = i * angleStep - Math.PI / 2; const x = centerX + radius * Math.cos(angle); const y = centerY + radius * Math.sin(angle); pointsStr += `${x.toFixed(3)},${y.toFixed(3)} `; } return pointsStr.trim(); }
+
+        // --- Main Drawing Function ---
+        function drawMandala() {
+             const numSegments = parseInt(controls.segments.value); const polygonSides = parseInt(controls.polygonSides.value); const strokeWidth = parseFloat(controls.strokeWidth.value); const strokeColor = controls.strokeColor.value;
+             const shapeColors = [ controls.color1.value, controls.color2.value, controls.color3.value, controls.color4.value, controls.color5.value ];
+             const shapeParams = [ { type: controls.shapeType1.value, dist: parseInt(controls.distance1.value), size: parseInt(controls.size1.value), distValEl: controls.distance1Value, sizeValEl: controls.size1Value }, { type: controls.shapeType2.value, dist: parseInt(controls.distance2.value), size: parseInt(controls.size2.value), distValEl: controls.distance2Value, sizeValEl: controls.size2Value }, { type: controls.shapeType3.value, dist: parseInt(controls.distance3.value), size: parseInt(controls.size3.value), distValEl: controls.distance3Value, sizeValEl: controls.size3Value }, { type: controls.shapeType4.value, dist: parseInt(controls.distance4.value), size: parseInt(controls.size4.value), distValEl: controls.distance4Value, sizeValEl: controls.size4Value }, { type: controls.shapeType5.value, dist: parseInt(controls.distance5.value), size: parseInt(controls.size5.value), distValEl: controls.distance5Value, sizeValEl: controls.size5Value } ];
+             controls.segmentsValue.textContent = numSegments; controls.polygonSidesValue.textContent = polygonSides; controls.strokeWidthValue.textContent = strokeWidth.toFixed(1); shapeParams.forEach(p => { p.distValEl.textContent = p.dist; p.sizeValEl.textContent = p.size; });
+             while (mandalaContainer.firstChild) { mandalaContainer.removeChild(mandalaContainer.firstChild); } const angle = 360 / numSegments;
+             for (let i = 0; i < numSegments; i++) { const segmentGroup = document.createElementNS(svgNS, 'g'); segmentGroup.setAttribute('transform', `rotate(${i * angle}, ${cx}, ${cy})`); shapeParams.forEach((params, index) => { if (params.type !== 'none' && params.size > 0 && params.dist >= 0) { let shapeElement = null; const currentFill = shapeColors[index] || '#888888'; const currentStroke = strokeColor; try { switch(params.type) { case 'circle': shapeElement = document.createElementNS(svgNS, 'circle'); shapeElement.setAttribute('cx', String(params.dist)); shapeElement.setAttribute('cy', String(cy)); shapeElement.setAttribute('r', String(params.size)); break; case 'polygon': shapeElement = document.createElementNS(svgNS, 'polygon'); shapeElement.setAttribute('points', generatePolygonPoints(polygonSides, params.size, params.dist, cy)); break; case 'petal': shapeElement = document.createElementNS(svgNS, 'path'); shapeElement.setAttribute('d', generatePetalPath(params.dist, params.size)); break; case 'star': shapeElement = document.createElementNS(svgNS, 'polygon'); const innerRadiusStar = params.size * 0.5; shapeElement.setAttribute('points', generateStarPoints(polygonSides, params.size, innerRadiusStar, params.dist, cy)); break; } if (shapeElement) { shapeElement.setAttribute('fill', currentFill); shapeElement.setAttribute('stroke', currentStroke); shapeElement.setAttribute('stroke-width', String(strokeWidth)); shapeElement.setAttribute('vector-effect', 'non-scaling-stroke'); segmentGroup.appendChild(shapeElement); } } catch (e) { console.error(`Error creating shape ${index + 1}:`, e, params); } } }); mandalaContainer.appendChild(segmentGroup); }
+        }
+
+        // --- Update Background Color ---
+        function updateBgColor() { const bgColor = controls.bgColor.value; if (mandalaBgRect) { mandalaBgRect.setAttribute('fill', bgColor); } }
+
+        // --- Function to show SVG code ---
+        function showSVGCodeToSave() { if (!mandalaContainer || !mandalaBgRect || !controls.svgOutputCode || !controls.svgOutputContainer) { console.error("Mandala container, background, or output elements not found."); alert("Error: Could not find required elements to generate SVG code."); return; } const mandalaContent = mandalaContainer.innerHTML; const currentBgColor = controls.bgColor.value; const containerTransform = mandalaContainer.getAttribute('transform') || ''; const svgWidth = mandalaBgRect.getAttribute('width'); const svgHeight = mandalaBgRect.getAttribute('height'); const svgString = `<svg width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" xmlns="http://www.w3.org/2000/svg">\n    <rect x="0" y="0" width="100%" height="100%" fill="${currentBgColor}" stroke="none" />\n    <g transform="${containerTransform}">\n        ${mandalaContent}\n    </g>\n</svg>`; try { controls.svgOutputCode.value = svgString; controls.svgOutputContainer.classList.remove('hidden'); controls.svgOutputCode.focus(); controls.svgOutputCode.select(); controls.saveButton.textContent = 'Copy Code'; } catch (e) { console.error("Error displaying SVG code:", e); alert("Sorry, there was an error displaying the SVG code. Check console for details."); controls.svgOutputContainer.classList.add('hidden'); } }
+
+        // --- Function to hide SVG code area ---
+        function hideSVGCodeArea() { if (controls.svgOutputContainer && controls.saveButton) { controls.svgOutputContainer.classList.add('hidden'); controls.saveButton.textContent = 'Show SVG Code to Save'; } else { console.error("Could not find elements to hide SVG code area."); } }
+
+        // --- Initial Draw & Event Listeners ---
+        setTimeout(() => {
+            drawMandala();
+            if (controls.saveButton) { controls.saveButton.addEventListener('click', showSVGCodeToSave); } else { console.error("Save button element not found!"); }
+            if (controls.closeSvgOutputButton) { controls.closeSvgOutputButton.addEventListener('click', hideSVGCodeArea); } else { console.error("Close SVG Output button element not found!"); }
+        }, 0);
+
+    ]]>
+    </script>
+
+// made by j4p4n on openclipart.org march 2025, with ai friend's help
+</svg>

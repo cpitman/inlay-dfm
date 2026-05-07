@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clipart Moderation</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e6e6e6; margin: 0; padding: 2rem; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; }
+  h1 { margin: 0; font-size: 1.4rem; }
+  .progress { color: #999; font-size: 0.9rem; }
+  .image-wrap { background: #fff; padding: 2rem; text-align: center; border-radius: 10px; margin-bottom: 1rem; min-height: 300px; display: flex; align-items: center; justify-content: center; }
+  .image-wrap img { max-width: 100%; max-height: 420px; }
+  .meta { background: #2a2a2a; padding: 1rem 1.25rem; border-radius: 10px; margin-bottom: 1rem; }
+  .title { margin: 0 0 0.5rem; font-size: 1.1rem; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; }
+  .tag { background: #444; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
+  .colors { display: flex; align-items: center; gap: 0.4rem; margin: 0.5rem 0; color: #999; font-size: 0.9rem; }
+  .swatch { width: 22px; height: 22px; border-radius: 4px; border: 1px solid #555; }
+  .footer { display: flex; justify-content: space-between; color: #999; font-size: 0.85rem; margin-top: 0.5rem; }
+  a { color: #79c0ff; }
+  .actions { display: flex; gap: 1rem; }
+  button { flex: 1; padding: 1rem; font-size: 1.05rem; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; color: #fff; }
+  .keep { background: #2d7a3d; }
+  .keep:hover { background: #389448; }
+  .reject { background: #a83232; }
+  .reject:hover { background: #c43e3e; }
+  .kbd { font-family: ui-monospace, monospace; padding: 1px 6px; margin-left: 0.4rem; background: rgba(255,255,255,0.18); border-radius: 4px; font-size: 0.8rem; }
+  .done { text-align: center; padding: 4rem 1rem; }
+  .done h2 { font-size: 1.6rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Clipart Moderation</h1>
+    <div class="progress" id="progress">…</div>
+  </header>
+  <div id="content">Loading…</div>
+</div>
+<script>
+let current = null;
+let busy = false;
+
+async function step(action) {
+  if (busy) return;
+  busy = true;
+  const init = action ? {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: current.id }),
+  } : undefined;
+  const url = action ? '/api/' + action : '/api/next';
+  const res = await fetch(url, init);
+  const { entry, done, total } = await res.json();
+  current = entry;
+  document.getElementById('progress').textContent =
+    done + ' / ' + total + ' approved · ' + (total - done) + ' remaining';
+  render(entry);
+  busy = false;
+}
+
+function escape(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function render(e) {
+  const c = document.getElementById('content');
+  if (!e) {
+    c.innerHTML = '<div class="done"><h2>All caught up 🎉</h2><p>Every entry in the manifest has been moderated.</p></div>';
+    return;
+  }
+  const tags = e.tags.map(t => '<span class="tag">' + escape(t) + '</span>').join('');
+  const colors = e.colors.map(col =>
+    '<span class="swatch" style="background:' + escape(col) + '" title="' + escape(col) + '"></span>'
+  ).join('');
+  c.innerHTML =
+    '<div class="image-wrap"><img src="/clipart/' + encodeURIComponent(e.id) + '.png" alt="' + escape(e.title) + '" onerror="this.onerror=null;this.src=\'/clipart/' + encodeURIComponent(e.id) + '.svg\'"></div>' +
+    '<div class="meta">' +
+      '<h2 class="title">' + escape(e.title) + '</h2>' +
+      (tags ? '<div class="tags">' + tags + '</div>' : '') +
+      '<div class="colors">' + colors + '<span>' + e.colorCount + ' color' + (e.colorCount === 1 ? '' : 's') + '</span></div>' +
+      '<div class="footer">' +
+        '<span><a href="' + escape(e.sourceUrl) + '" target="_blank" rel="noopener">' + escape(e.source) + ' source ↗</a></span>' +
+        '<span>id: <code>' + escape(e.id) + '</code> · rank #' + e.rank + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="actions">' +
+      '<button class="keep" onclick="step(\'approve\')">✓ Keep<span class="kbd">Y</span></button>' +
+      '<button class="reject" onclick="step(\'reject\')">✗ Reject<span class="kbd">N</span></button>' +
+    '</div>';
+}
+
+document.addEventListener('keydown', e => {
+  if (!current || busy) return;
+  if (e.key === 'y' || e.key === 'Y') step('approve');
+  else if (e.key === 'n' || e.key === 'N') step('reject');
+});
+
+step();
+</script>
+</body>
+</html>

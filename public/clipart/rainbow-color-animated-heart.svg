@@ -1,0 +1,11 @@
+<svg role="img" xmlns="http://www.w3.org/2000/svg" width="102px" height="102px">
+  <metadata>Heart shape by Mozilla https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Element/path#attributes as a relative path</metadata>
+  <title>Simple red heart with black border changing to rainbow colors changing size giving a "beat" effect</title>
+  <g id="beatingheart">
+    <path id="heart" transform-origin="center" fill="#f00" stroke="#000" stroke-width="2" d="m10 30 a20 20 0 0 1 40 0 a20 20 0 0 1 40 0 q0 30 -40 60 q-40 -30 -40 -60 z">
+      <animate id="rainbowheart" attributeName="fill" attributeType="XML" dur="21s" values="#ff0000; #ff0000; #ff7518; #ff7518; #ff7518; #ffff00; #ffff00; #ffff00; #009900; #009900; #009900; #0073cf; #0073cf; #0073cf; #330099; #330099; #330099; #ee82ee; #ee82ee; #ee82ee; #ff0000;" repeatCount="indefinite"></animate>
+      <animatetransform attributeName="transform" dur="2s" type="scale" values="1 1;0.8 0.8;1 1" repeatCount="indefinite" additive="sum">
+      </animatetransform>
+    </path>
+  </g>
+</svg>
