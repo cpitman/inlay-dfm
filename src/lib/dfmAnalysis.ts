@@ -11,6 +11,15 @@ import { parseViewBox } from './svgLayers';
 import { computePlugStockUsageSqIn } from './plugStockPacking';
 import { findMaskComponentCentroids } from './maskComponents';
 import { dilateMask } from './maskOps';
+import { svgFragmentToMultiPolygon } from './polygonParser';
+import { multiPolygonDifference } from './clipperOps';
+import type { MultiPolygon } from './polygon';
+import { polygonProblemStats, type PolygonProblemStats } from './polygonPocketStats';
+import {
+  rasterizeMultiPolygonToMask,
+  renderDepthMapToContext,
+  type DesignToCanvasTransform,
+} from './polygonRender';
 
 const DEFAULT_CANVAS_WIDTH = 1200;
 const THIN_WALL_THRESHOLD_INCHES = 0.05;
@@ -660,6 +669,71 @@ async function buildDepthMap(
   return canvasToDataUrl(oc);
 }
 
+/**
+ * Polygon-native per-preset depth map. Renders successive inward
+ * offsets of `carvedMP` in increasingly green tones over `base` so
+ * the visible color at each pixel encodes the bit's reachable depth
+ * there. Replaces `buildDepthMap` for the per-preset path; the
+ * per-side path still uses the bitmap version.
+ */
+async function buildPolygonDepthMap(
+  base: OffscreenCanvas,
+  canvasW: number,
+  canvasH: number,
+  carvedMP: MultiPolygon,
+  fullDepthRadiusUnits: number,
+  transform: DesignToCanvasTransform,
+  plugFit?: DepthMapPlugFit,
+): Promise<string> {
+  const oc = new OffscreenCanvas(canvasW, canvasH);
+  const ctx = oc.getContext('2d')!;
+  ctx.drawImage(base, 0, 0);
+  renderDepthMapToContext(ctx, carvedMP, fullDepthRadiusUnits, transform, { plugFit });
+  return canvasToDataUrl(oc);
+}
+
+/**
+ * Polygon-native per-preset problem-stats wrapper. Internally calls
+ * `polygonProblemStats` and rasterizes the resulting problem polygon
+ * into a Uint8Array so the existing bitmap-based overlay PNG builder
+ * and component-centroid finder can consume it without modification.
+ *
+ * The shape mirrors `problemStatsForAngle`'s return type so Phase 5
+ * call sites stay almost identical; only the inputs change from
+ * (mask, dist1) to (carvedMP).
+ */
+function polygonProblemStatsBitmap(
+  carvedMP: MultiPolygon,
+  fullDepthRadiusUnits: number,
+  canvasW: number,
+  canvasH: number,
+  transform: DesignToCanvasTransform,
+  options: {
+    plugMode: boolean;
+    designBounds: { x0: number; y0: number; x1: number; y1: number };
+    returnMask: boolean;
+  },
+): ProblemStatsForAngle {
+  const stats: PolygonProblemStats = polygonProblemStats(carvedMP, fullDepthRadiusUnits, {
+    plugMode: options.plugMode,
+    designBounds: options.designBounds,
+    returnPolygon: options.returnMask,
+  });
+  const out: ProblemStatsForAngle = {
+    percent: stats.percent,
+    fullDepthPercent: stats.fullDepthPercent,
+    hasAnyFullDepth: stats.hasAnyFullDepth,
+    hasIsolatedComponent: stats.hasIsolatedComponent,
+    passed: stats.passed,
+  };
+  if (options.returnMask) {
+    out.problemMask = rasterizeMultiPolygonToMask(
+      stats.problemPolygon ?? [], canvasW, canvasH, transform,
+    );
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // colorOrder controls which inlay is "earlier" for alignment detection.
@@ -735,6 +809,26 @@ export async function runDfmAnalysis(
   // SVG path emitted from canvas-pixel masks must add this offset so it
   // lands in the same coordinate system as the unchanged layer fragments.
   const vb = parseViewBox(vector.viewBox);
+
+  // Design (= SVG viewBox) units per inch. Used by the polygon-
+  // native per-preset path to convert R from inches into design
+  // units (where Clipper offsets operate).
+  const designUnitsPerInch = vb.w / designWidthInches;
+  const polygonTransform: DesignToCanvasTransform = {
+    scaleX: canvasW / vb.w,
+    scaleY: canvasH / vb.h,
+    offsetX: vb.x,
+    offsetY: vb.y,
+  };
+  const designBounds = {
+    x0: vb.x, y0: vb.y, x1: vb.x + vb.w, y1: vb.y + vb.h,
+  };
+  const canvasBoxMP: MultiPolygon = [[
+    { x: designBounds.x0, y: designBounds.y0 },
+    { x: designBounds.x1, y: designBounds.y0 },
+    { x: designBounds.x1, y: designBounds.y1 },
+    { x: designBounds.x0, y: designBounds.y1 },
+  ]];
 
   // Per-layer base canvases — each shows only that layer's geometry. Used as the
   // visual backdrop for each wood's overlay/depth-map so the WoodSection canvas
@@ -916,8 +1010,10 @@ export async function runDfmAnalysis(
     plugIsThinWall: Uint8Array;
     pocketMask: Uint8Array;
     plugMask: Uint8Array;
-    pocketDist1: Float32Array;
-    plugDist1: Float32Array;
+    /** Pocket polygon (design units) for the polygon-native per-preset path. */
+    pocketMP: MultiPolygon;
+    /** Plug polygon (= canvas frame − pocket) for the polygon-native per-preset path. */
+    plugMP: MultiPolygon;
   }[] = [];
   let totalMachineTime = 0;
   let anyMachineTimeMissing = false;
@@ -1118,6 +1214,18 @@ ${plugStockOutlineSvg}
       layerMachineTimeMinutes,
     });
 
+    // Polygon representation for the per-preset path. The pocket
+    // comes straight from the layer's SVG (= layer mass in design
+    // units, including portions extend-for-registration may have
+    // hidden beneath later layers). The plug is the canvas frame
+    // minus the pocket — same semantics as the bitmap
+    // `plugMaskForDfm` complement, but without rasterization loss.
+    const targetLayerForMP = vector.layers.find(l => l.colorHex === colorHex);
+    const pocketMP: MultiPolygon = targetLayerForMP
+      ? svgFragmentToMultiPolygon(targetLayerForMP.svgFragment)
+      : [];
+    const plugMP = multiPolygonDifference(canvasBoxMP, pocketMP);
+
     overlayRebuildInputs.push({
       pocketBase,
       plugBase,
@@ -1128,8 +1236,8 @@ ${plugStockOutlineSvg}
       plugIsThinWall: plugAnalysis.isThinWall,
       pocketMask,
       plugMask: plugMaskForDfm,
-      pocketDist1: pocketAnalysis.dist1,
-      plugDist1:   plugAnalysis.dist1,
+      pocketMP,
+      plugMP,
     });
   }
 
@@ -1160,6 +1268,8 @@ ${plugStockOutlineSvg}
     angleDegrees: number;
     angleVbitWarning: boolean;
     angleFdrPx: number;
+    /** Same R in design units (= the unit Clipper offsets work in). */
+    angleFdrUnits: number;
     /** Worst per-side problem-area percent across all woods. */
     maxProblem: number;
     /** OR of `hasIsolatedComponent` across all woods × pocket/plug. */
@@ -1179,6 +1289,8 @@ ${plugStockOutlineSvg}
     const angleDeg = VBIT_PRESET_ANGLES[aIdx];
     const half = (angleDeg / 2) * (Math.PI / 180);
     const angleFdrPx = inlayDepthInches * Math.tan(half) * pixelsPerInch;
+    // Same R, expressed in design units for the polygon path.
+    const angleFdrUnits = inlayDepthInches * Math.tan(half) * designUnitsPerInch;
     const angleVbitWarning = grainDirection !== 'end' && angleDeg < MIN_VBIT_ANGLE_SIDE_GRAIN;
 
     let maxProblem = 0;
@@ -1187,13 +1299,15 @@ ${plugStockOutlineSvg}
 
     for (let wIdx = 0; wIdx < woods.length; wIdx++) {
       const inp = overlayRebuildInputs[wIdx];
-      const pocketStats = problemStatsForAngle(
-        inp.pocketMask, inp.pocketDist1, angleFdrPx, canvasW, canvasH, true,
+      const pocketStats = polygonProblemStatsBitmap(
+        inp.pocketMP, angleFdrUnits, canvasW, canvasH, polygonTransform,
+        { plugMode: false, designBounds, returnMask: true },
       );
-      // Plug analysis: outsideIsFullDepth = true. See `analyzeMask`
-      // call site for the rationale.
-      const plugStats = problemStatsForAngle(
-        inp.plugMask, inp.plugDist1, angleFdrPx, canvasW, canvasH, true, true,
+      // Plug analysis: bit can come in from off-canvas, so the
+      // canvas-perimeter band counts as a full-depth seed.
+      const plugStats = polygonProblemStatsBitmap(
+        inp.plugMP, angleFdrUnits, canvasW, canvasH, polygonTransform,
+        { plugMode: true, designBounds, returnMask: true },
       );
       if (pocketStats.percent > maxProblem) maxProblem = pocketStats.percent;
       if (plugStats.percent   > maxProblem) maxProblem = plugStats.percent;
@@ -1211,6 +1325,7 @@ ${plugStockOutlineSvg}
       angleDegrees: angleDeg,
       angleVbitWarning,
       angleFdrPx,
+      angleFdrUnits,
       maxProblem,
       anyIsolatedComponent,
       perWood,
@@ -1273,13 +1388,13 @@ ${plugStockOutlineSvg}
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketDepth',
-          promise: buildDepthMap(inp.pocketBase, canvasW, canvasH,
-            inp.pocketMask, inp.pocketDist1, data.angleFdrPx),
+          promise: buildPolygonDepthMap(inp.pocketBase, canvasW, canvasH,
+            inp.pocketMP, data.angleFdrUnits, polygonTransform),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'plugDepth',
-          promise: buildDepthMap(inp.plugBase, canvasW, canvasH,
-            inp.plugMask, inp.plugDist1, data.angleFdrPx, plugDepthMapFit),
+          promise: buildPolygonDepthMap(inp.plugBase, canvasW, canvasH,
+            inp.plugMP, data.angleFdrUnits, polygonTransform, plugDepthMapFit),
         });
       }
     }

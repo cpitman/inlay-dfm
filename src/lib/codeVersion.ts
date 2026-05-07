@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.9';
+export const CODE_VERSION = '2026-05-07.10';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'fillEnclosedHoles: partial-fill of partially-covered holes via boundary simplification + 0.13" hole margin';
+  'Phase 5 per-preset pocket analysis is polygon-native (Minkowski offsets); per-preset depth map renders polygon offset levels; dist1 retired from Phase 5';
