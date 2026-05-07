@@ -100,7 +100,7 @@ describe('computePlugStockUsageSqIn', () => {
   });
 
   it('zero growth still produces an OBB around each component', () => {
-    // With growthInches=0, dilation is a no-op (the mask itself is the
+    // With marginInches=0, dilation is a no-op (the mask itself is the
     // "dilated" set). A single 1×1" plug → 1 sq in OBB.
     const w = 300, h = 300;
     const mask = emptyMask(w, h);
@@ -108,5 +108,30 @@ describe('computePlugStockUsageSqIn', () => {
     const usage = computePlugStockUsageSqIn(mask, w, h, PPI, 0);
     expect(usage).toBeGreaterThan(0.95);
     expect(usage).toBeLessThan(1.05);
+  });
+
+  it('smaller margin keeps regions disjoint that would merge at a larger margin', () => {
+    // Two 1×1" plugs separated by 0.6". At 0.5" margin they almost-
+    // merge (gap < 2 × 0.5 = 1.0"); at 0.2" margin they stay clearly
+    // separate (gap > 2 × 0.2 = 0.4"). Per-component OBB sum at the
+    // smaller margin should be markedly less than at the larger.
+    const w = 500, h = 250;
+    const mask = emptyMask(w, h);
+    stampRect(mask, w, 50, 75, 100, 100);    // (0.5", 0.75")
+    stampRect(mask, w, 210, 75, 100, 100);   // (2.1", 0.75"), gap = 0.6"
+
+    const usageLarge = computePlugStockUsageSqIn(mask, w, h, PPI, 0.5);
+    const usageSmall = computePlugStockUsageSqIn(mask, w, h, PPI, 0.2);
+
+    // 0.5" margin: dilated regions touch (gap 0.6 < 2 × 0.5), so single
+    // OBB ~ (2.6 + 2 × 0.5) × (1 + 2 × 0.5) = 3.6 × 2.0 ≈ 7.2 sq in.
+    expect(usageLarge).toBeGreaterThan(6.8);
+    expect(usageLarge).toBeLessThan(7.6);
+    // 0.2" margin: two disjoint OBBs ~ 2 × (1.4 × 1.4) = 2 × 1.96 ≈
+    // 3.92 sq in. Sum is markedly smaller — about half — even though
+    // the geometry didn't change.
+    expect(usageSmall).toBeGreaterThan(3.5);
+    expect(usageSmall).toBeLessThan(4.3);
+    expect(usageSmall).toBeLessThan(usageLarge * 0.7);
   });
 });

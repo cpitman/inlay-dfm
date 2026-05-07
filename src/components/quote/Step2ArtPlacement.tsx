@@ -115,6 +115,31 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
     [designs, currentSide],
   );
 
+  // Per-design original-colors data URLs. Used as a thumbnail above
+  // each design's wood-picker so the user can correlate detected
+  // colors to design regions. Computed once per design (svgString is
+  // immutable post-parse) — keyed by design id.
+  const originalSvgUrls = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of designs) {
+      // Encode the SVG text as a data URL. encodeURIComponent handles
+      // any non-ASCII / reserved chars in the SVG.
+      m.set(d.id, `data:image/svg+xml;utf8,${encodeURIComponent(d.vector.svgString)}`);
+    }
+    return m;
+  }, [designs]);
+
+  // Which color (per design) is currently being interacted with in
+  // its wood-picker. Drives the outline highlight overlay in the
+  // larger preview so the user can see which region a row maps to.
+  const [focusedColor, setFocusedColor] = useState<Record<string, string | null>>({});
+  const onFocusColor = useCallback((designId: string, colorHex: string | null) => {
+    setFocusedColor(prev => {
+      if (prev[designId] === colorHex) return prev;
+      return { ...prev, [designId]: colorHex };
+    });
+  }, []);
+
   // Drag state — at most one design is dragged at a time.
   const [drag, setDrag] = useState<{ designId: string; placement: Placement; overlapping: boolean } | null>(null);
   const dragStart = useRef<DragStart | null>(null);
@@ -438,6 +463,40 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                 draggable={false}
                 onMouseDown={isActive ? handleMouseDown(d.id, 'move') : undefined}
               />
+              {focusedColor[d.id] && (() => {
+                const layer = d.vector.layers.find(l => l.colorHex === focusedColor[d.id]);
+                if (!layer) return null;
+                // Stroke-only render of the focused color's geometry,
+                // overlaid on the composite. The CSS is scoped to a
+                // unique class so it doesn't leak to other SVGs on the
+                // page (inline SVG `<style>` matches against the whole
+                // document — without scoping, the FileUpload icon and
+                // any other SVGs would also fill: none + paint amber).
+                // Stroke kept thin (1.5 px) so it doesn't visually
+                // mask wood-color changes happening underneath.
+                const html =
+                  `<style>.icp-outline-highlight * { fill: none !important; stroke: #fbbf24; stroke-width: 1.5; vector-effect: non-scaling-stroke; }</style>` +
+                  `<g class="icp-outline-highlight">${layer.svgFragment}</g>`;
+                return (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox={d.vector.viewBox}
+                    preserveAspectRatio="none"
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: '50%', top: '50%',
+                      width:  `${innerWidthPct}%`,
+                      height: `${innerHeightPct}%`,
+                      maxWidth: 'none', maxHeight: 'none',
+                      transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+                      transformOrigin: 'center center',
+                      overflow: 'visible',
+                      filter: 'drop-shadow(0 0 1px rgba(0,0,0,0.8))',
+                    }}
+                    dangerouslySetInnerHTML={{ __html: html }}
+                  />
+                );
+              })()}
               {isActive && (['resize-tl', 'resize-tr', 'resize-bl', 'resize-br'] as DragMode[]).map(mode => {
                 const top    = mode === 'resize-tl' || mode === 'resize-tr' ? '-5px' : 'auto';
                 const bottom = mode === 'resize-bl' || mode === 'resize-br' ? '-5px' : 'auto';
@@ -501,9 +560,11 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
                 <DesignCard
                   key={d.id}
                   design={d}
+                  originalSvgUrl={originalSvgUrls.get(d.id)}
                   onRemove={() => onRemoveDesign(d.id)}
                   onUpdateWoodConfig={(colorHex, patch) => onUpdateDesignWoodConfig(d.id, colorHex, patch)}
                   onEditText={d.textSpec ? () => onRequestEditText(d.id) : undefined}
+                  onFocusColor={hex => onFocusColor(d.id, hex)}
                 />
               ))}
             </div>
@@ -580,15 +641,23 @@ export default function Step2ArtPlacement(props: Step2ArtPlacementProps) {
  */
 function DesignCard({
   design,
+  originalSvgUrl,
   onRemove,
   onUpdateWoodConfig,
   onEditText,
+  onFocusColor,
 }: {
   design: Design;
+  /** Data URL of the design's original-colors SVG, for the wood-picker
+   *  thumbnail. Skipped for text designs (single-color, no thumbnail
+   *  needed). */
+  originalSvgUrl?: string;
   onRemove: () => void;
   onUpdateWoodConfig: (colorHex: string, patch: Partial<WoodConfig>) => void;
   /** Defined for text designs only — opens the edit dialog. */
   onEditText?: () => void;
+  /** Called when a wood-picker row is hovered/focused. */
+  onFocusColor?: (colorHex: string | null) => void;
 }) {
   const isTextDesign = !!design.textSpec;
   const displayName = isTextDesign && design.textSpec
@@ -620,6 +689,9 @@ function DesignCard({
         <InlayColorPicker
           woodConfigs={design.woodConfigs}
           onUpdate={onUpdateWoodConfig}
+          originalSvgUrl={originalSvgUrl}
+          thumbnailAspect={design.vector.naturalWidth / design.vector.naturalHeight}
+          onFocusColor={onFocusColor}
         />
       )}
       {isTextDesign && design.textSpec && (

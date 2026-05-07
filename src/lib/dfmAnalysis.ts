@@ -1084,11 +1084,15 @@ ${plugStockOutlineSvg}
       plugBase = await renderSvgToCanvas(plugBaseSvg, canvasW, canvasH);
     }
     // Plug-stock packing estimate: per-component OBB sum of the plug
-    // shapes dilated by ~0.51" cutting margin. Drives the fractional
-    // inlay cost in the guided quote pipeline; harmless to compute for
-    // the expert flow.
+    // shapes dilated by the user's plug margin. Disjoint plug regions
+    // far apart enough to be cut from separate stock pieces (i.e.,
+    // their dilated versions don't intersect) contribute their own
+    // smaller OBB instead of being absorbed into one big design-wide
+    // hull. Drives the fractional inlay cost in the guided quote
+    // pipeline; harmless to compute for the expert flow.
     const plugStockUsageSqIn = computePlugStockUsageSqIn(
       pocketMask, canvasW, canvasH, pixelsPerInch,
+      settings.plugStockMarginInches,
     );
 
     woods.push({

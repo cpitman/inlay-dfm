@@ -9,10 +9,16 @@ import { dilateMask } from './maskOps';
  * than the full per-sheet price.
  *
  * Algorithm:
- *   1. Dilate `pocketMask` by `growthInches` (Minkowski sum with a
- *      disc — implemented via EDT thresholding). This bakes in the
- *      cutting margin between adjacent plug pieces.
- *   2. Find connected components of the dilated mask.
+ *   1. Dilate `pocketMask` by `marginInches` (Minkowski sum with a
+ *      disc — implemented via EDT thresholding). This is the user-
+ *      configured per-plug margin: each plug needs `marginInches` of
+ *      stock around it for cutting clearance, so two plugs whose
+ *      original geometry is within `2 × marginInches` cannot be cut
+ *      from separate stock pieces — they must share one piece.
+ *   2. Find connected components of the dilated mask. Each component
+ *      represents one chunk of stock material — disjoint components
+ *      are cut from separate stock and inlaid as separate pieces,
+ *      saving total material.
  *   3. For each component, compute the convex hull (Andrew's monotone
  *      chain over the component's boundary points), then the minimum-
  *      area enclosing rectangle (oriented bounding box) by testing
@@ -20,16 +26,17 @@ import { dilateMask } from './maskOps';
  *   4. Sum the OBB areas across components.
  *
  * The OBB sum approximates how the plug pieces would pack onto a
- * rectangular blank when nested optimally. Returns square inches.
+ * rectangular blank when nested optimally — modeled as one rectangle
+ * per disjoint plug. Returns square inches.
  */
 export function computePlugStockUsageSqIn(
   pocketMask: Uint8Array,
   canvasW: number,
   canvasH: number,
   pixelsPerInch: number,
-  growthInches: number = 0.51,
+  marginInches: number,
 ): number {
-  const growthPx = growthInches * pixelsPerInch;
+  const growthPx = marginInches * pixelsPerInch;
   const ppiSq = pixelsPerInch * pixelsPerInch;
 
   // Step 1: dilate pocketMask by growthPx (Minkowski sum with a disc).

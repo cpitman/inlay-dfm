@@ -266,14 +266,14 @@ export function buildMachiningTimeMatrix(params: {
   const layerCuttingTimes: number[][][] = layers.map(() =>
     strategies.map(() => vbits.map(() => 0)),
   );
+  // Compute cutting time for every (strategy, v-bit) cell, including
+  // infeasible v-bits. The picker already filters infeasible v-bits via
+  // `matrix.vbits[vi].feasible`; computing the time anyway lets the
+  // optimizer fall back to a rough estimate (using the smallest v-bit)
+  // when no preset is feasible — without that, the price drops to "no
+  // machining" which sets buyer expectations far too low.
   const cuttingTimes: number[][] = strategies.map((strategy, si) =>
     vbits.map((v, vi) => {
-      if (!v.feasible) {
-        // Mirror NaN through every layer's slot so the picker sees the
-        // infeasibility at the per-layer level.
-        for (let li = 0; li < layers.length; li++) layerCuttingTimes[li][si][vi] = NaN;
-        return NaN;
-      }
       let total = 0;
       for (let li = 0; li < layers.length; li++) {
         const sides = layerSides[li];
@@ -440,6 +440,66 @@ export function pickPerLayerBitPlan(
     const total = cutting + overhead;
 
     if (best === null || total < best.totalTimeMinutes) {
+      best = {
+        strategyIdx: si,
+        strategyDiameters: strategy.diameters,
+        perLayerVbitIdxs,
+        perLayerVbitAngles: perLayerVbitIdxs.map(vi => matrix.vbits[vi].angleDegrees),
+        distinctVbitCount,
+        cuttingTimeMinutes: cutting,
+        toolChangeOverheadMinutes: overhead,
+        totalTimeMinutes: total,
+      };
+    }
+  }
+  return best;
+}
+
+/**
+ * Build a "rough" PerLayerBitPlan locked to a single v-bit index for
+ * every layer, ignoring feasibility. Used as a fallback when
+ * `pickPerLayerBitPlan` returns null (no preset is feasible for some
+ * layer): we still want the price quote to include a machining-time
+ * estimate rather than zero, otherwise the buyer sees a price that
+ * implies ~0 cutting time and forms expectations far below reality.
+ *
+ * Pick `vbitIdx = 0` (the smallest = sharpest = slowest preset) for
+ * the most-conservative time estimate — a sharp bit takes the longest
+ * because it removes less material per pass.
+ *
+ * The strategy is chosen to minimize total time at the fixed v-bit
+ * (same min-over-strategies as `pickPerLayerBitPlan`). Returns null
+ * iff `vbitIdx` has non-finite cutting times for some layer, or the
+ * matrix is empty.
+ */
+export function pickRoughBitPlan(
+  matrix: import('@/types').MachiningTimeMatrix,
+  toolChangeMinutes: number,
+  vbitIdx: number = 0,
+): PerLayerBitPlan | null {
+  const numLayers = matrix.layerCuttingTimes.length;
+  if (numLayers === 0) return null;
+  if (vbitIdx < 0 || vbitIdx >= matrix.vbits.length) return null;
+
+  let best: PerLayerBitPlan | null = null;
+  for (let si = 0; si < matrix.strategies.length; si++) {
+    const strategy = matrix.strategies[si];
+    let cutting = 0;
+    let allFinite = true;
+    for (let li = 0; li < numLayers; li++) {
+      const t = matrix.layerCuttingTimes[li][si][vbitIdx];
+      if (!isFinite(t)) { allFinite = false; break; }
+      cutting += t;
+    }
+    if (!allFinite) continue;
+
+    const distinctVbitCount = 1;
+    const bitsLoaded = strategy.diameters.length + distinctVbitCount;
+    const overhead = bitsLoaded * toolChangeMinutes;
+    const total = cutting + overhead;
+
+    if (best === null || total < best.totalTimeMinutes) {
+      const perLayerVbitIdxs = Array<number>(numLayers).fill(vbitIdx);
       best = {
         strategyIdx: si,
         strategyDiameters: strategy.diameters,

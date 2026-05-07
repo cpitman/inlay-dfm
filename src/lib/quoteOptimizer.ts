@@ -8,7 +8,7 @@ import { fillConvexHullCovered } from './fillConvexHullCovered';
 import { removeFullyOccludedRegions } from './removeOccludedRegions';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
-import { pickPerLayerBitPlan, jointToolChangeOverhead, type PerLayerBitPlan } from './machiningTime';
+import { pickPerLayerBitPlan, pickRoughBitPlan, jointToolChangeOverhead, type PerLayerBitPlan } from './machiningTime';
 import { EMPTY_SIDE_AGGREGATE, type SideAggregate } from './pricing';
 
 /** Manual tool change overhead used by the guided experience. */
@@ -51,6 +51,14 @@ export interface DesignOptimizationResult {
    * irreducibly non-manufacturable.
    */
   bitPlan: PerLayerBitPlan | null;
+  /**
+   * Fallback bit plan locked to the smallest v-bit (sharpest = slowest).
+   * Populated only when `bitPlan === null` — gives the pricing layer a
+   * conservative machining-time estimate so a non-manufacturable design
+   * doesn't price as if it took zero machine time. The "approximate
+   * quote" banner still shows because `noFeasibleAngle` stays true.
+   */
+  roughBitPlan: PerLayerBitPlan | null;
   /** True iff a fill-holes pass ran for this design. */
   appliedFill: boolean;
 }
@@ -232,6 +240,13 @@ async function runSingleDesignOptimization(
     perLayerPresetAnalysis,
     TOOL_CHANGE_MINUTES_MANUAL,
   );
+  // Fallback rough plan (smallest v-bit, no feasibility check). Only
+  // computed when the design is irreducibly non-manufacturable — it
+  // gives the pricing layer a conservative machining-time number so a
+  // non-feasible design doesn't price as if cutting took zero minutes.
+  const roughBitPlan = bitPlan === null
+    ? pickRoughBitPlan(result.machiningTimeTable, TOOL_CHANGE_MINUTES_MANUAL)
+    : null;
 
   return {
     designId: design.id,
@@ -241,6 +256,7 @@ async function runSingleDesignOptimization(
     placement: design.placement,
     result,
     bitPlan,
+    roughBitPlan,
     appliedFill,
   };
 }
@@ -267,13 +283,19 @@ function aggregateSide(designs: DesignOptimizationResult[]): SideAggregate {
   if (designs.length === 0) return EMPTY_SIDE_AGGREGATE;
 
   let totalCuttingMinutes = 0;
-  let anyInfeasible = false;
+  let missingTime = false;
   const speciesSet = new Set<string>();
   const plugStockUsageBySpecies = new Map<string, number>();
 
   for (const d of designs) {
-    if (d.bitPlan === null) anyInfeasible = true;
-    else                    totalCuttingMinutes += d.bitPlan.cuttingTimeMinutes;
+    // Use the feasible bit plan when available; otherwise fall back to
+    // the rough plan (smallest v-bit) so a non-manufacturable design
+    // contributes a conservative machine-time estimate to the price
+    // rather than zero. The `noFeasibleAngle` flag (computed in
+    // `aggregate`) still drives the "approximate quote" banner.
+    const plan = d.bitPlan ?? d.roughBitPlan;
+    if (plan === null) missingTime = true;
+    else               totalCuttingMinutes += plan.cuttingTimeMinutes;
 
     for (let i = 0; i < d.woodConfigs.length; i++) {
       const wc = d.woodConfigs[i];
@@ -289,13 +311,17 @@ function aggregateSide(designs: DesignOptimizationResult[]): SideAggregate {
     }
   }
 
+  // Tool-change overhead unions across designs. Use the feasible plan
+  // when available (more-accurate distinct-v-bit count); for fully-
+  // infeasible designs, fall back to the rough plan so the overhead
+  // estimate is computed from a real bit plan rather than null.
   const jointToolChangeMinutes = jointToolChangeOverhead(
-    designs.map(d => d.bitPlan),
+    designs.map(d => d.bitPlan ?? d.roughBitPlan),
     TOOL_CHANGE_MINUTES_MANUAL,
   );
 
   return {
-    totalCuttingMinutes: anyInfeasible ? NaN : totalCuttingMinutes,
+    totalCuttingMinutes: missingTime ? NaN : totalCuttingMinutes,
     jointToolChangeMinutes,
     uniqueSpeciesCount: speciesSet.size,
     plugStockUsageBySpecies,
