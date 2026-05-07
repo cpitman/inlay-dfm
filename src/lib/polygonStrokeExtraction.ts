@@ -1,20 +1,23 @@
 /**
- * Polygon-native stroke layer extraction. Replaces the bitmap-
- * render-trace-dilate pipeline with direct SVG parsing + Clipper
- * polyline offsets. Eliminates the 2-px chord-error overshoot
- * `STROKE_TRACE_OVERSHOOT_PX` was fudging for.
+ * Polygon-native stroke layer extraction. Two entry points:
  *
- * Pipeline:
- *   1. Walk the SVG in document order, extracting each element's
- *      geometry (subpaths with open/closed flag) and stroke styling
- *      (width, linecap, linejoin) + fill state.
- *   2. For each stroked element, offset the polyline by `width/2`
- *      via Clipper to produce its stroke band — exact polygon
- *      geometry, not a rasterized approximation.
- *   3. Walk top-down (= reverse z-order), accumulating a "covered
- *      from above" buffer. Each stroke's visible part is its band
- *      minus the buffer; each element's fill + stroke contributes
- *      to the buffer for elements drawn before it.
+ *   - `extractStrokesPolygonViaFlatten(svgText)` — runtime path.
+ *     Pre-flattens the SVG via the browser DOM (`svgFlatten.ts`)
+ *     to resolve `transform`, `<g>` inheritance, and CSS
+ *     stylesheets, then runs the same processing as below.
+ *
+ *   - `extractStrokesPolygon(svgText)` — Node-friendly fallback.
+ *     Regex-parses the SVG element-by-element. Does NOT resolve
+ *     transforms / group inheritance / CSS — only safe on
+ *     pre-flattened SVGs (= what the tests use).
+ *
+ * Both feed `processStrokeElements`, which:
+ *   1. For each stroked element, offsets the polyline by `width/2`
+ *      via Clipper to produce its stroke band.
+ *   2. Walks top-down (= reverse z-order), accumulating a "covered
+ *      from above" buffer. Each stroke's visible part = band minus
+ *      the buffer; each element's fill + stroke contributes to the
+ *      buffer for elements drawn before it.
  *
  * Output:
  *   - `allStrokesMP`: union of every stroke band, regardless of
@@ -23,24 +26,6 @@
  *   - `visibleStrokesMP`: stroke pixels topmost in z-order. Used to
  *     punch through the fill layers when the user opts to inlay
  *     strokes (so the outline visibly pierces through fills).
- *
- * **Status — not currently wired into `extractStrokeLayer`.** Real-
- * world clipart SVGs were producing offset layers and thin/missing
- * strokes (v2026-05-07.12) because this parser ignores three SVG
- * features the bitmap renderer handled correctly:
- *
- *   1. `transform="..."` attributes on individual elements.
- *   2. `<g>` group inheritance — children inherit `stroke`,
- *      `stroke-width`, `transform`, etc. from ancestor `<g>` tags.
- *   3. CSS stylesheets — `<style>` blocks defining selectors that
- *      apply to elements by class / id / tag.
- *
- * For typical hand-drawn clipart these three account for most of
- * the stroke-styling. Until they're handled, this module is
- * exported for future work but `strokeDetection.ts` keeps the
- * bitmap path. The polygon-native helpers (
- * `multiPolygonOffsetOpenPolyline`, `multiPolygonOffsetClosedLine`)
- * are stable building blocks regardless.
  */
 
 import svgpath from 'svgpath';
@@ -407,11 +392,12 @@ export interface PolygonStrokeExtractionResult {
 }
 
 /**
- * Walk the parsed SVG top-down, accumulating all-strokes and
- * visible-strokes (= stroke band minus everything drawn after it).
+ * Pure: walk a list of parsed (= already flattened, attribute-
+ * resolved, transform-applied) elements top-down, accumulating
+ * all-strokes and visible-strokes. Both the regex parser and the
+ * DOM flattener feed this.
  */
-export function extractStrokesPolygon(svgText: string): PolygonStrokeExtractionResult {
-  const elements = parseSvgStrokeElements(svgText);
+export function processStrokeElements(elements: readonly ParsedSvgElement[]): PolygonStrokeExtractionResult {
   const allStrokesParts: MultiPolygon[] = [];
   const visibleParts: MultiPolygon[] = [];
   let coveredFromAbove: MultiPolygon = [];
@@ -441,4 +427,34 @@ export function extractStrokesPolygon(svgText: string): PolygonStrokeExtractionR
     allStrokesMP: allStrokesParts.length === 0 ? [] : multiPolygonUnionAll(allStrokesParts),
     visibleStrokesMP: visibleParts.length === 0 ? [] : multiPolygonUnionAll(visibleParts),
   };
+}
+
+/**
+ * Sync regex-based extraction. Does NOT resolve transforms / group
+ * inheritance / CSS — only safe on pre-flattened SVGs. Used by
+ * tests; runtime should call `extractStrokesPolygonViaFlatten`.
+ */
+export function extractStrokesPolygon(svgText: string): PolygonStrokeExtractionResult {
+  return processStrokeElements(parseSvgStrokeElements(svgText));
+}
+
+/**
+ * Async DOM-based extraction. Pre-flattens the SVG via
+ * `flattenSvg` (browser-only) so transforms, group inheritance,
+ * and CSS stylesheets are all resolved before processing. Use this
+ * at runtime.
+ */
+export async function extractStrokesPolygonViaFlatten(svgText: string): Promise<PolygonStrokeExtractionResult> {
+  const { flattenSvg } = await import('./svgFlatten');
+  const flattened = await flattenSvg(svgText);
+  const elements: ParsedSvgElement[] = flattened.map(f => ({
+    zIndex: f.zIndex,
+    subpaths: f.subpaths,
+    hasStroke: f.hasStroke,
+    strokeWidth: f.strokeWidth,
+    strokeLinecap: f.strokeLinecap,
+    strokeLinejoin: f.strokeLinejoin,
+    hasFill: f.hasFill,
+  }));
+  return processStrokeElements(elements);
 }

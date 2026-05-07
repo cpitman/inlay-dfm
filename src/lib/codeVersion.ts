@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.13';
+export const CODE_VERSION = '2026-05-07.14';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Revert strokeDetection to bitmap path: polygon parser missed transform/group/CSS attributes, producing offset layers and thin/missing strokes; polygonStrokeExtraction kept as future work';
+  'Polygon stroke extraction reinstated with browser-DOM pre-flatten (getCTM + getComputedStyle resolve transforms / group inheritance / CSS); 2-px overshoot retired again';
