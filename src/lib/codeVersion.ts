@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.5';
+export const CODE_VERSION = '2026-05-08.6';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'runDfmAnalysisLite polygon-native: parses svgFragment, walks PolyTree for fully-covered holes (eroded-empty predicate). Drops per-layer rasterization, alignment detection (unused by optimizer), and the pocketMasks/canvas/pixelsPerInch result fields the optimizer never consumed.';
+  'Phase E dead-code cleanup: remove analyzeMask, problemStatsForAngle, applyOutsideFullDepthSeeds, monotonicAscentReachable, carvedHasComponentWithoutFullDepth, machiningTimeForMask, buildMachiningTimeMatrix, computePlugStockMask, computePlugCarvedMask, rasterizeConvexPolygon, morphologicalOpening (and their tests). All replaced by polygon equivalents in earlier phases.';
