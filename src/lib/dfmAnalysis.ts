@@ -18,7 +18,7 @@ import {
 import { detectAlignmentRiskPolygon } from './polygonAlignmentRisk';
 import { polygonThinWalls } from './polygonThinWalls';
 
-const DEFAULT_CANVAS_WIDTH = 1200;
+export const DEFAULT_CANVAS_WIDTH = 1200;
 const THIN_WALL_THRESHOLD_INCHES = 0.05;
 const MIN_THIN_WALL_AREA_SQ_IN = 0.25;
 const MIN_VBIT_ANGLE_SIDE_GRAIN = 60;
@@ -148,89 +148,10 @@ interface DepthMapPlugFit {
   inlayDepthInches: number;
 }
 
-async function buildDepthMap(
-  base: OffscreenCanvas,
-  canvasW: number,
-  canvasH: number,
-  carvedMask: Uint8Array,
-  dist1: Float32Array,
-  fullDepthRadiusPx: number,
-  plugFit?: DepthMapPlugFit,
-): Promise<string> {
-  const oc = new OffscreenCanvas(canvasW, canvasH);
-  const ctx = oc.getContext('2d')!;
-  ctx.drawImage(base, 0, 0);
-  const img = ctx.getImageData(0, 0, canvasW, canvasH);
-  const d = img.data;
-
-  // Without plugFit: ratio in [0,1], red → green.
-  // With plugFit on plug side: ratio can exceed 1 in the flat-bottom region
-  // (effective depth > inlayDepth). Render that range with a cyan tint so
-  // the step-down at the foot of the slope is visually distinguishable.
-  const inlay = plugFit?.inlayDepthInches ?? 0;
-  const glueGap = plugFit?.glueGapInches ?? 0;
-  const surfaceGap = plugFit?.surfaceGapInches ?? 0;
-  // ratio_max for color saturation; floor at 1 so color stays in normal
-  // gradient when surfaceGap is 0.
-  const overshootRatio = inlay > 0 ? Math.max(0, surfaceGap / inlay) : 0;
-
-  for (let i = 0, n = canvasW * canvasH; i < n; i++) {
-    if (!carvedMask[i]) continue;
-    const baseRatio = dist1[i] / fullDepthRadiusPx; // 0 at wall, 1 at full-depth boundary
-
-    let r: number, g: number, b: number, a: number;
-
-    if (!plugFit) {
-      const ratio = Math.min(1, baseRatio);
-      r = Math.round(220 - 180 * ratio);
-      g = Math.round(40  + 160 * ratio);
-      b = 30;
-      a = 220;
-    } else {
-      // Effective depth in inches; capped/floored.
-      const baseDepth = Math.min(1, baseRatio) * inlay;
-      let effDepth: number;
-      if (baseRatio >= 1) {
-        // Flat-bottom region: drop by glueGap then add surfaceGap (uniform).
-        effDepth = Math.max(0, inlay - glueGap + surfaceGap);
-      } else {
-        // Tapered region: just drop by glueGap (clamp at no-carve).
-        effDepth = Math.max(0, baseDepth - glueGap);
-      }
-      const ratio = inlay > 0 ? effDepth / inlay : 0;
-
-      if (ratio <= 1) {
-        // Standard red → green for [0, 1].
-        const r0 = Math.min(1, ratio);
-        r = Math.round(220 - 180 * r0);
-        g = Math.round(40  + 160 * r0);
-        b = 30;
-      } else {
-        // Above nominal full depth — surface-gap region. Lerp from full
-        // green toward a green-cyan tint scaled by how far past 1 we are.
-        const over = Math.min(1, (ratio - 1) / Math.max(overshootRatio, 1e-6));
-        r = Math.round(40   - 30  * over);  // 40 → 10
-        g = Math.round(200);
-        b = Math.round(30   + 180 * over);  // 30 → 210 (cyan-ward)
-      }
-      a = 220;
-    }
-
-    d[i*4]   = r;
-    d[i*4+1] = g;
-    d[i*4+2] = b;
-    d[i*4+3] = a;
-  }
-  ctx.putImageData(img, 0, 0);
-  return canvasToDataUrl(oc);
-}
-
 /**
- * Polygon-native per-preset depth map. Renders successive inward
- * offsets of `carvedMP` in increasingly green tones over `base` so
- * the visible color at each pixel encodes the bit's reachable depth
- * there. Replaces `buildDepthMap` for the per-preset path; the
- * per-side path still uses the bitmap version.
+ * Polygon-native depth map. Renders successive inward offsets of
+ * `carvedMP` in increasingly green tones over `base` so the visible
+ * color at each pixel encodes the bit's reachable depth there.
  */
 async function buildPolygonDepthMap(
   base: OffscreenCanvas,
@@ -406,12 +327,10 @@ export async function runDfmAnalysis(
   const canvasW = canvasWidth;
   const canvasH = Math.max(1, Math.round(canvasWidth * aspect));
   const pixelsPerInch = canvasW / designWidthInches;
-  const fullDepthRadiusPx = fullDepthRadiusInches * pixelsPerInch;
-  const thinWallThresholdPx = THIN_WALL_THRESHOLD_INCHES * pixelsPerInch;
-  const alignThresholdPx = ALIGNMENT_THRESHOLD_INCHES * pixelsPerInch;
 
-  // Same R, expressed in design units, for the polygon-native
-  // per-side and per-preset paths.
+  // Polygon-native R values in design units (= the unit Clipper
+  // offsets work in). Threshold + min-area constants in design
+  // units squared.
   const fullDepthRadiusUnits = fullDepthRadiusInches * (vector.naturalWidth / designWidthInches);
   const thinWallThresholdUnits = THIN_WALL_THRESHOLD_INCHES * (vector.naturalWidth / designWidthInches);
   const thinWallMinAreaSqUnits = MIN_THIN_WALL_AREA_SQ_IN * (vector.naturalWidth / designWidthInches) ** 2;
@@ -455,8 +374,6 @@ export async function runDfmAnalysis(
     const layerSvg = layerToStandaloneSvg(layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight);
     perLayerBases.set(layer.colorHex, await renderSvgToCanvas(layerSvg, canvasW, canvasH));
   }
-
-  const args = [canvasW, canvasH, pixelsPerInch, fullDepthRadiusPx, thinWallThresholdPx, grainDirection, vbitAngleDegrees] as const;
 
   const plugDepthMapFit: DepthMapPlugFit | undefined =
     (settings.plugGlueGapInches > 0 || settings.plugSurfaceGapInches > 0)
@@ -591,10 +508,6 @@ export async function runDfmAnalysis(
   // -----------------------------------------------------------------------
   // Phase 4: Run DFM analysis and assemble WoodAnalysis entries.
   // -----------------------------------------------------------------------
-  // Plug-stock margin in pixels. Used to dilate each pocket's convex hull
-  // into the modeled plug stock for the plug-side time computation.
-  const plugMarginPx = settings.plugStockMarginInches * pixelsPerInch;
-
   // For each layer i, the union of pocket polygons for all layers j > i.
   // Used to detect "fillable" holes — holes in layer i fully covered by
   // some combination of later layers (so filling them in i changes
@@ -878,8 +791,8 @@ ${plugStockOutlineSvg}
   interface PresetData {
     angleDegrees: number;
     angleVbitWarning: boolean;
-    angleFdrPx: number;
-    /** Same R in design units (= the unit Clipper offsets work in). */
+    /** R = inlayDepth × tan(angle/2), in design units (= the unit
+     *  Clipper offsets work in). */
     angleFdrUnits: number;
     /** Worst per-side problem-area percent across all woods. */
     maxProblem: number;
@@ -899,8 +812,7 @@ ${plugStockOutlineSvg}
     if (cached) return cached;
     const angleDeg = VBIT_PRESET_ANGLES[aIdx];
     const half = (angleDeg / 2) * (Math.PI / 180);
-    const angleFdrPx = inlayDepthInches * Math.tan(half) * pixelsPerInch;
-    // Same R, expressed in design units for the polygon path.
+    // R in design units (Clipper offsets operate in design units).
     const angleFdrUnits = inlayDepthInches * Math.tan(half) * designUnitsPerInch;
     const angleVbitWarning = grainDirection !== 'end' && angleDeg < MIN_VBIT_ANGLE_SIDE_GRAIN;
 
@@ -935,7 +847,6 @@ ${plugStockOutlineSvg}
     const data: PresetData = {
       angleDegrees: angleDeg,
       angleVbitWarning,
-      angleFdrPx,
       angleFdrUnits,
       maxProblem,
       anyIsolatedComponent,

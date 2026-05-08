@@ -41,7 +41,6 @@ const SCREENING_SETTINGS: DFMSettings = {
   vbitAngleDegrees: 60,
   inlayDepthInches: 0.125,
   grainDirection: 'horizontal',
-  analysisResolution: 'low',  // 600px wide canvas — fast for batch screening.
   clearanceBitDiameterInches: 0.25,
   clearanceStrategy: [0.25],
   toolChangeMinutes: 5,

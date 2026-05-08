@@ -18,16 +18,11 @@ export interface AlignmentIssue {
   affectedPercent: number;
 }
 
-/** Analysis raster width preset. Higher resolution detects finer features at quadratic memory/CPU cost. */
-export type AnalysisResolution = 'low' | 'default' | 'high';
-
 export interface DFMSettings {
   designWidthInches: number;
   vbitAngleDegrees: number;
   inlayDepthInches: number;
   grainDirection: GrainDirection;
-  /** Pixel width of the analysis canvas — controls feature-detection resolution. */
-  analysisResolution: AnalysisResolution;
   /**
    * Diameter of the "primary" clearance bit (1/8", 1/4", or 1/2") used by
    * per-wood machine-time displays on Step 2 / Step 3. Step 4's matrix

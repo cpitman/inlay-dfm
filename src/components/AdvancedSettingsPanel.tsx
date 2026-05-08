@@ -1,18 +1,12 @@
 'use client';
 
-import type { DFMSettings, AnalysisResolution } from '@/types';
+import type { DFMSettings } from '@/types';
 import { Field, NumberInput } from './form/FormPrimitives';
 
 interface AdvancedSettingsPanelProps {
   settings: DFMSettings;
   onChange: (s: DFMSettings) => void;
 }
-
-const RESOLUTION_OPTIONS: { key: AnalysisResolution; label: string; px: number }[] = [
-  { key: 'low',     label: 'Low',     px: 600  },
-  { key: 'default', label: 'Default', px: 1200 },
-  { key: 'high',    label: 'High',    px: 2400 },
-];
 
 /**
  * Defaults that affect analysis math but rarely need tuning per design.
@@ -35,27 +29,6 @@ export default function AdvancedSettingsPanel({ settings, onChange }: AdvancedSe
           step={0.0625}
           unit="inches"
         />
-      </Field>
-
-      <Field
-        label="Analysis Resolution"
-        hint="Higher resolution detects finer features but uses ~4× memory and time per step."
-      >
-        <div className="flex gap-2">
-          {RESOLUTION_OPTIONS.map((r) => (
-            <button
-              key={r.key}
-              onClick={() => set('analysisResolution', r.key)}
-              title={`${r.px}px wide`}
-              className={`flex-1 py-1.5 rounded-md text-sm font-medium border transition-colors
-                ${settings.analysisResolution === r.key
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-slate-700 border-slate-600 text-slate-300 hover:border-slate-400'}`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
       </Field>
     </div>
   );

@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.10';
+export const CODE_VERSION = '2026-05-08.11';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'SVG export polygon-native: buildUnionedSvgString uses svgFragmentToMultiPolygon + multiPolygonToSvgFragment directly (Clipper self-union merges per-layer overlaps). Drops the rasterize-then-marching-squares round-trip; deletes maskToPath.ts, rasterizeLayerToBinaryMask, renderSvgToCanvasTransparent, withInjectedStyle, MASK_ALPHA_THRESHOLD.';
+  'Hardcode canvas resolution to 1200 px everywhere; remove the analysisResolution setting, AnalysisResolution type, AdvancedSettingsPanel resolution UI, and GUIDED_PIXELS_PER_INCH / LITE_PIXELS_PER_INCH from quoteOptimizer (after the polygon migration the canvas resolution affects only overlay PNG appearance, not analysis numbers). Cut dead px constants + buildDepthMap function from dfmAnalysis.ts.';

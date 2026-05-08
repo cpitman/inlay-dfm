@@ -14,7 +14,6 @@ function freshSettings() {
     vbitAngleDegrees: 60,
     inlayDepthInches: 0.125,
     grainDirection: 'horizontal' as const,
-    analysisResolution: 'default' as const,
     clearanceBitDiameterInches: 0.25 as const,
     clearanceStrategy: [0.25],
     toolChangeMinutes: 5,

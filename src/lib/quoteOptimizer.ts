@@ -2,6 +2,7 @@ import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Place
 import {
   runDfmAnalysis,
   runDfmAnalysisLite,
+  DEFAULT_CANVAS_WIDTH,
 } from './dfmAnalysis';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
 // fillConvexHullCovered is currently deferred (see comment in
@@ -16,22 +17,6 @@ import { EMPTY_SIDE_AGGREGATE, type SideAggregate } from './pricing';
 
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
-/**
- * Analysis canvas resolution for the FINAL DFM analysis in the guided
- * flow, in pixels per inch. 240 ppi resolves features down to
- * ~0.0042" — slightly finer than the ±0.005" X/Y accuracy of a
- * typical CNC router. The expert flow keeps its own user-controlled
- * `analysisResolution` setting and is unaffected.
- */
-const GUIDED_PIXELS_PER_INCH = 240;
-/**
- * Resolution used by the lite-pass + fill modification. Half of
- * `GUIDED_PIXELS_PER_INCH` — connectivity-based fill detection is
- * resolution-insensitive at this scale, but the per-layer rasterization
- * and per-pixel work drops to ~25% of the full-pass cost.
- */
-const LITE_PIXELS_PER_INCH = 120;
-
 /** Per-design optimization output. One entry per `Design` in the input. */
 export interface DesignOptimizationResult {
   /** Stable id from the input `Design`. */
@@ -149,15 +134,14 @@ async function runSingleDesignOptimization(
   // Scale the analysis canvas with the design — bigger designs need
   // more pixels to keep the same physical resolution. No upper cap;
   // very large designs trade some optimizer wall-time for fidelity.
-  const canvasWidth     = Math.max(1, Math.ceil(designWidthInches * GUIDED_PIXELS_PER_INCH));
-  const liteCanvasWidth = Math.max(1, Math.ceil(designWidthInches * LITE_PIXELS_PER_INCH));
+  const canvasWidth     = DEFAULT_CANVAS_WIDTH;
+  const liteCanvasWidth = DEFAULT_CANVAS_WIDTH;
 
   const settings: DFMSettings = {
     designWidthInches,
     vbitAngleDegrees: 60,
     inlayDepthInches,
     grainDirection: 'horizontal',
-    analysisResolution: 'default',
     clearanceBitDiameterInches: 0.25,
     clearanceStrategy: [0.25],
     toolChangeMinutes: TOOL_CHANGE_MINUTES_MANUAL,
