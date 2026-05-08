@@ -268,6 +268,25 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
 
   const originalParent = svg.parentNode;
   const originalNext = svg.nextSibling;
+  // When the source SVG carries CSS-unit width/height ("190.5mm",
+  // "10in", etc.), the browser renders into a device-pixel viewport
+  // whose dimensions scale independently of the viewBox. `getCTM()`
+  // then returns matrices in that pixel space, NOT in viewBox space
+  // — so baking the CTM into path `d` attributes lands the geometry
+  // outside the SVG's stored viewBox. Force width/height to the
+  // viewBox's numeric extents so the viewport-to-viewBox scale is
+  // 1:1, and getCTM matrices are in viewBox coords. Restore at the
+  // end in case downstream code reads the original attrs.
+  const origWidth = svg.getAttribute('width');
+  const origHeight = svg.getAttribute('height');
+  const viewBox = svg.getAttribute('viewBox');
+  if (viewBox) {
+    const parts = viewBox.trim().split(/[\s,]+/).map(Number);
+    if (parts.length === 4 && Number.isFinite(parts[2]) && parts[2] > 0 && Number.isFinite(parts[3]) && parts[3] > 0) {
+      svg.setAttribute('width', String(parts[2]));
+      svg.setAttribute('height', String(parts[3]));
+    }
+  }
   host.appendChild(svg);
   void svg.getBoundingClientRect();
 
@@ -355,6 +374,12 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
   } finally {
     host.removeChild(svg);
     document.body.removeChild(host);
+    // Restore original width/height attrs (the bake forced them
+    // to viewBox-numeric values to fix CTM scale).
+    if (origWidth === null) svg.removeAttribute('width');
+    else svg.setAttribute('width', origWidth);
+    if (origHeight === null) svg.removeAttribute('height');
+    else svg.setAttribute('height', origHeight);
     // Restore the SVG to its original parent if it had one, in case the caller cares.
     if (originalParent) originalParent.insertBefore(svg, originalNext);
   }

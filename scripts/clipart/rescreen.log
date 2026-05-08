@@ -2,194 +2,106 @@
 > inlay-dfm@0.1.0 rescreen-clipart
 > tsx scripts/clipart/rescreen.ts --dev http://localhost:3002
 
-rescreen: loaded 183 manifest entries
-[1/183] heart: ✓ pass
-[2/183] star: ✓ pass
-[3/183] sun: ✓ pass
-[4/183] house: ✓ pass
-[5/183] tree: ✓ pass
-[6/183] pika: ✗ FAIL (isolated-component, problem=0.00%)
-[7/183] hyrax: ✗ FAIL (isolated-component, problem=0.00%)
-[8/183] dog: ✓ pass
-[9/183] ibis: ✗ FAIL (problem=8.23%)
-[10/183] bass: ✓ pass
-[11/183] no-kings-crown-symbol-on-yellow-square: ✓ pass
-[12/183] no-kings-crown-profile-picture: ✓ pass
-[13/183] no-kings-protest-poster-anti-monarchy: ✓ pass
-[14/183] yellow-no-kings-symbol-placard: ✓ pass
-[15/183] fawn: ✓ pass
-[16/183] rainbow-color-animated-heart: ✓ pass
-[17/183] puma: ✓ pass
-[18/183] snow-leopard: ✓ pass
-[19/183] lion: ✗ FAIL (problem=0.50%)
-[20/183] enzo: ✓ pass
-[21/183] finch: ✗ FAIL (isolated-component, problem=0.00%, align=49.88%)
-[22/183] kid: ✓ pass
-[23/183] firefly: ✗ FAIL (isolated-component, problem=24.43%, align=5.93%)
-[24/183] elephant: ✗ FAIL (parser-or-analysis-error)
-[25/183] lion-head-african-animal: ✗ FAIL (problem=1.92%)
-[26/183] swordfish: ✓ pass
-[27/183] ibex: ✓ pass
-[28/183] salamander: ✓ pass
-[29/183] protest-clenched-fist-triangle-solidarity: ✓ pass
-[30/183] square-palestine-flag-icon: ✓ pass
-[31/183] green-engineering-climate-solution-tree-with-gears: ✓ pass
-[32/183] hummingbird: ✓ pass
-[33/183] red-panda: ✓ pass
-[34/183] arctic-fox: ✗ FAIL (problem=4.08%, align=36.89%)
-[35/183] muskrat: ✗ FAIL (isolated-component, problem=0.00%)
-[36/183] gazelle: ✗ FAIL (isolated-component, problem=4.78%, align=2.33%)
-[37/183] reading-purple-book-icon: ✓ pass
-[38/183] baboon: ✓ pass
-[39/183] revolution-love-wordart-typography: ✗ FAIL (problem=30.12%)
-[40/183] white-open-book-being-read: ✗ FAIL (isolated-component, problem=0.03%)
-[41/183] velociraptor: ✗ FAIL (problem=9.31%, align=29.85%)
-[42/183] skull-and-crossbones-toxic-sign-warning-triangle: ✓ pass
-[43/183] jaekelopterus: ✓ pass
-[44/183] eagle: ✗ FAIL (problem=19.57%, align=23.25%)
-[45/183] narwhal: ✓ pass
-[46/183] fox: ✓ pass
-[47/183] to-go-cup-of-coffee: ✗ FAIL (parser-or-analysis-error)
-[48/183] albatross: ✓ pass
-[49/183] wombat: ✓ pass
-[50/183] okapi: ✗ FAIL (problem=2.04%, align=28.95%)
-[51/183] seagull: ✓ pass
-[52/183] calf: ✓ pass
-[53/183] lamb: ✓ pass
-[54/183] kitten: ✗ FAIL (problem=0.22%, align=43.10%)
-[55/183] puppy: ✓ pass
-[56/183] tokyo-winter-version-1: ✓ pass
-[57/183] classic-puerto-rico-flag: ✓ pass
-[58/183] map-marker-red: ✗ FAIL (parser-or-analysis-error)
-[59/183] puerto-rico-flag-as-a-heart: ✓ pass
-[60/183] radiation-symbol-rounded-corners: ✓ pass
-[61/183] radiation-warning-round-logo: ✓ pass
-[62/183] bird-flying-over-mountains-logo-chatgpt: ✗ FAIL (problem=0.49%, align=23.95%)
-[63/183] spanners: ✗ FAIL (parser-or-analysis-error)
-[64/183] patterns-3: ✗ FAIL (parser-or-analysis-error)
-[65/183] blue-paint-roller-brush-icon: ✓ pass
-[66/183] headphones-icon: ✓ pass
-[67/183] microphone-icon: ✓ pass
-[68/183] microscope-icon: ✓ pass
-[69/183] stethoscope-icon: ✗ FAIL (isolated-component, problem=0.00%, align=5.11%)
-[70/183] japanese-person-from-the-back: ✓ pass
-[71/183] cow: ✓ pass
-[72/183] all-lives-matter: ✗ FAIL (problem=0.17%)
-[73/183] pig: ✓ pass
-[74/183] chicken: ✓ pass
-[75/183] parrot: ✓ pass
-[76/183] parrot-icon-flat-black-simple: ✓ pass
-[77/183] frog: ✓ pass
-[78/183] snake: ✓ pass
-[79/183] turtle: ✓ pass
-[80/183] rabbit: ✓ pass
-[81/183] rooster: ✓ pass
-[82/183] horse: ✓ pass
-[83/183] dog: ✓ pass
-[84/183] hammer: ✗ FAIL (parser-or-analysis-error)
-[85/183] red-heart-frame-with-dark-red-middle: ✓ pass
-[86/183] sparrow: ✗ FAIL (isolated-component, problem=0.00%, align=2.33%)
-[87/183] pelican: ✓ pass
-[88/183] bad-face: ✓ pass
-[89/183] snake-remix: ✓ pass
-[90/183] puma: ✓ pass
-[91/183] fire-horse: ✗ FAIL (parser-or-analysis-error)
-[92/183] grey-cat: ✓ pass
-[93/183] a-new-rotate-animation: ✓ pass
-[94/183] crossword-puzzles-symbol-fix-remix: ✗ FAIL (parser-or-analysis-error)
-[95/183] happy-whale: ✗ FAIL (parser-or-analysis-error)
-[96/183] heart-finger-gesture: ✗ FAIL (parser-or-analysis-error)
-[97/183] rotate-three-bar-animation2: ✗ FAIL (isolated-component, problem=0.19%)
-[98/183] atom-animation: ✓ pass
-[99/183] double-happiness: ✓ pass
-[100/183] simple-flat-hearts-love-is-in-the-air: ✓ pass
-[101/183] orange-isolated: ✗ FAIL (problem=41.50%, align=62.43%)
-[102/183] circle-a-red-version: ✓ pass
-[103/183] golden-angle-rotate-animation: ✓ pass
-[104/183] two-cross-animation: ✓ pass
-[105/183] cross-animate: ✓ pass
-[106/183] taichi-rotate-animation: ✗ FAIL (parser-or-analysis-error)
-[107/183] snail-escargot-decroissance: ✓ pass
-[108/183] baffled-man-sitting-at-table-cartoon: ✓ pass
-[109/183] cool-cat: ✓ pass
-[110/183] cartoon-musical-notes-jumping-flowing: ✗ FAIL (problem=6.22%)
-[111/183] atom: ✓ pass
-[112/183] simple-poison-bottle: ✓ pass
-[113/183] bottle-simple-black-label: ✓ pass
-[114/183] square-pattern: ✗ FAIL (parser-or-analysis-error)
-[115/183] moosefather-versus-mountain-lion: ✓ pass
-[116/183] be-an-artist: ✗ FAIL (isolated-component, problem=0.33%)
-[117/183] dotted-pattern-3: ✗ FAIL (parser-or-analysis-error)
-[118/183] sailboat: ✗ FAIL (parser-or-analysis-error)
-[119/183] angular-pattern-5: ✗ FAIL (parser-or-analysis-error)
-[120/183] angular-pattern-4: ✗ FAIL (parser-or-analysis-error)
-[121/183] angular-pattern-2: ✗ FAIL (parser-or-analysis-error)
-[122/183] angular-pattern: ✗ FAIL (parser-or-analysis-error)
-[123/183] hexagons-6: ✗ FAIL (parser-or-analysis-error)
-[124/183] hexagons-5: ✗ FAIL (parser-or-analysis-error)
-[125/183] hexagons-4: ✗ FAIL (parser-or-analysis-error)
-[126/183] hexagons-3: ✗ FAIL (parser-or-analysis-error)
-[127/183] hexagons-2: ✗ FAIL (parser-or-analysis-error)
-[128/183] hexagons: ✗ FAIL (parser-or-analysis-error)
-[129/183] accordion-colour-remix: ✗ FAIL (parser-or-analysis-error)
-[130/183] angular-pattern-2: ✗ FAIL (parser-or-analysis-error)
-[131/183] angular-pattern: ✗ FAIL (parser-or-analysis-error)
-[132/183] blues-guitarist: ✓ pass
-[133/183] pattern-10: ✗ FAIL (parser-or-analysis-error)
-[134/183] mandala: ✗ FAIL (problem=29.42%)
-[135/183] trees: ✗ FAIL (parser-or-analysis-error)
-[136/183] tiles-27: ✗ FAIL (parser-or-analysis-error)
-[137/183] checkerboard-2: ✗ FAIL (parser-or-analysis-error)
-[138/183] checkerboard-pattern: ✗ FAIL (parser-or-analysis-error)
-[139/183] square-pattern: ✗ FAIL (parser-or-analysis-error)
-[140/183] rectalinear-pattern: ✗ FAIL (parser-or-analysis-error)
-[141/183] hearts-for-fans: ✗ FAIL (parser-or-analysis-error)
-[142/183] squares: ✗ FAIL (parser-or-analysis-error)
-[143/183] triangles-2: ✗ FAIL (parser-or-analysis-error)
-[144/183] dotted-pattern-3: ✗ FAIL (parser-or-analysis-error)
-[145/183] dotted-pattern-2: ✗ FAIL (parser-or-analysis-error)
-[146/183] dotted-pattern: ✗ FAIL (parser-or-analysis-error)
-[147/183] strip-decoration: ✗ FAIL (parser-or-analysis-error)
-[148/183] castle: ✓ pass
-[149/183] pattern-4: ✗ FAIL (parser-or-analysis-error)
-[150/183] xmas-tree-3-in-green: ✗ FAIL (parser-or-analysis-error)
-[151/183] pattern-3: ✗ FAIL (parser-or-analysis-error)
-[152/183] clock-4: ✗ FAIL (parser-or-analysis-error)
-[153/183] simple-skull: ✓ pass
-[154/183] clock-2: ✗ FAIL (parser-or-analysis-error)
-[155/183] abstract-rose-2: ✗ FAIL (parser-or-analysis-error)
-[156/183] abstract-flower: ✗ FAIL (parser-or-analysis-error)
-[157/183] seven-pointed-star: ✓ pass
-[158/183] stars-2: ✗ FAIL (parser-or-analysis-error)
-[159/183] anamorphic-optical-illusion: ✗ FAIL (problem=1.58%, align=249.25%)
-[160/183] snail: ✓ pass
-[161/183] swirly-pattern-2: ✗ FAIL (isolated-component, problem=0.00%, align=21.42%)
-[162/183] abstract-rose-2: ✗ FAIL (parser-or-analysis-error)
-[163/183] thick-red-outlined-white-heart: ✓ pass
-[164/183] diamond-grid: ✗ FAIL (parser-or-analysis-error)
-[165/183] yutnori: ✓ pass
-[166/183] dustdfg-medal: ✓ pass
-[167/183] chessboard-variation: ✓ pass
-[168/183] chessboard-made-out-of-set-of-squares: ✓ pass
-[169/183] chessboard-made-out-of-set-of-squares: ✓ pass
-[170/183] chessboard-made-out-of-set-of-squares: ✓ pass
-[171/183] cyber-wolves-crew: ✗ FAIL (parser-or-analysis-error)
-[172/183] half-circles-variation: ✗ FAIL (parser-or-analysis-error)
-[173/183] half-circles: ✗ FAIL (parser-or-analysis-error)
-[174/183] asklepios: ✗ FAIL (parser-or-analysis-error)
-[175/183] cats-eye-tile-background: ✗ FAIL (parser-or-analysis-error)
-[176/183] dinosaur-crossing-caution-sign: ✗ FAIL (parser-or-analysis-error)
-[177/183] checkered-race-flags: ✗ FAIL (problem=0.21%, align=96.27%)
-[178/183] modern-democrats-logo: ✗ FAIL (isolated-component, problem=0.05%)
-[179/183] linux-tux: ✓ pass
-[180/183] run-colour-remix: ✗ FAIL (parser-or-analysis-error)
-[181/183] grand-piano-uni-color: ✗ FAIL (isolated-component, problem=21.70%)
-[182/183] be-your-own-hero: ✓ pass
-[183/183] guitar: ✓ pass
+rescreen: loaded 95 manifest entries
+[1/95] heart: ✓ pass
+[2/95] star: ✓ pass
+[3/95] sun: ✓ pass
+[4/95] house: ✓ pass
+[5/95] tree: ✓ pass
+[6/95] dog: ✓ pass
+[7/95] bass: ✓ pass
+[8/95] no-kings-crown-symbol-on-yellow-square: ✓ pass
+[9/95] no-kings-crown-profile-picture: ✓ pass
+[10/95] no-kings-protest-poster-anti-monarchy: ✓ pass
+[11/95] yellow-no-kings-symbol-placard: ✓ pass
+[12/95] fawn: ✓ pass
+[13/95] rainbow-color-animated-heart: ✓ pass
+[14/95] puma: ✓ pass
+[15/95] snow-leopard: ✓ pass
+[16/95] enzo: ✓ pass
+[17/95] kid: ✓ pass
+[18/95] swordfish: ✓ pass
+[19/95] ibex: ✓ pass
+[20/95] salamander: ✓ pass
+[21/95] protest-clenched-fist-triangle-solidarity: ✓ pass
+[22/95] square-palestine-flag-icon: ✓ pass
+[23/95] green-engineering-climate-solution-tree-with-gears: ✓ pass
+[24/95] hummingbird: ✓ pass
+[25/95] red-panda: ✓ pass
+[26/95] reading-purple-book-icon: ✓ pass
+[27/95] baboon: ✓ pass
+[28/95] skull-and-crossbones-toxic-sign-warning-triangle: ✓ pass
+[29/95] jaekelopterus: ✓ pass
+[30/95] narwhal: ✓ pass
+[31/95] fox: ✓ pass
+[32/95] albatross: ✓ pass
+[33/95] wombat: ✓ pass
+[34/95] seagull: ✓ pass
+[35/95] calf: ✓ pass
+[36/95] lamb: ✓ pass
+[37/95] puppy: ✓ pass
+[38/95] tokyo-winter-version-1: ✓ pass
+[39/95] classic-puerto-rico-flag: ✓ pass
+[40/95] puerto-rico-flag-as-a-heart: ✓ pass
+[41/95] radiation-symbol-rounded-corners: ✓ pass
+[42/95] radiation-warning-round-logo: ✓ pass
+[43/95] blue-paint-roller-brush-icon: ✓ pass
+[44/95] headphones-icon: ✓ pass
+[45/95] microphone-icon: ✓ pass
+[46/95] microscope-icon: ✓ pass
+[47/95] japanese-person-from-the-back: ✓ pass
+[48/95] cow: ✓ pass
+[49/95] pig: ✓ pass
+[50/95] chicken: ✓ pass
+[51/95] parrot: ✓ pass
+[52/95] parrot-icon-flat-black-simple: ✓ pass
+[53/95] frog: ✓ pass
+[54/95] snake: ✓ pass
+[55/95] turtle: ✓ pass
+[56/95] rabbit: ✓ pass
+[57/95] rooster: ✓ pass
+[58/95] horse: ✓ pass
+[59/95] dog: ✓ pass
+[60/95] red-heart-frame-with-dark-red-middle: ✓ pass
+[61/95] pelican: ✓ pass
+[62/95] bad-face: ✗ FAIL (problem=0.37%)
+[63/95] snake-remix: ✓ pass
+[64/95] puma: ✓ pass
+[65/95] grey-cat: ✓ pass
+[66/95] a-new-rotate-animation: ✓ pass
+[67/95] atom-animation: ✓ pass
+[68/95] double-happiness: ✓ pass
+[69/95] simple-flat-hearts-love-is-in-the-air: ✓ pass
+[70/95] circle-a-red-version: ✓ pass
+[71/95] golden-angle-rotate-animation: ✓ pass
+[72/95] two-cross-animation: ✓ pass
+[73/95] cross-animate: ✓ pass
+[74/95] snail-escargot-decroissance: ✓ pass
+[75/95] baffled-man-sitting-at-table-cartoon: ✓ pass
+[76/95] cool-cat: ✓ pass
+[77/95] atom: ✓ pass
+[78/95] simple-poison-bottle: ✓ pass
+[79/95] bottle-simple-black-label: ✓ pass
+[80/95] moosefather-versus-mountain-lion: ✓ pass
+[81/95] blues-guitarist: ✓ pass
+[82/95] castle: ✓ pass
+[83/95] simple-skull: ✓ pass
+[84/95] seven-pointed-star: ✗ FAIL (problem=29.29%)
+[85/95] snail: ✓ pass
+[86/95] thick-red-outlined-white-heart: ✓ pass
+[87/95] yutnori: ✓ pass
+[88/95] dustdfg-medal: ✓ pass
+[89/95] chessboard-variation: ✓ pass
+[90/95] chessboard-made-out-of-set-of-squares: ✓ pass
+[91/95] chessboard-made-out-of-set-of-squares: ✓ pass
+[92/95] chessboard-made-out-of-set-of-squares: ✓ pass
+[93/95] linux-tux: ✓ pass
+[94/95] be-your-own-hero: ✓ pass
+[95/95] guitar: ✓ pass
 
 rescreen summary:
-  kept:    95
-  removed: 88
+  kept:    93
+  removed: 2
   missing: 0 (manifest entries with no SVG on disk)
-wrote manifest with 95 entries
-appended 88 rejection lines to rejections.jsonl
+wrote manifest with 93 entries
+appended 2 rejection lines to rejections.jsonl

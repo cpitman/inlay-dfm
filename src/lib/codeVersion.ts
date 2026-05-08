@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.15';
+export const CODE_VERSION = '2026-05-08.16';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'svgFlatten now expands <use href="#id"> references before the CTM bake walk + skips display:none shapes. Fixes imports of OpenClipart "animation"-style SVGs that build their visible geometry by instancing tiles defined in <defs>: previously those parsed as a solid backdrop square because <use> elements were ignored. Catalog re-screened with the fix: rotate-three-bar-animation2 correctly flips from pass to fail; net catalog 95/183 (was 96/183).';
+  'svgFlatten now clamps the SVG\'s width/height to viewBox-numeric values before getCTM(). Fixes Inkscape-output SVGs with CSS-unit dimensions ("190.5mm", "10in", etc.): the browser was rendering into a device-pixel viewport whose getCTM matrices were in pixel space, not viewBox space, so the bake landed geometry outside the stored viewBox. With width/height pinned to viewBox numerics, the viewport-to-viewBox scale is 1:1 and CTMs reflect just the matrix transforms. Width/height are restored after bake. Re-screened catalog drops bad-face + seven-pointed-star (true DFM fails surfaced now that geometry parses at correct scale); net 93/183.';
