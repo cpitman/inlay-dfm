@@ -200,13 +200,29 @@ export async function fillEnclosedHoles(
   const fillRings: Ring[] = [];
   const partialMassAdded: MultiPolygon[] = [];
 
+  // Diagnostic: dump per-hole decisions to the dev-mode browser
+  // console. Statically inlined at build time so production bundles
+  // are untouched. Lets the user reproduce a hole-fill regression
+  // and share the log without us re-instrumenting on each iteration.
+  const DEBUG_FILLS = process.env.NODE_ENV === 'development';
+  let holeIndex = 0;
+
   walkPolygonHoles(target, holeRing => {
     const holeMP: MultiPolygon = [holeRing];
+    const holeArea = multiPolygonArea(holeMP);
     const uncovered = multiPolygonDifference(holeMP, allLayersUnion);
+    const uncoveredArea = multiPolygonArea(uncovered);
+    const idx = holeIndex++;
+
     if (multiPolygonIsEmpty(uncovered)) {
       fillRings.push(holeRing);
       filledHoleCount++;
-      filledAreaSqUnits += multiPolygonArea(holeMP);
+      filledAreaSqUnits += holeArea;
+      if (DEBUG_FILLS) {
+        console.log(
+          `[fillHoles ${targetColorHex} h${idx}] FULL: holeArea=${holeArea.toFixed(2)} sq.u uncovered=0`,
+        );
+      }
       return true; // skip descending — full-fill absorbs nested geometry
     }
 
@@ -214,15 +230,26 @@ export async function fillEnclosedHoles(
     const grown = multiPolygonOffset(uncovered, holeMarginUnits, { joinType: 'round' });
     const grownNoHoles = stripPolygonHoles(grown);
     if (multiPolygonIsEmpty(grownNoHoles)) {
-      // Pathological: offset collapsed everything. Leave H untouched.
+      if (DEBUG_FILLS) {
+        console.log(
+          `[fillHoles ${targetColorHex} h${idx}] PARTIAL-NOOP (grown collapsed): holeArea=${holeArea.toFixed(2)} sq.u uncovered=${uncoveredArea.toFixed(2)} sq.u`,
+        );
+      }
       return false;
     }
     const newHoleMP = partiallyFillHoleRing(holeRing, grownNoHoles);
     const massAdded = multiPolygonDifference(holeMP, newHoleMP);
+    const massAddedArea = multiPolygonArea(massAdded);
     if (!multiPolygonIsEmpty(massAdded)) {
       partialMassAdded.push(massAdded);
       partiallyFilledHoleCount++;
-      partiallyFilledAreaSqUnits += multiPolygonArea(massAdded);
+      partiallyFilledAreaSqUnits += massAddedArea;
+    }
+    if (DEBUG_FILLS) {
+      const grownArea = multiPolygonArea(grownNoHoles);
+      console.log(
+        `[fillHoles ${targetColorHex} h${idx}] PARTIAL: holeArea=${holeArea.toFixed(2)} sq.u uncovered=${uncoveredArea.toFixed(2)} sq.u grownNCU=${grownArea.toFixed(2)} sq.u massAdded=${massAddedArea.toFixed(2)} sq.u`,
+      );
     }
     return false; // descend so nested holes can be checked too
   });

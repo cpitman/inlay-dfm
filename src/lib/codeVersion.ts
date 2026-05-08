@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.16';
+export const CODE_VERSION = '2026-05-07.17';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'svgFragmentToMultiPolygon respects per-path fill-rule (default nonzero); polygonStrokeExtraction canonicalizes element fills via fill-rule; bake step preserves resolved fill-rule. Fixes XOR appearance of overlapping same-fill subpaths and stroke-bleed-through.';
+  'fillEnclosedHoles: dev-mode per-hole decision logging (full / partial / massAdded). Use to diagnose why specific holes shifted between full-fill and partial-fill after the v.16 fill-rule fix.';
