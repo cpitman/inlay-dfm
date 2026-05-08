@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.3';
+export const CODE_VERSION = '2026-05-08.4';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'fillable-hole stats polygon-native: per-layer laterPolygonUnion + walkPolygonHoles BFS replaces findEnclosedHoles + computeBoundary. Predicate now mirrors fillEnclosedHoles (eroded-empty test with HOLE_MARGIN_INCHES/2) so stats count matches what the optimizer would actually fill.';
+  'preAnalyzeLayerOrder polygon-native: parses svgFragment to MultiPolygon, computes area via multiPolygonArea, tests pairwise overlap via Clipper intersection on inward-eroded copies. Drops the 60-ppi rasterize + erodeMask + bitmap AND.';
