@@ -3,6 +3,9 @@ import { combineLayers } from './svgLayers';
 import { computeTrimmedViewBox } from './trimSvg';
 import { extractStrokeLayer } from './strokeDetection';
 import { bakeSvgTransforms } from './svgFlatten';
+import { svgFragmentToMultiPolygon, multiPolygonToSvgFragment } from './polygonParser';
+import { multiPolygonDifference, multiPolygonUnion, multiPolygonUnionAll } from './clipperOps';
+import { multiPolygonIsEmpty, type MultiPolygon } from './polygon';
 
 // ---------------------------------------------------------------------------
 // Color utilities
@@ -146,10 +149,17 @@ function stripFillFromStyle(style: string): string {
     .join('; ');
 }
 
-function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: string[] } {
+/**
+ * Walk the post-bake SVG element tree to collect each renderable
+ * shape as a paint event in document order. Each event carries the
+ * resolved fill color and the polygonized geometry. Hidden / fill-
+ * less elements are skipped.
+ */
+function collectPaintEvents(
+  svgRoot: SVGSVGElement,
+): { color: string; mp: MultiPolygon; clonedHtml: string }[] {
   const classFills = parseClassFills(svgRoot);
-  const buckets = new Map<string, string[]>();
-  const order: string[] = [];
+  const events: { color: string; mp: MultiPolygon; clonedHtml: string }[] = [];
 
   svgRoot.querySelectorAll('*').forEach(el => {
     if (!RENDERABLE_TAGS.has(el.tagName.toLowerCase())) return;
@@ -157,20 +167,10 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
     if (!raw) return;
     const hex = normalizeHex(raw);
     if (!hex) return;
-    // Substitute near-white fills with a dark sentinel so the
-    // mask-extraction luma threshold catches them. See `WHITE_SENTINEL`
-    // for the full rationale.
     const finalHex = isNearWhite(hex) ? WHITE_SENTINEL : hex;
 
-    if (!buckets.has(finalHex)) {
-      buckets.set(finalHex, []);
-      order.push(finalHex);
-    }
-
-    // Clone and force the fill explicitly. The caller has already
-    // baked all ancestor transforms into each leaf's path data
-    // (see `bakeSvgTransforms`), so the leaf is self-contained in
-    // root-SVG coordinates — no <g transform> wrapper needed.
+    // Clone with normalized fill so we have a self-contained
+    // outerHTML to polygonize via svgFragmentToMultiPolygon.
     const clone = el.cloneNode(true) as Element;
     const inlineStyle = clone.getAttribute('style');
     if (inlineStyle) {
@@ -179,16 +179,124 @@ function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: s
       else clone.removeAttribute('style');
     }
     clone.setAttribute('fill', finalHex);
+    const html = clone.outerHTML;
 
-    buckets.get(finalHex)!.push(clone.outerHTML);
+    const mp = svgFragmentToMultiPolygon(html);
+    if (multiPolygonIsEmpty(mp)) return;
+
+    events.push({ color: finalHex, mp, clonedHtml: html });
   });
 
-  const layers: Layer[] = order.map(colorHex => ({
-    colorHex,
-    svgFragment: buckets.get(colorHex)!.join('\n'),
-  }));
+  return events;
+}
 
-  return { layers, order };
+/**
+ * Split an SVG into per-color layers with z-order-aware
+ * subtractions so source rendering survives layer collapse.
+ *
+ * The naive grouping (= union all paint events of each color)
+ * loses information when a color is painted at MULTIPLE z-
+ * positions interleaved with other colors. After collapse, an
+ * upper layer can hide a lower color's region that should have
+ * shown on top in source. Concrete case: nested squares of
+ * alternating colors (chessboard pattern) — color C painted
+ * at z=0 and z=2, with color D at z=1; D's union covers C's
+ * z=2 paint, hiding it from the rendered output.
+ *
+ * Asymmetric fix:
+ *   1. Per-color `union[C]` = ∪ paint events of C. (Same as
+ *      before — preserves any artist-baked overlap, e.g.,
+ *      a hole-fill optimization where the lower layer has
+ *      extra extent that gets covered cleanly by the upper.)
+ *   2. Per-color `sourceVisible[C]` via painter's algorithm
+ *      walking events high-to-low z. Each event contributes
+ *      `event.mp − claimed` to `visibleParts[event.color]`,
+ *      where `claimed` is the running union of higher-z
+ *      events.
+ *   3. Walk colors bottom-up (= document order of first
+ *      occurrence). For each color C: subtract the union of
+ *      all lower colors' `sourceVisible` from `union[C]`. The
+ *      bottommost color is unchanged. Each color's adjusted
+ *      polygon = `union[C] − ∪ sourceVisible[C']` for
+ *      C' BELOW C.
+ *
+ * This makes upper layers carve out exactly the regions
+ * lower colors are supposed to show through, while leaving
+ * lower layers at their full union extent (= preserves the
+ * "lower layer is larger than visible" pattern that DFM-
+ * aware artists use to fold tiny hard-to-carve regions into
+ * a bigger feasible carve).
+ */
+function splitSvgIntoLayers(svgRoot: SVGSVGElement): { layers: Layer[]; order: string[] } {
+  const events = collectPaintEvents(svgRoot);
+
+  // Per-color union (= what the old grouping produced).
+  const unionParts = new Map<string, MultiPolygon[]>();
+  const order: string[] = [];
+  for (const ev of events) {
+    if (!unionParts.has(ev.color)) {
+      unionParts.set(ev.color, []);
+      order.push(ev.color);
+    }
+    unionParts.get(ev.color)!.push(ev.mp);
+  }
+  const union = new Map<string, MultiPolygon>();
+  for (const [c, parts] of unionParts) {
+    union.set(c, parts.length === 1 ? parts[0] : multiPolygonUnionAll(parts));
+  }
+
+  // Painter's algorithm — source-visible region per color.
+  const visibleParts = new Map<string, MultiPolygon[]>();
+  let claimed: MultiPolygon = [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    const visible = multiPolygonIsEmpty(claimed)
+      ? ev.mp
+      : multiPolygonDifference(ev.mp, claimed);
+    if (!multiPolygonIsEmpty(visible)) {
+      const arr = visibleParts.get(ev.color) ?? [];
+      arr.push(visible);
+      visibleParts.set(ev.color, arr);
+    }
+    claimed = multiPolygonIsEmpty(claimed)
+      ? ev.mp
+      : multiPolygonUnion(claimed, ev.mp);
+  }
+  const sourceVisible = new Map<string, MultiPolygon>();
+  for (const [c, parts] of visibleParts) {
+    sourceVisible.set(c, parts.length === 1 ? parts[0] : multiPolygonUnionAll(parts));
+  }
+
+  // Asymmetric subtraction in bottom-up order. Lower colors
+  // keep full union; upper colors carve out lower colors'
+  // source-visible regions.
+  const adjusted = new Map<string, MultiPolygon>();
+  let belowVisible: MultiPolygon = [];
+  for (const c of order) {
+    const u = union.get(c) ?? [];
+    const mp = (multiPolygonIsEmpty(belowVisible) || multiPolygonIsEmpty(u))
+      ? u
+      : multiPolygonDifference(u, belowVisible);
+    adjusted.set(c, mp);
+    const sv = sourceVisible.get(c);
+    if (sv && !multiPolygonIsEmpty(sv)) {
+      belowVisible = multiPolygonIsEmpty(belowVisible)
+        ? sv
+        : multiPolygonUnion(belowVisible, sv);
+    }
+  }
+
+  const layers: Layer[] = order
+    .map(colorHex => {
+      const mp = adjusted.get(colorHex) ?? [];
+      const fragment = multiPolygonIsEmpty(mp)
+        ? ''
+        : multiPolygonToSvgFragment(mp, colorHex);
+      return { colorHex, svgFragment: fragment };
+    })
+    .filter(l => l.svgFragment.length > 0);
+
+  return { layers, order: layers.map(l => l.colorHex) };
 }
 
 // ---------------------------------------------------------------------------

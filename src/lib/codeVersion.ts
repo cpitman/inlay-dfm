@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.16';
+export const CODE_VERSION = '2026-05-08.17';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'svgFlatten now clamps the SVG\'s width/height to viewBox-numeric values before getCTM(). Fixes Inkscape-output SVGs with CSS-unit dimensions ("190.5mm", "10in", etc.): the browser was rendering into a device-pixel viewport whose getCTM matrices were in pixel space, not viewBox space, so the bake landed geometry outside the stored viewBox. With width/height pinned to viewBox numerics, the viewport-to-viewBox scale is 1:1 and CTMs reflect just the matrix transforms. Width/height are restored after bake. Re-screened catalog drops bad-face + seven-pointed-star (true DFM fails surfaced now that geometry parses at correct scale); net 93/183.';
+  'splitSvgIntoLayers now applies asymmetric z-order-aware subtractions: lower layers keep their full color-union (preserving artist hole-fill optimizations); upper layers carve out lower colors\' source-visible regions. Fixes nested-color SVGs where a color is interleaved with other colors at multiple z-positions (e.g., chessboard\'s alternating dark-red / white / pink / white squares were collapsing to wrong rendering). Painter\'s-algorithm pass over post-bake paint events computes source-visible per color; bottom-up walk subtracts from upper layers.';

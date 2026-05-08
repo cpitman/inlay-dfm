@@ -2,106 +2,104 @@
 > inlay-dfm@0.1.0 rescreen-clipart
 > tsx scripts/clipart/rescreen.ts --dev http://localhost:3002
 
-rescreen: loaded 95 manifest entries
-[1/95] heart: ✓ pass
-[2/95] star: ✓ pass
-[3/95] sun: ✓ pass
-[4/95] house: ✓ pass
-[5/95] tree: ✓ pass
-[6/95] dog: ✓ pass
-[7/95] bass: ✓ pass
-[8/95] no-kings-crown-symbol-on-yellow-square: ✓ pass
-[9/95] no-kings-crown-profile-picture: ✓ pass
-[10/95] no-kings-protest-poster-anti-monarchy: ✓ pass
-[11/95] yellow-no-kings-symbol-placard: ✓ pass
-[12/95] fawn: ✓ pass
-[13/95] rainbow-color-animated-heart: ✓ pass
-[14/95] puma: ✓ pass
-[15/95] snow-leopard: ✓ pass
-[16/95] enzo: ✓ pass
-[17/95] kid: ✓ pass
-[18/95] swordfish: ✓ pass
-[19/95] ibex: ✓ pass
-[20/95] salamander: ✓ pass
-[21/95] protest-clenched-fist-triangle-solidarity: ✓ pass
-[22/95] square-palestine-flag-icon: ✓ pass
-[23/95] green-engineering-climate-solution-tree-with-gears: ✓ pass
-[24/95] hummingbird: ✓ pass
-[25/95] red-panda: ✓ pass
-[26/95] reading-purple-book-icon: ✓ pass
-[27/95] baboon: ✓ pass
-[28/95] skull-and-crossbones-toxic-sign-warning-triangle: ✓ pass
-[29/95] jaekelopterus: ✓ pass
-[30/95] narwhal: ✓ pass
-[31/95] fox: ✓ pass
-[32/95] albatross: ✓ pass
-[33/95] wombat: ✓ pass
-[34/95] seagull: ✓ pass
-[35/95] calf: ✓ pass
-[36/95] lamb: ✓ pass
-[37/95] puppy: ✓ pass
-[38/95] tokyo-winter-version-1: ✓ pass
-[39/95] classic-puerto-rico-flag: ✓ pass
-[40/95] puerto-rico-flag-as-a-heart: ✓ pass
-[41/95] radiation-symbol-rounded-corners: ✓ pass
-[42/95] radiation-warning-round-logo: ✓ pass
-[43/95] blue-paint-roller-brush-icon: ✓ pass
-[44/95] headphones-icon: ✓ pass
-[45/95] microphone-icon: ✓ pass
-[46/95] microscope-icon: ✓ pass
-[47/95] japanese-person-from-the-back: ✓ pass
-[48/95] cow: ✓ pass
-[49/95] pig: ✓ pass
-[50/95] chicken: ✓ pass
-[51/95] parrot: ✓ pass
-[52/95] parrot-icon-flat-black-simple: ✓ pass
-[53/95] frog: ✓ pass
-[54/95] snake: ✓ pass
-[55/95] turtle: ✓ pass
-[56/95] rabbit: ✓ pass
-[57/95] rooster: ✓ pass
-[58/95] horse: ✓ pass
-[59/95] dog: ✓ pass
-[60/95] red-heart-frame-with-dark-red-middle: ✓ pass
-[61/95] pelican: ✓ pass
-[62/95] bad-face: ✗ FAIL (problem=0.37%)
-[63/95] snake-remix: ✓ pass
-[64/95] puma: ✓ pass
-[65/95] grey-cat: ✓ pass
-[66/95] a-new-rotate-animation: ✓ pass
-[67/95] atom-animation: ✓ pass
-[68/95] double-happiness: ✓ pass
-[69/95] simple-flat-hearts-love-is-in-the-air: ✓ pass
-[70/95] circle-a-red-version: ✓ pass
-[71/95] golden-angle-rotate-animation: ✓ pass
-[72/95] two-cross-animation: ✓ pass
-[73/95] cross-animate: ✓ pass
-[74/95] snail-escargot-decroissance: ✓ pass
-[75/95] baffled-man-sitting-at-table-cartoon: ✓ pass
-[76/95] cool-cat: ✓ pass
-[77/95] atom: ✓ pass
-[78/95] simple-poison-bottle: ✓ pass
-[79/95] bottle-simple-black-label: ✓ pass
-[80/95] moosefather-versus-mountain-lion: ✓ pass
-[81/95] blues-guitarist: ✓ pass
-[82/95] castle: ✓ pass
-[83/95] simple-skull: ✓ pass
-[84/95] seven-pointed-star: ✗ FAIL (problem=29.29%)
-[85/95] snail: ✓ pass
-[86/95] thick-red-outlined-white-heart: ✓ pass
-[87/95] yutnori: ✓ pass
-[88/95] dustdfg-medal: ✓ pass
-[89/95] chessboard-variation: ✓ pass
-[90/95] chessboard-made-out-of-set-of-squares: ✓ pass
-[91/95] chessboard-made-out-of-set-of-squares: ✓ pass
-[92/95] chessboard-made-out-of-set-of-squares: ✓ pass
-[93/95] linux-tux: ✓ pass
-[94/95] be-your-own-hero: ✓ pass
-[95/95] guitar: ✓ pass
+rescreen: loaded 93 manifest entries
+[1/93] heart: ✓ pass
+[2/93] star: ✓ pass
+[3/93] sun: ✓ pass
+[4/93] house: ✓ pass
+[5/93] tree: ✓ pass
+[6/93] dog: ✓ pass
+[7/93] bass: ✗ FAIL (isolated-component, problem=0.06%, align=28.44%)
+[8/93] no-kings-crown-symbol-on-yellow-square: ✓ pass
+[9/93] no-kings-crown-profile-picture: ✓ pass
+[10/93] no-kings-protest-poster-anti-monarchy: ✓ pass
+[11/93] yellow-no-kings-symbol-placard: ✓ pass
+[12/93] fawn: ✗ FAIL (isolated-component, problem=0.09%, align=80.56%)
+[13/93] rainbow-color-animated-heart: ✓ pass
+[14/93] puma: ✓ pass
+[15/93] snow-leopard: ✗ FAIL (isolated-component, problem=1.04%, align=48.22%)
+[16/93] enzo: ✓ pass
+[17/93] kid: ✗ FAIL (isolated-component, problem=0.16%, align=77.26%)
+[18/93] swordfish: ✓ pass
+[19/93] ibex: ✗ FAIL (isolated-component, problem=0.64%, align=71.64%)
+[20/93] salamander: ✓ pass
+[21/93] protest-clenched-fist-triangle-solidarity: ✓ pass
+[22/93] square-palestine-flag-icon: ✓ pass
+[23/93] green-engineering-climate-solution-tree-with-gears: ✓ pass
+[24/93] hummingbird: ✗ FAIL (isolated-component, problem=10.42%, align=5.91%)
+[25/93] red-panda: ✗ FAIL (isolated-component, problem=20.65%, align=103.59%)
+[26/93] reading-purple-book-icon: ✓ pass
+[27/93] baboon: ✓ pass
+[28/93] skull-and-crossbones-toxic-sign-warning-triangle: ✓ pass
+[29/93] jaekelopterus: ✓ pass
+[30/93] narwhal: ✓ pass
+[31/93] fox: ✗ FAIL (isolated-component, problem=15.77%, align=143.04%)
+[32/93] albatross: ✗ FAIL (isolated-component, problem=18.13%)
+[33/93] wombat: ✓ pass
+[34/93] seagull: ✓ pass
+[35/93] calf: ✗ FAIL (isolated-component, problem=0.08%, align=80.07%)
+[36/93] lamb: ✓ pass
+[37/93] puppy: ✗ FAIL (isolated-component, problem=0.21%, align=133.28%)
+[38/93] tokyo-winter-version-1: ✗ FAIL (isolated-component, problem=0.01%)
+[39/93] classic-puerto-rico-flag: ✓ pass
+[40/93] puerto-rico-flag-as-a-heart: ✗ FAIL (problem=0.11%, align=51.31%)
+[41/93] radiation-symbol-rounded-corners: ✓ pass
+[42/93] radiation-warning-round-logo: ✓ pass
+[43/93] blue-paint-roller-brush-icon: ✓ pass
+[44/93] headphones-icon: ✓ pass
+[45/93] microphone-icon: ✓ pass
+[46/93] microscope-icon: ✓ pass
+[47/93] japanese-person-from-the-back: ✓ pass
+[48/93] cow: ✓ pass
+[49/93] pig: ✓ pass
+[50/93] chicken: ✓ pass
+[51/93] parrot: ✓ pass
+[52/93] parrot-icon-flat-black-simple: ✓ pass
+[53/93] frog: ✓ pass
+[54/93] snake: ✓ pass
+[55/93] turtle: ✓ pass
+[56/93] rabbit: ✓ pass
+[57/93] rooster: ✓ pass
+[58/93] horse: ✓ pass
+[59/93] dog: ✓ pass
+[60/93] red-heart-frame-with-dark-red-middle: ✓ pass
+[61/93] pelican: ✗ FAIL (isolated-component, problem=10.61%, align=40.84%)
+[62/93] snake-remix: ✓ pass
+[63/93] puma: ✓ pass
+[64/93] grey-cat: ✗ FAIL (problem=5.48%, align=6.73%)
+[65/93] a-new-rotate-animation: ✓ pass
+[66/93] atom-animation: ✓ pass
+[67/93] double-happiness: ✓ pass
+[68/93] simple-flat-hearts-love-is-in-the-air: ✓ pass
+[69/93] circle-a-red-version: ✓ pass
+[70/93] golden-angle-rotate-animation: ✓ pass
+[71/93] two-cross-animation: ✓ pass
+[72/93] cross-animate: ✓ pass
+[73/93] snail-escargot-decroissance: ✓ pass
+[74/93] baffled-man-sitting-at-table-cartoon: ✓ pass
+[75/93] cool-cat: ✓ pass
+[76/93] atom: ✓ pass
+[77/93] simple-poison-bottle: ✓ pass
+[78/93] bottle-simple-black-label: ✓ pass
+[79/93] moosefather-versus-mountain-lion: ✓ pass
+[80/93] blues-guitarist: ✓ pass
+[81/93] castle: ✓ pass
+[82/93] simple-skull: ✓ pass
+[83/93] snail: ✓ pass
+[84/93] thick-red-outlined-white-heart: ✓ pass
+[85/93] yutnori: ✓ pass
+[86/93] dustdfg-medal: ✓ pass
+[87/93] chessboard-variation: ✓ pass
+[88/93] chessboard-made-out-of-set-of-squares: ✓ pass
+[89/93] chessboard-made-out-of-set-of-squares: ✓ pass
+[90/93] chessboard-made-out-of-set-of-squares: ✓ pass
+[91/93] linux-tux: ✗ FAIL (isolated-component, problem=15.49%, align=117.99%)
+[92/93] be-your-own-hero: ✓ pass
+[93/93] guitar: ✓ pass
 
 rescreen summary:
-  kept:    93
-  removed: 2
+  kept:    77
+  removed: 16
   missing: 0 (manifest entries with no SVG on disk)
-wrote manifest with 93 entries
-appended 2 rejection lines to rejections.jsonl
+wrote manifest with 77 entries
+appended 16 rejection lines to rejections.jsonl

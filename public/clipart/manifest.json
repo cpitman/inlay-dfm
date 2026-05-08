@@ -118,34 +118,6 @@
     "rank": 6
   },
   {
-    "id": "bass",
-    "title": "Bass",
-    "tags": [
-      "animal",
-      "cartoon",
-      "animals",
-      "round",
-      "bass",
-      "fish",
-      "river",
-      "sea",
-      "ocean"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355581/bass",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#f68534",
-      "#0dcc00",
-      "#098c00",
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 1.349731100742049,
-    "rank": 7
-  },
-  {
     "id": "no-kings-crown-symbol-on-yellow-square",
     "title": "No Kings crown symbol on yellow square",
     "tags": [
@@ -184,7 +156,7 @@
       "#000000"
     ],
     "aspectRatio": 1,
-    "rank": 8
+    "rank": 7
   },
   {
     "id": "no-kings-crown-profile-picture",
@@ -222,7 +194,7 @@
       "#f5060b"
     ],
     "aspectRatio": 1,
-    "rank": 9
+    "rank": 8
   },
   {
     "id": "no-kings-protest-poster-anti-monarchy",
@@ -274,7 +246,7 @@
       "#000000"
     ],
     "aspectRatio": 0.618,
-    "rank": 10
+    "rank": 9
   },
   {
     "id": "yellow-no-kings-symbol-placard",
@@ -324,34 +296,7 @@
       "#000000"
     ],
     "aspectRatio": 0.618,
-    "rank": 11
-  },
-  {
-    "id": "fawn",
-    "title": "Fawn",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "deer",
-      "fawn",
-      "mammal",
-      "baby",
-      "forest"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355557/fawn",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#784421",
-      "#000000",
-      "#502d16",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.9672707624049159,
-    "rank": 12
+    "rank": 10
   },
   {
     "id": "rainbow-color-animated-heart",
@@ -386,7 +331,7 @@
       "#ff0000"
     ],
     "aspectRatio": 0.9969774195460201,
-    "rank": 13
+    "rank": 11
   },
   {
     "id": "puma",
@@ -414,33 +359,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.9866750585565971,
-    "rank": 14
-  },
-  {
-    "id": "snow-leopard",
-    "title": "Snow Leopard",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "leopard",
-      "snow",
-      "snow leopard",
-      "mountain"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355531/snow-leopard",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#bbbbbb",
-      "#000000",
-      "#010101",
-      "#a6a6a6"
-    ],
-    "aspectRatio": 0.633862619252368,
-    "rank": 15
+    "rank": 12
   },
   {
     "id": "enzo",
@@ -463,33 +382,7 @@
       "#132028"
     ],
     "aspectRatio": 0.850314465408805,
-    "rank": 16
-  },
-  {
-    "id": "kid",
-    "title": "Kid",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "kid",
-      "goat",
-      "baby",
-      "farm"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355451/kid",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#c8beb7",
-      "#000000",
-      "#6c5d53",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.91080391522045,
-    "rank": 17
+    "rank": 13
   },
   {
     "id": "swordfish",
@@ -519,41 +412,7 @@
       "#7ed0ff"
     ],
     "aspectRatio": 1.4496410486111808,
-    "rank": 18
-  },
-  {
-    "id": "ibex",
-    "title": "Ibex",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "ibex",
-      "goat",
-      "mammal",
-      "mountain",
-      "cliff",
-      "outcrop",
-      "meadow",
-      "alpine",
-      "mountainous",
-      "hilly",
-      "plateau",
-      "rocky"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355408/ibex",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#c7b1a1",
-      "#000000",
-      "#5e544c",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.856271197384078,
-    "rank": 19
+    "rank": 14
   },
   {
     "id": "salamander",
@@ -585,7 +444,7 @@
       "#000000"
     ],
     "aspectRatio": 0.5666820414678401,
-    "rank": 20
+    "rank": 15
   },
   {
     "id": "protest-clenched-fist-triangle-solidarity",
@@ -611,7 +470,7 @@
       "#000000"
     ],
     "aspectRatio": 0.6518,
-    "rank": 21
+    "rank": 16
   },
   {
     "id": "square-palestine-flag-icon",
@@ -638,7 +497,7 @@
       "#ce1126"
     ],
     "aspectRatio": 1,
-    "rank": 22
+    "rank": 17
   },
   {
     "id": "green-engineering-climate-solution-tree-with-gears",
@@ -670,67 +529,7 @@
       "#338d22"
     ],
     "aspectRatio": 0.6457800511508951,
-    "rank": 23
-  },
-  {
-    "id": "hummingbird",
-    "title": "Hummingbird",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "hummingbird",
-      "hummer",
-      "colibri",
-      "kolibri",
-      "beija-flor",
-      "picaflor",
-      "bird"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355321/hummingbird",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#42b9ff",
-      "#000000",
-      "#bbbbbb",
-      "#373737",
-      "#ffc84b"
-    ],
-    "aspectRatio": 0.6902718480049805,
-    "rank": 24
-  },
-  {
-    "id": "red-panda",
-    "title": "Red Panda",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "red panda",
-      "lesser panda",
-      "firefox",
-      "red bear-cat",
-      "bear-cat",
-      "mammal",
-      "jungle"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355319/red-panda",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#bbbbbb",
-      "#8e3c30",
-      "#000000",
-      "#ff6d57",
-      "#635c5c"
-    ],
-    "aspectRatio": 1.1729771079288989,
-    "rank": 25
+    "rank": 18
   },
   {
     "id": "reading-purple-book-icon",
@@ -773,7 +572,7 @@
       "#333333"
     ],
     "aspectRatio": 1.0000999800039994,
-    "rank": 26
+    "rank": 19
   },
   {
     "id": "baboon",
@@ -804,7 +603,7 @@
       "#000000"
     ],
     "aspectRatio": 1.0517783408306396,
-    "rank": 27
+    "rank": 20
   },
   {
     "id": "skull-and-crossbones-toxic-sign-warning-triangle",
@@ -853,7 +652,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 28
+    "rank": 21
   },
   {
     "id": "jaekelopterus",
@@ -883,7 +682,7 @@
       "#000000"
     ],
     "aspectRatio": 0.7053105854825178,
-    "rank": 29
+    "rank": 22
   },
   {
     "id": "narwhal",
@@ -912,67 +711,7 @@
       "#000000"
     ],
     "aspectRatio": 1.6513158564915147,
-    "rank": 30
-  },
-  {
-    "id": "fox",
-    "title": "Fox",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "fox",
-      "mammal",
-      "forest",
-      "woodland",
-      "grassland",
-      "savanna"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355069/fox",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#9f3c1d",
-      "#bbbbbb",
-      "#cc4e28",
-      "#010101",
-      "#000000"
-    ],
-    "aspectRatio": 0.7810479070311422,
-    "rank": 31
-  },
-  {
-    "id": "albatross",
-    "title": "Albatross",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "albatross",
-      "bird",
-      "polar",
-      "ocean",
-      "sea",
-      "coastal",
-      "cliff",
-      "outcrop",
-      "shore",
-      "beach"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355044/albatross",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#191919",
-      "#bbbbbb",
-      "#010101"
-    ],
-    "aspectRatio": 0.9181466221866255,
-    "rank": 32
+    "rank": 23
   },
   {
     "id": "wombat",
@@ -1003,7 +742,7 @@
       "#000000"
     ],
     "aspectRatio": 0.8614508959759867,
-    "rank": 33
+    "rank": 24
   },
   {
     "id": "seagull",
@@ -1031,34 +770,7 @@
       "#010101"
     ],
     "aspectRatio": 0.6888874071531409,
-    "rank": 34
-  },
-  {
-    "id": "calf",
-    "title": "Calf",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "cow",
-      "calf",
-      "farm",
-      "baby",
-      "mammal"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354913/calf",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#bbbbbb",
-      "#4d4d4d",
-      "#000000",
-      "#333333"
-    ],
-    "aspectRatio": 0.9618360651394894,
-    "rank": 35
+    "rank": 25
   },
   {
     "id": "lamb",
@@ -1084,57 +796,7 @@
       "#333333"
     ],
     "aspectRatio": 0.9635071044657564,
-    "rank": 36
-  },
-  {
-    "id": "puppy",
-    "title": "Puppy",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "dog",
-      "puppy",
-      "pet",
-      "mammal",
-      "baby"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354850/puppy",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#784421",
-      "#000000",
-      "#a05a2c",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.1697208594180672,
-    "rank": 37
-  },
-  {
-    "id": "tokyo-winter-version-1",
-    "title": "Tokyo Winter Version 1",
-    "tags": [
-      "tokyo",
-      "winter",
-      "version1",
-      "v1",
-      "tokyo tower"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354804/tokyo-winter-version-1",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#bbbbbb",
-      "#ff4c4c",
-      "#5a7d9a",
-      "#4a657a"
-    ],
-    "aspectRatio": 1,
-    "rank": 38
+    "rank": 26
   },
   {
     "id": "classic-puerto-rico-flag",
@@ -1156,28 +818,7 @@
       "#3cb44b"
     ],
     "aspectRatio": 1.5,
-    "rank": 39
-  },
-  {
-    "id": "puerto-rico-flag-as-a-heart",
-    "title": "Puerto Rico Flag as a Heart",
-    "tags": [
-      "puerto rico",
-      "flag",
-      "heart",
-      "america"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354770/puerto-rico-flag-as-a-heart",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#ee0000",
-      "#bbbbbb",
-      "#0044ff"
-    ],
-    "aspectRatio": 1.134256182409558,
-    "rank": 40
+    "rank": 27
   },
   {
     "id": "radiation-symbol-rounded-corners",
@@ -1197,7 +838,7 @@
       "#1a1a1a"
     ],
     "aspectRatio": 1.07643294373676,
-    "rank": 41
+    "rank": 28
   },
   {
     "id": "radiation-warning-round-logo",
@@ -1221,7 +862,7 @@
       "#000000"
     ],
     "aspectRatio": 1,
-    "rank": 42
+    "rank": 29
   },
   {
     "id": "blue-paint-roller-brush-icon",
@@ -1258,7 +899,7 @@
       "#d9dbdb"
     ],
     "aspectRatio": 0.6440224518701149,
-    "rank": 43
+    "rank": 30
   },
   {
     "id": "headphones-icon",
@@ -1296,7 +937,7 @@
       "#959fa6"
     ],
     "aspectRatio": 0.8932365897901011,
-    "rank": 44
+    "rank": 31
   },
   {
     "id": "microphone-icon",
@@ -1339,7 +980,7 @@
       "#767d83"
     ],
     "aspectRatio": 0.5048108606827468,
-    "rank": 45
+    "rank": 32
   },
   {
     "id": "microscope-icon",
@@ -1382,7 +1023,7 @@
       "#585e62"
     ],
     "aspectRatio": 0.7978198948290972,
-    "rank": 46
+    "rank": 33
   },
   {
     "id": "japanese-person-from-the-back",
@@ -1416,7 +1057,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3823761477372875,
-    "rank": 47
+    "rank": 34
   },
   {
     "id": "cow",
@@ -1459,7 +1100,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 48
+    "rank": 35
   },
   {
     "id": "pig",
@@ -1499,7 +1140,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 49
+    "rank": 36
   },
   {
     "id": "chicken",
@@ -1532,7 +1173,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 50
+    "rank": 37
   },
   {
     "id": "parrot",
@@ -1561,7 +1202,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 51
+    "rank": 38
   },
   {
     "id": "parrot-icon-flat-black-simple",
@@ -1588,7 +1229,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.0133428340258652,
-    "rank": 52
+    "rank": 39
   },
   {
     "id": "frog",
@@ -1622,7 +1263,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 53
+    "rank": 40
   },
   {
     "id": "snake",
@@ -1656,7 +1297,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 54
+    "rank": 41
   },
   {
     "id": "turtle",
@@ -1690,7 +1331,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 55
+    "rank": 42
   },
   {
     "id": "rabbit",
@@ -1725,7 +1366,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 56
+    "rank": 43
   },
   {
     "id": "rooster",
@@ -1761,7 +1402,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 57
+    "rank": 44
   },
   {
     "id": "horse",
@@ -1795,7 +1436,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 58
+    "rank": 45
   },
   {
     "id": "dog",
@@ -1829,7 +1470,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 59
+    "rank": 46
   },
   {
     "id": "red-heart-frame-with-dark-red-middle",
@@ -1853,37 +1494,7 @@
       "#5a0000"
     ],
     "aspectRatio": 1.1420362488333045,
-    "rank": 60
-  },
-  {
-    "id": "pelican",
-    "title": "Pelican",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "pelican",
-      "bird",
-      "ocean",
-      "river",
-      "lake",
-      "pond",
-      "wetland",
-      "marsh"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354332/pelican",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#ff4b00",
-      "#bbbbbb",
-      "#010101",
-      "#1b1b1b"
-    ],
-    "aspectRatio": 0.5633678417171832,
-    "rank": 61
+    "rank": 47
   },
   {
     "id": "snake-remix",
@@ -1910,7 +1521,7 @@
       "#b6b428"
     ],
     "aspectRatio": 0.8992184433103744,
-    "rank": 62
+    "rank": 48
   },
   {
     "id": "puma",
@@ -1942,33 +1553,7 @@
       "#010101"
     ],
     "aspectRatio": 0.6361054091046416,
-    "rank": 63
-  },
-  {
-    "id": "grey-cat",
-    "title": "Grey cat",
-    "tags": [
-      "cat",
-      "kitten",
-      "animal",
-      "pet",
-      "feline",
-      "paws",
-      "whiskers",
-      "cartoon",
-      "grey cat"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/353865/grey-cat",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#808080",
-      "#000000",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.0290950728682848,
-    "rank": 64
+    "rank": 49
   },
   {
     "id": "a-new-rotate-animation",
@@ -1986,7 +1571,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 65
+    "rank": 50
   },
   {
     "id": "atom-animation",
@@ -2004,7 +1589,7 @@
       "#ff0000"
     ],
     "aspectRatio": 1,
-    "rank": 66
+    "rank": 51
   },
   {
     "id": "double-happiness",
@@ -2030,7 +1615,7 @@
       "#c20000"
     ],
     "aspectRatio": 0.9918257963747297,
-    "rank": 67
+    "rank": 52
   },
   {
     "id": "simple-flat-hearts-love-is-in-the-air",
@@ -2064,7 +1649,7 @@
       "#ff0003"
     ],
     "aspectRatio": 1.3116562881832503,
-    "rank": 68
+    "rank": 53
   },
   {
     "id": "circle-a-red-version",
@@ -2084,7 +1669,7 @@
       "#cc0001"
     ],
     "aspectRatio": 1.0126903553299493,
-    "rank": 69
+    "rank": 54
   },
   {
     "id": "golden-angle-rotate-animation",
@@ -2103,7 +1688,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 70
+    "rank": 55
   },
   {
     "id": "two-cross-animation",
@@ -2121,7 +1706,7 @@
       "#7f7f7f"
     ],
     "aspectRatio": 1,
-    "rank": 71
+    "rank": 56
   },
   {
     "id": "cross-animate",
@@ -2140,7 +1725,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 72
+    "rank": 57
   },
   {
     "id": "snail-escargot-decroissance",
@@ -2158,7 +1743,7 @@
       "#000000"
     ],
     "aspectRatio": 1.8378363268561335,
-    "rank": 73
+    "rank": 58
   },
   {
     "id": "baffled-man-sitting-at-table-cartoon",
@@ -2208,7 +1793,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.8736292993651739,
-    "rank": 74
+    "rank": 59
   },
   {
     "id": "cool-cat",
@@ -2244,7 +1829,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1167411479794074,
-    "rank": 75
+    "rank": 60
   },
   {
     "id": "atom",
@@ -2274,7 +1859,7 @@
       "#2f4bff"
     ],
     "aspectRatio": 0.8912429378531073,
-    "rank": 76
+    "rank": 61
   },
   {
     "id": "simple-poison-bottle",
@@ -2339,7 +1924,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3314193300081251,
-    "rank": 77
+    "rank": 62
   },
   {
     "id": "bottle-simple-black-label",
@@ -2393,7 +1978,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3314193300081251,
-    "rank": 78
+    "rank": 63
   },
   {
     "id": "moosefather-versus-mountain-lion",
@@ -2428,7 +2013,7 @@
       "#000000"
     ],
     "aspectRatio": 1.5999999000000062,
-    "rank": 79
+    "rank": 64
   },
   {
     "id": "blues-guitarist",
@@ -2446,7 +2031,7 @@
       "#000080"
     ],
     "aspectRatio": 0.7089700996677741,
-    "rank": 80
+    "rank": 65
   },
   {
     "id": "castle",
@@ -2466,7 +2051,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.4476257496555789,
-    "rank": 81
+    "rank": 66
   },
   {
     "id": "simple-skull",
@@ -2487,7 +2072,7 @@
       "#000000"
     ],
     "aspectRatio": 1.498335175624715,
-    "rank": 82
+    "rank": 67
   },
   {
     "id": "snail",
@@ -2509,7 +2094,7 @@
       "#ff7f2a"
     ],
     "aspectRatio": 1.7765812260701395,
-    "rank": 83
+    "rank": 68
   },
   {
     "id": "thick-red-outlined-white-heart",
@@ -2543,7 +2128,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1234731092925239,
-    "rank": 84
+    "rank": 69
   },
   {
     "id": "yutnori",
@@ -2569,7 +2154,7 @@
       "#c62033"
     ],
     "aspectRatio": 1.0039841623512054,
-    "rank": 85
+    "rank": 70
   },
   {
     "id": "dustdfg-medal",
@@ -2589,7 +2174,7 @@
       "#ffd42a"
     ],
     "aspectRatio": 1.0005984193784125,
-    "rank": 86
+    "rank": 71
   },
   {
     "id": "chessboard-variation",
@@ -2613,7 +2198,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 87
+    "rank": 72
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -2637,7 +2222,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 88
+    "rank": 73
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -2661,7 +2246,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 89
+    "rank": 74
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -2685,31 +2270,7 @@
       "#ff8080"
     ],
     "aspectRatio": 1.0000001049868876,
-    "rank": 90
-  },
-  {
-    "id": "linux-tux",
-    "title": "Linux Tux",
-    "tags": [
-      "linux",
-      "tux",
-      "penguin",
-      "icon",
-      "avatar",
-      "animal"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348432/linux-tux",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#ffc020",
-      "#212121",
-      "#bbbbbb",
-      "#ff3e03"
-    ],
-    "aspectRatio": 1,
-    "rank": 91
+    "rank": 75
   },
   {
     "id": "be-your-own-hero",
@@ -2733,7 +2294,7 @@
       "#000000"
     ],
     "aspectRatio": 0.7764632394893226,
-    "rank": 92
+    "rank": 76
   },
   {
     "id": "guitar",
@@ -2755,6 +2316,6 @@
       "#967b1f"
     ],
     "aspectRatio": 0.8500569111203942,
-    "rank": 93
+    "rank": 77
   }
 ]
