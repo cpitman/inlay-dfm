@@ -2,9 +2,13 @@ import type { Design, VectorData, WoodConfig, AnalysisResult, DFMSettings, Place
 import {
   runDfmAnalysis,
   runDfmAnalysisLite,
+  DEFAULT_CANVAS_WIDTH,
 } from './dfmAnalysis';
 import { fillEnclosedHoles } from './fillEnclosedHoles';
-import { fillConvexHullCovered } from './fillConvexHullCovered';
+// fillConvexHullCovered is currently deferred (see comment in
+// applyFillAll). Import retained for future re-enablement.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { fillConvexHullCovered as _fillConvexHullCovered } from './fillConvexHullCovered';
 import { removeFullyOccludedRegions } from './removeOccludedRegions';
 import { combineLayers } from './svgLayers';
 import { preAnalyzeLayerOrder, topoSortByArea } from './layerOrderOptimizer';
@@ -13,22 +17,6 @@ import { EMPTY_SIDE_AGGREGATE, type SideAggregate } from './pricing';
 
 /** Manual tool change overhead used by the guided experience. */
 const TOOL_CHANGE_MINUTES_MANUAL = 5;
-/**
- * Analysis canvas resolution for the FINAL DFM analysis in the guided
- * flow, in pixels per inch. 240 ppi resolves features down to
- * ~0.0042" — slightly finer than the ±0.005" X/Y accuracy of a
- * typical CNC router. The expert flow keeps its own user-controlled
- * `analysisResolution` setting and is unaffected.
- */
-const GUIDED_PIXELS_PER_INCH = 240;
-/**
- * Resolution used by the lite-pass + fill modification. Half of
- * `GUIDED_PIXELS_PER_INCH` — connectivity-based fill detection is
- * resolution-insensitive at this scale, but the per-layer rasterization
- * and per-pixel work drops to ~25% of the full-pass cost.
- */
-const LITE_PIXELS_PER_INCH = 120;
-
 /** Per-design optimization output. One entry per `Design` in the input. */
 export interface DesignOptimizationResult {
   /** Stable id from the input `Design`. */
@@ -146,15 +134,13 @@ async function runSingleDesignOptimization(
   // Scale the analysis canvas with the design — bigger designs need
   // more pixels to keep the same physical resolution. No upper cap;
   // very large designs trade some optimizer wall-time for fidelity.
-  const canvasWidth     = Math.max(1, Math.ceil(designWidthInches * GUIDED_PIXELS_PER_INCH));
-  const liteCanvasWidth = Math.max(1, Math.ceil(designWidthInches * LITE_PIXELS_PER_INCH));
+  const canvasWidth = DEFAULT_CANVAS_WIDTH;
 
   const settings: DFMSettings = {
     designWidthInches,
     vbitAngleDegrees: 60,
     inlayDepthInches,
     grainDirection: 'horizontal',
-    analysisResolution: 'default',
     clearanceBitDiameterInches: 0.25,
     clearanceStrategy: [0.25],
     toolChangeMinutes: TOOL_CHANGE_MINUTES_MANUAL,
@@ -186,7 +172,7 @@ async function runSingleDesignOptimization(
   // Skips per-preset overlay encoding, depth maps, and the machining
   // matrix — those run once at the end after fill + extend commit.
   onProgress?.(`Inspecting your design${suffix}…`);
-  const lite = await runDfmAnalysisLite(workingVector, settings, order, liteCanvasWidth);
+  const lite = await runDfmAnalysisLite(workingVector, settings, order);
 
   // Phase 2: layer-mask expansion. Two passes inside `applyFillAll`:
   // closed-hole fill on lite-flagged layers, then convex-hull fill on
@@ -198,7 +184,7 @@ async function runSingleDesignOptimization(
   const holeFillTargets = lite.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
   if (order.length >= 2) {
     onProgress?.(`Optimizing layer geometry${suffix}…`);
-    workingVector = await applyFillAll(workingVector, holeFillTargets, designWidthInches, order, liteCanvasWidth);
+    workingVector = await applyFillAll(workingVector, holeFillTargets, designWidthInches, order);
     appliedFill = true;
   }
 
@@ -356,9 +342,15 @@ async function applyFillAll(
   holeFillTargets: string[],
   designWidthInches: number,
   colorOrder: string[],
-  canvasWidth: number,
 ): Promise<VectorData> {
-  const ENABLE_HULL_FILL = true;
+  // Pass 2 (convex-hull fill) is currently DEFERRED. Its previous
+  // partial-fill semantics (= absorb the covered fraction of a
+  // hole, leaving the uncovered fraction as a thin sliver) produced
+  // ragged geometry on the synthesized stroke layer's ear-area
+  // hole. The user explicitly wants partial-fill paused pending a
+  // smarter strategy. The new BFS-based fillEnclosedHoles handles
+  // the fully-covered-with-islands case (= the "biggest square"
+  // rule) cleanly, which was the main thing pass 2 was bridging.
   const ENABLE_OCCLUDED_REMOVAL = true;
 
   let workingLayers = vector.layers;
@@ -369,24 +361,27 @@ async function applyFillAll(
     svgString: combineLayers(workingLayers, vector.viewBox, vector.naturalWidth, vector.naturalHeight),
   });
 
-  // Pass 1: closed-hole fill. Limited to layers the lite analysis
-  // already flagged — a precise, fast win.
+  // Pass 1: closed-hole fill. The polygon-native implementation
+  // BFS-walks each layer's PolyTree and fills any hole whose
+  // exposed area (= ring interior minus same-layer islands inside)
+  // is fully covered by some later layer. Holes that are only
+  // partially covered are left intact. Limited to layers the lite
+  // analysis already flagged.
   for (const colorHex of holeFillTargets) {
-    const res = await fillEnclosedHoles(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
-    if (res.filledHoleCount > 0) workingLayers = res.layers;
-  }
-
-  // Pass 2: convex-hull fill. Run for every non-final color; the lite
-  // analysis doesn't surface a "hull-fillable" hint, and the per-layer
-  // rasterization the function does internally is cheap relative to
-  // the screening canvas it operates on.
-  if (ENABLE_HULL_FILL) {
-    for (let i = 0; i < colorOrder.length - 1; i++) {
-      const colorHex = colorOrder[i];
-      const res = await fillConvexHullCovered(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
-      if (res.filledHoleCount > 0) workingLayers = res.layers;
+    const res = await fillEnclosedHoles(buildVector(), colorHex, designWidthInches, colorOrder);
+    if (res.filledHoleCount > 0 || res.partiallyFilledHoleCount > 0) {
+      workingLayers = res.layers;
     }
   }
+
+  // Pass 2 (convex-hull fill / partial-fill of concavities) is
+  // currently DEFERRED. Its previous polygon-native implementation
+  // absorbed only the laterUnion-covered fraction of a concavity,
+  // leaving thin uncovered slivers as visible artifacts on the
+  // synthesized stroke layer. The strategy needs reworking before
+  // it can be safely re-enabled. fillEnclosedHoles handles the
+  // full-coverage case (= the "biggest square" rule with island
+  // absorption), which is what most designs need.
 
   // Pass 3: remove fully-occluded regions. Runs LAST so any
   // components grown or merged by passes 1–2 have the chance to
@@ -394,7 +389,7 @@ async function applyFillAll(
   if (ENABLE_OCCLUDED_REMOVAL) {
     for (let i = 0; i < colorOrder.length - 1; i++) {
       const colorHex = colorOrder[i];
-      const res = await removeFullyOccludedRegions(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
+      const res = await removeFullyOccludedRegions(buildVector(), colorHex, designWidthInches, colorOrder);
       if (res.removedComponentCount > 0) workingLayers = res.layers;
     }
   }

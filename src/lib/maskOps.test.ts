@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dilateMask, erodeMask } from './maskOps';
+import { dilateMask } from './maskOps';
 
 function emptyMask(w: number, h: number): Uint8Array {
   return new Uint8Array(w * h);
@@ -87,77 +87,3 @@ describe('dilateMask', () => {
   });
 });
 
-describe('erodeMask', () => {
-  it('returns the same mask when radiusPx is 0', () => {
-    const w = 10, h = 10;
-    const m = emptyMask(w, h);
-    m[5 * w + 5] = 1;
-    const e = erodeMask(m, w, h, 0);
-    expect(e).toBe(m);
-  });
-
-  it('a single pixel is fully eroded by radius 1', () => {
-    const w = 10, h = 10;
-    const m = emptyMask(w, h);
-    m[5 * w + 5] = 1;
-    const e = erodeMask(m, w, h, 1);
-    expect(countSet(e)).toBe(0);
-  });
-
-  it('a 3×3 square fully erodes when radius >= 2 (no pixel is more than 1 deep)', () => {
-    const w = 11, h = 11;
-    const m = emptyMask(w, h);
-    for (let y = 4; y <= 6; y++) for (let x = 4; x <= 6; x++) m[y * w + x] = 1;
-    expect(countSet(erodeMask(m, w, h, 2))).toBe(0);
-  });
-
-  it('a solid 9×9 square erodes inward by 1 → 7×7 strict interior', () => {
-    const w = 11, h = 11;
-    const m = emptyMask(w, h);
-    for (let y = 1; y <= 9; y++) for (let x = 1; x <= 9; x++) m[y * w + x] = 1;
-    const e = erodeMask(m, w, h, 1);
-    expect(countSet(e)).toBe(49);
-    expect(e[1 * w + 1]).toBe(0); // boundary corner
-    expect(e[1 * w + 5]).toBe(0); // boundary edge
-    expect(e[5 * w + 5]).toBe(1); // center
-    expect(e[2 * w + 2]).toBe(1); // first interior
-  });
-
-  it('two boundary-sharing rects have empty intersection after eroding both by 1', () => {
-    // The case the layer-order pre-pass cares about: two adjacent inlays
-    // sharing only a column of pixels. Erosion strips the shared column
-    // from both, leaving disjoint masks.
-    const w = 12, h = 6;
-    const left = emptyMask(w, h);
-    for (let y = 1; y <= 4; y++) for (let x = 1; x <= 5; x++) left[y * w + x] = 1;
-    const right = emptyMask(w, h);
-    for (let y = 1; y <= 4; y++) for (let x = 5; x <= 9; x++) right[y * w + x] = 1;
-    expect(left[2 * w + 5]).toBe(1);
-    expect(right[2 * w + 5]).toBe(1);
-
-    const eL = erodeMask(left,  w, h, 1);
-    const eR = erodeMask(right, w, h, 1);
-    let intersect = 0;
-    for (let k = 0; k < eL.length; k++) if (eL[k] && eR[k]) intersect++;
-    expect(intersect).toBe(0);
-  });
-
-  it('two interior-overlapping rects keep non-empty intersection after eroding by 1', () => {
-    const w = 12, h = 6;
-    const a = emptyMask(w, h);
-    for (let y = 1; y <= 4; y++) for (let x = 1; x <= 5; x++) a[y * w + x] = 1;
-    const b = emptyMask(w, h);
-    for (let y = 1; y <= 4; y++) for (let x = 3; x <= 7; x++) b[y * w + x] = 1;
-    const eA = erodeMask(a, w, h, 1);
-    const eB = erodeMask(b, w, h, 1);
-    let intersect = 0;
-    for (let k = 0; k < eA.length; k++) if (eA[k] && eB[k]) intersect++;
-    expect(intersect).toBeGreaterThan(0);
-  });
-
-  it('an empty mask stays empty after erosion', () => {
-    const w = 10, h = 10;
-    const m = emptyMask(w, h);
-    expect(countSet(erodeMask(m, w, h, 5))).toBe(0);
-  });
-});

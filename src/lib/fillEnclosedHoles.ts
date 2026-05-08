@@ -1,57 +1,140 @@
 import type { Layer, VectorData } from '@/types';
-import { parseViewBox, rasterizeLayerToBinaryMask } from './svgLayers';
-import { findEnclosedHoles } from './morphology';
-import { maskToSvgPath } from './maskToPath';
-import { distanceTransform } from './distanceTransform';
-import { constrainedDistanceTransform } from './constrainedDistance';
-import { dilateMask } from './maskOps';
+import {
+  multiPolygonCanonicalize,
+  multiPolygonDifference,
+  multiPolygonOffset,
+  multiPolygonUnion,
+  multiPolygonUnionAll,
+  stripPolygonHoles,
+  walkPolygonHoles,
+} from './clipperOps';
+import {
+  multiPolygonArea,
+  multiPolygonIsEmpty,
+  pointInMultiPolygon,
+  type MultiPolygon,
+  type Point,
+  type Ring,
+} from './polygon';
+import {
+  svgFragmentToMultiPolygon,
+  multiPolygonToSvgFragment,
+} from './polygonParser';
 
-const DEFAULT_RASTER_WIDTH = 1200;
 /**
- * Minimum fraction of a hole's pixels that must be covered by later
- * layers for it to qualify as fillable. Set tight (99.5%) so we still
- * preserve genuinely-uncovered features like whiskers and eye sclera
- * gaps but tolerate the small (sub-1%) sub-pixel-boundary stragglers
- * that even a perfect rasterization can't avoid when adjacent layers
- * meet at a sub-pixel-aligned boundary.
+ * Bit clearance margin used by the partial-fill path. The grown-NCU
+ * (= non-covered-region union, inflated by this much) is the
+ * "danger zone" the simplified hole H′ must enclose so the V-bit
+ * stays at least this far from any actually-uncovered sliver.
  */
-const HOLE_COVERAGE_THRESHOLD = 0.995;
-// Dilate the region traced into a polygon by this many pixels so the appended
-// path overshoots into the original mask (or covering later layers), bridging
-// the inherent half-pixel inset from marching squares + Douglas-Peucker drift.
-// Same-color overlap with the original is invisible; later-layer overlap is
-// hidden by z-order.
-const TRACE_OVERSHOOT_PX = 2;
-/**
- * Clearance-bit margin to keep around earlier-layer (lower-z, drawn-
- * first) boundaries. Fill is excluded from a 0.3"-wide band centered
- * on every earlier-layer edge so the bit cutting the fill region has
- * room to clear earlier-layer wood without crashing into its edge.
- * 0.3" sits comfortably above the 1/4" clearance bit standard.
- */
-const EARLIER_BOUNDARY_MARGIN_INCHES = 0.3;
+const HOLE_MARGIN_INCHES = 0.13;
 
 interface FillResult {
-  /** New layers array with the target layer's fragment extended (fill path appended). */
+  /** New layers array with the target layer's fragment replaced by
+   *  the post-fill polygon. */
   layers: Layer[];
-  /** Number of holes that were filled. */
+  /** Number of holes that were fully absorbed by the union. */
   filledHoleCount: number;
-  /** Total area filled in (sq inches). */
+  /** Total area filled in (sq inches) by full-hole absorption. */
   filledAreaSqIn: number;
+  /** Number of holes whose boundaries were simplified (partial fill). */
+  partiallyFilledHoleCount: number;
+  /** Total area absorbed (sq inches) by partial-fill simplification. */
+  partiallyFilledAreaSqIn: number;
 }
 
 /**
- * Fill enclosed holes in `targetColorHex`'s pocket that are fully covered
- * by the union of later inlay layers. The resulting design is visually
- * identical (the holes were hidden by later layers anyway) but the V-bit
- * no longer has to trace the hole perimeter on either side, saving time.
+ * Replace the target hole `holeRing` with a simplified hole H′
+ * whose boundary hugs the inflated danger zone (`grownNCU`) and
+ * uses straight chords across the safe stretches.
+ *
+ * Per-edge classification: the edge `(holeRing[i], holeRing[i+1])`
+ * is INSIDE iff its midpoint lies inside `grownNCU`. A vertex is
+ * KEPT iff at least one adjacent edge is INSIDE; SKIPPED iff both
+ * adjacent edges are OUTSIDE (= middle of a safe run, collapsed
+ * into a chord).
+ *
+ * Degenerate cases (no boundary crossings between H and grown-NCU):
+ *   - all edges OUTSIDE  → grown-NCU is fully internal to H. Return
+ *     grown-NCU's outer rings as the new holes.
+ *   - all edges INSIDE   → H is entirely inside the danger zone.
+ *     No simplification possible; return [holeRing] unchanged.
+ *
+ * The midpoint test mis-classifies edges that genuinely cross
+ * grown-NCU's boundary mid-edge, but the polygon parser flattens
+ * to ≤0.05 chord error so edges are short and crossings rare. The
+ * final `multiPolygonCanonicalize` repairs any self-intersection
+ * the kept-vertex polyline might produce.
+ */
+function partiallyFillHoleRing(
+  holeRing: Ring,
+  grownNCU: MultiPolygon,
+): MultiPolygon {
+  if (multiPolygonIsEmpty(grownNCU)) return [holeRing];
+  const n = holeRing.length;
+  if (n < 3) return [holeRing];
+
+  const edgeInside: boolean[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = holeRing[i];
+    const b = holeRing[(i + 1) % n];
+    const mid: Point = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
+    edgeInside[i] = pointInMultiPolygon(mid, grownNCU);
+  }
+
+  let anyInside  = false;
+  let anyOutside = false;
+  for (const e of edgeInside) {
+    if (e) anyInside = true; else anyOutside = true;
+  }
+  if (!anyInside)  return grownNCU;          // grown-NCU fully internal to H
+  if (!anyOutside) return [holeRing];        // H fully inside grown-NCU
+
+  const kept: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = (i - 1 + n) % n;
+    if (edgeInside[prev] || edgeInside[i]) kept.push(holeRing[i]);
+  }
+  if (kept.length < 3) return [holeRing];
+
+  const canonical = multiPolygonCanonicalize([kept]);
+  return multiPolygonIsEmpty(canonical) ? [holeRing] : canonical;
+}
+
+/**
+ * Fill enclosed holes in `targetColorHex`'s polygon and partially
+ * simplify the boundaries of holes that are only fractionally
+ * covered. Both modes shrink the V-bit's traversal — full fills
+ * eliminate the hole entirely; partial fills replace the safe
+ * portions of a hole's perimeter with straight chords, leaving
+ * the danger arcs (within 0.13" of an actually-uncovered sliver)
+ * intact.
+ *
+ * Polygon-native, BFS-through-PolyTree implementation:
+ *   1. Parse target + every later layer's svgFragment to a
+ *      MultiPolygon (Bezier-flattened).
+ *   2. Build `allLayersUnion = target ∪ laterUnion`. Including
+ *      `target` here is the key: same-layer islands sitting inside
+ *      a hole are part of the layer's mass and shouldn't count as
+ *      "uncovered" when judging hole coverage.
+ *   3. BFS-walk the target's PolyTree. For each hole `H`:
+ *      - If `[H_ring] ⊆ allLayersUnion` (= no uncovered area
+ *        inside H), full-fill: stage `H_ring` for union into the
+ *        target. Skip descending — nested geometry is absorbed.
+ *      - Else, partial-fill: grow the uncovered region by the hole
+ *        margin, strip its holes, run `partiallyFillHoleRing` to
+ *        compute H′, and stage `[H_ring] − H′` for union into the
+ *        target. Still descend so nested holes can be checked too.
+ *   4. Final union: target ∪ (full-fill rings) ∪ (partial-fill
+ *      mass-added). The result has H replaced by H′ for partial
+ *      fills, with H′'s rings re-emerging as holes of the resulting
+ *      polygon under even-odd.
  */
 export async function fillEnclosedHoles(
   vector: VectorData,
   targetColorHex: string,
   designWidthInches: number,
   colorOrder?: string[],
-  rasterWidth: number = DEFAULT_RASTER_WIDTH,
 ): Promise<FillResult> {
   const order = colorOrder ?? vector.detectedColors;
   const targetIndex = order.indexOf(targetColorHex);
@@ -59,162 +142,160 @@ export async function fillEnclosedHoles(
     throw new Error(`Target color ${targetColorHex} not found in layer order.`);
   }
   if (targetIndex === order.length - 1) {
-    // No later layers exist, so no hole can be "covered" by later inlays.
-    return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
+    return {
+      layers: vector.layers,
+      filledHoleCount: 0,
+      filledAreaSqIn: 0,
+      partiallyFilledHoleCount: 0,
+      partiallyFilledAreaSqIn: 0,
+    };
   }
 
-  const aspect = vector.naturalHeight / vector.naturalWidth;
-  const canvasW = rasterWidth;
-  const canvasH = Math.max(1, Math.round(rasterWidth * aspect));
-  const pixelsPerInch = canvasW / designWidthInches;
-  const n = canvasW * canvasH;
+  // sq inches per (svg-user-unit)². Polygon coords come straight
+  // from the source SVG viewBox.
+  const inchesPerUnit = designWidthInches / vector.naturalWidth;
+  const sqInchesPerSqUnit = inchesPerUnit * inchesPerUnit;
+  const holeMarginUnits = HOLE_MARGIN_INCHES / inchesPerUnit;
 
-  // Per-layer rasterization for every layer (target, earlier, later).
-  // Earlier-layer masks feed the boundary danger-zone check; later-
-  // layer masks feed the original coverage check.
-  const masksByIndex: Uint8Array[] = [];
-  for (let i = 0; i < order.length; i++) {
+  const targetLayer = vector.layers.find(l => l.colorHex === targetColorHex);
+  if (!targetLayer) {
+    return {
+      layers: vector.layers,
+      filledHoleCount: 0,
+      filledAreaSqIn: 0,
+      partiallyFilledHoleCount: 0,
+      partiallyFilledAreaSqIn: 0,
+    };
+  }
+  const target = svgFragmentToMultiPolygon(targetLayer.svgFragment);
+  if (multiPolygonIsEmpty(target)) {
+    return {
+      layers: vector.layers,
+      filledHoleCount: 0,
+      filledAreaSqIn: 0,
+      partiallyFilledHoleCount: 0,
+      partiallyFilledAreaSqIn: 0,
+    };
+  }
+
+  const laterParts: MultiPolygon[] = [];
+  for (let i = targetIndex + 1; i < order.length; i++) {
     const layer = vector.layers.find(l => l.colorHex === order[i]);
-    if (!layer) { masksByIndex.push(new Uint8Array(n)); continue; }
-    const mask = await rasterizeLayerToBinaryMask(
-      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-      canvasW, canvasH,
-    );
-    masksByIndex.push(mask);
+    if (!layer) continue;
+    const mp = svgFragmentToMultiPolygon(layer.svgFragment);
+    if (!multiPolygonIsEmpty(mp)) laterParts.push(mp);
   }
+  const laterUnion = multiPolygonUnionAll(laterParts);
+  const allLayersUnion = multiPolygonUnion(target, laterUnion);
 
-  const targetMask = masksByIndex[targetIndex];
-  // Union of all strictly-later layers' masks.
-  const laterUnion = new Uint8Array(n);
-  for (let i = targetIndex + 1; i < masksByIndex.length; i++) {
-    const m = masksByIndex[i];
-    for (let k = 0; k < n; k++) if (m[k]) laterUnion[k] = 1;
-  }
-  // Danger source for the boundary clearance check: earlier-layer
-  // union (intact wood the bit must clear) ∪ background-visible
-  // pixels (raw board the bit must clear). The bit cutting the fill
-  // region needs ~0.3" clearance from the boundary of EITHER, so we
-  // treat them uniformly.
-  //
-  // Background-visible is computed from `NOT (allLayers dilated by
-  // 1 px)` rather than `NOT allLayers` directly. The dilation
-  // absorbs the 1-pixel-wide stragglers that adjacent layers'
-  // rasterizations leave at their shared boundaries — we already
-  // tolerate them in the per-hole coverage threshold, but if we
-  // didn't filter them out here they'd each seed their own ~36-px
-  // exclusion ring in the constrained-DT pass and produce splotchy
-  // donut-shaped holes inside the resulting fill.
-  const allLayers = new Uint8Array(n);
-  for (const m of masksByIndex) {
-    for (let k = 0; k < n; k++) if (m[k]) allLayers[k] = 1;
-  }
-  const allLayersDilated = dilateMask(allLayers, canvasW, canvasH, 1);
+  let filledHoleCount = 0;
+  let filledAreaSqUnits = 0;
+  let partiallyFilledHoleCount = 0;
+  let partiallyFilledAreaSqUnits = 0;
+  const fillRings: Ring[] = [];
+  const partialMassAdded: MultiPolygon[] = [];
 
-  const dangerSource = new Uint8Array(n);
-  for (let i = 0; i < targetIndex; i++) {
-    const m = masksByIndex[i];
-    for (let k = 0; k < n; k++) if (m[k]) dangerSource[k] = 1;
-  }
-  for (let k = 0; k < n; k++) {
-    if (!dangerSource[k] && !allLayersDilated[k]) dangerSource[k] = 1;
-  }
+  // Diagnostic: dump per-hole decisions to the dev-mode browser
+  // console. Statically inlined at build time so production bundles
+  // are untouched. Lets the user reproduce a hole-fill regression
+  // and share the log without us re-instrumenting on each iteration.
+  const DEBUG_FILLS = process.env.NODE_ENV === 'development';
+  let holeIndex = 0;
 
-  // Detect mostly-covered holes and accumulate them into a single
-  // fill mask. A hole qualifies when its later-layer-covered fraction
-  // is ≥ HOLE_COVERAGE_THRESHOLD (99.5%) — tolerates the sub-pixel
-  // boundary stragglers that adjacent-layer rasterizations always
-  // produce, while still preserving genuinely-uncovered features.
-  const holes = findEnclosedHoles(targetMask, canvasW, canvasH);
-  const fillMask = new Uint8Array(n);
-  let filledHoleCount = 0, filledPixelCount = 0;
-  for (const hole of holes) {
-    let coveredPx = 0;
-    for (const k of hole.pixels) {
-      if (laterUnion[k]) coveredPx++;
+  walkPolygonHoles(target, holeRing => {
+    const holeMP: MultiPolygon = [holeRing];
+    const holeArea = multiPolygonArea(holeMP);
+    const uncovered = multiPolygonDifference(holeMP, allLayersUnion);
+    const uncoveredArea = multiPolygonArea(uncovered);
+    const idx = holeIndex++;
+
+    // Full-fill when `uncovered` is empty OR a sub-bit-clearance
+    // numerical sliver. Clipper's int-arithmetic boolean op may
+    // leave ≥3-vertex rings with effectively zero area along the
+    // boundary; growing those by `holeMarginUnits` would produce
+    // a phantom "danger zone" the partial-fill algorithm then
+    // tries to preserve, leaving the bit tracing nearly the
+    // original hole. The eroded-empty check rejects any uncovered
+    // region too narrow to fit a half-bit-clearance disk — = a
+    // gap the bit physically can't resolve, so treating it as
+    // covered is geometrically correct.
+    let fullyCovered = multiPolygonIsEmpty(uncovered);
+    if (!fullyCovered) {
+      const uncoveredEroded = multiPolygonOffset(
+        uncovered,
+        -holeMarginUnits / 2,
+        { joinType: 'round' },
+      );
+      fullyCovered = multiPolygonIsEmpty(uncoveredEroded);
     }
-    if (coveredPx / hole.pixels.length < HOLE_COVERAGE_THRESHOLD) continue;
-    for (const k of hole.pixels) fillMask[k] = 1;
-    filledHoleCount++;
-    filledPixelCount += hole.pixels.length;
-  }
-  if (filledHoleCount === 0) {
-    return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
-  }
 
-  // Subtract the danger zone from the fill so we don't extend layer
-  // K's pocket to within a clearance bit's diameter of any boundary
-  // the bit must clear. Constrained distance transform with
-  // `target.mask` as a barrier ensures each NOT-target connected
-  // component is evaluated independently — danger sources on the
-  // opposite side of target.mask from a candidate fill pixel are
-  // physically unreachable to the bit at that position, so they
-  // don't pull the candidate into the danger zone.
-  const marginPx = EARLIER_BOUNDARY_MARGIN_INCHES * pixelsPerInch;
-  if (marginPx > 0) {
-    // Seeds: only danger-source pixels OUTSIDE the target. Pixels
-    // inside target are part of the bit's playing field — they're
-    // cut as part of the layer's pocket, not adjacent obstacles.
-    const seeds = new Uint8Array(n);
-    for (let k = 0; k < n; k++) {
-      if (dangerSource[k] && !targetMask[k]) seeds[k] = 1;
-    }
-    const distFromDanger = constrainedDistanceTransform(seeds, targetMask, canvasW, canvasH);
-    let dangerExcluded = 0;
-    for (let k = 0; k < n; k++) {
-      if (fillMask[k] && distFromDanger[k] <= marginPx) {
-        fillMask[k] = 0;
-        dangerExcluded++;
+    if (fullyCovered) {
+      fillRings.push(holeRing);
+      filledHoleCount++;
+      filledAreaSqUnits += holeArea;
+      if (DEBUG_FILLS) {
+        console.log(
+          `[fillHoles ${targetColorHex} h${idx}] FULL: holeArea=${holeArea.toFixed(2)} sq.u uncovered=${uncoveredArea.toFixed(4)}`,
+        );
       }
+      return true; // skip descending — full-fill absorbs nested geometry
     }
-    filledPixelCount -= dangerExcluded;
-    if (filledPixelCount <= 0) {
-      return { layers: vector.layers, filledHoleCount: 0, filledAreaSqIn: 0 };
+
+    // Partial-fill: grow uncovered, strip holes, simplify H.
+    const grown = multiPolygonOffset(uncovered, holeMarginUnits, { joinType: 'round' });
+    const grownNoHoles = stripPolygonHoles(grown);
+    if (multiPolygonIsEmpty(grownNoHoles)) {
+      if (DEBUG_FILLS) {
+        console.log(
+          `[fillHoles ${targetColorHex} h${idx}] PARTIAL-NOOP (grown collapsed): holeArea=${holeArea.toFixed(2)} sq.u uncovered=${uncoveredArea.toFixed(2)} sq.u`,
+        );
+      }
+      return false;
     }
-  }
-
-  // Trace ONLY the fill region and APPEND it to the existing layer
-  // fragment. Don't trace the union and replace the fragment — that
-  // round-trips the entire layer through pixel space, and the resulting
-  // marching-squares + Douglas-Peucker polygon drifts the original Bezier
-  // boundaries by ~1 px in places, eating into thin background gaps
-  // between adjacent regions on the same layer.
-  //
-  // Dilate fillMask by TRACE_OVERSHOOT_PX before tracing so the appended
-  // polygon overshoots into the original layer mask, bridging the half-
-  // pixel inset of marching squares and any DP drift. Holes are bounded
-  // by targetMask topologically (a "hole" is by definition not connected
-  // to the canvas edge through non-targetMask), so dilation lands strictly
-  // inside targetMask — no risk of painting outside the layer.
-  const fillSeeds = new Uint8Array(n);
-  for (let k = 0; k < n; k++) fillSeeds[k] = fillMask[k] ? 0 : 1;
-  const distFromFill = distanceTransform(fillSeeds, canvasW, canvasH);
-  const tracedMask = new Uint8Array(n);
-  for (let k = 0; k < n; k++) {
-    if (distFromFill[k] <= TRACE_OVERSHOOT_PX) tracedMask[k] = 1;
-  }
-
-  const scaleX = vector.naturalWidth  / canvasW;
-  const scaleY = vector.naturalHeight / canvasH;
-  const vb = parseViewBox(vector.viewBox);
-  const fillPath = maskToSvgPath(tracedMask, canvasW, canvasH, {
-    fill: targetColorHex,
-    scaleX,
-    scaleY,
-    offsetX: vb.x,
-    offsetY: vb.y,
-    simplifyEpsilonPx: 1,
-    minAreaPx: 4,
+    const newHoleMP = partiallyFillHoleRing(holeRing, grownNoHoles);
+    const massAdded = multiPolygonDifference(holeMP, newHoleMP);
+    const massAddedArea = multiPolygonArea(massAdded);
+    if (!multiPolygonIsEmpty(massAdded)) {
+      partialMassAdded.push(massAdded);
+      partiallyFilledHoleCount++;
+      partiallyFilledAreaSqUnits += massAddedArea;
+    }
+    if (DEBUG_FILLS) {
+      const grownArea = multiPolygonArea(grownNoHoles);
+      console.log(
+        `[fillHoles ${targetColorHex} h${idx}] PARTIAL: holeArea=${holeArea.toFixed(2)} sq.u uncovered=${uncoveredArea.toFixed(2)} sq.u grownNCU=${grownArea.toFixed(2)} sq.u massAdded=${massAddedArea.toFixed(2)} sq.u`,
+      );
+    }
+    return false; // descend so nested holes can be checked too
   });
 
-  const newLayers = vector.layers.map(l => {
-    if (l.colorHex !== targetColorHex) return l;
-    const sep = l.svgFragment ? '\n' : '';
-    return { ...l, svgFragment: `${l.svgFragment}${sep}${fillPath}` };
-  });
+  if (filledHoleCount === 0 && partiallyFilledHoleCount === 0) {
+    return {
+      layers: vector.layers,
+      filledHoleCount: 0,
+      filledAreaSqIn: 0,
+      partiallyFilledHoleCount: 0,
+      partiallyFilledAreaSqIn: 0,
+    };
+  }
+
+  let filledTarget = target;
+  if (fillRings.length > 0) filledTarget = multiPolygonUnion(filledTarget, fillRings);
+  if (partialMassAdded.length > 0) {
+    const partialUnion = multiPolygonUnionAll(partialMassAdded);
+    filledTarget = multiPolygonUnion(filledTarget, partialUnion);
+  }
+
+  const newFragment = multiPolygonToSvgFragment(filledTarget, targetColorHex);
+  const newLayers = vector.layers.map(l =>
+    l.colorHex === targetColorHex ? { ...l, svgFragment: newFragment } : l,
+  );
 
   return {
     layers: newLayers,
     filledHoleCount,
-    filledAreaSqIn: filledPixelCount / (pixelsPerInch * pixelsPerInch),
+    filledAreaSqIn: filledAreaSqUnits * sqInchesPerSqUnit,
+    partiallyFilledHoleCount,
+    partiallyFilledAreaSqIn: partiallyFilledAreaSqUnits * sqInchesPerSqUnit,
   };
 }

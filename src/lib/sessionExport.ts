@@ -234,13 +234,9 @@ function validateSettings(value: unknown): DFMSettings {
       }
       return g;
     })(),
-    analysisResolution:       (() => {
-      const r = s.analysisResolution;
-      if (r !== 'low' && r !== 'default' && r !== 'high') {
-        throw new Error('Session field "settings.analysisResolution" must be low, default, or high.');
-      }
-      return r;
-    })(),
+    // analysisResolution: removed in v2026-05-08.11. Old sessions
+    // may carry a low/default/high value; we silently discard it
+    // (canvas resolution is now hardcoded to DEFAULT_CANVAS_WIDTH).
     clearanceBitDiameterInches: (() => {
       const d = s.clearanceBitDiameterInches;
       if (d !== 0.125 && d !== 0.25 && d !== 0.5) {

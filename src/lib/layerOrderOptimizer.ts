@@ -1,23 +1,18 @@
 import type { VectorData } from '@/types';
-import { rasterizeLayerToBinaryMask } from './svgLayers';
-import { erodeMask } from './maskOps';
+import { svgFragmentToMultiPolygon } from './polygonParser';
+import { multiPolygonIntersection, multiPolygonOffset } from './clipperOps';
+import { multiPolygonArea, multiPolygonIsEmpty } from './polygon';
 
 /**
- * Resolution used by `preAnalyzeLayerOrder`. 60 ppi resolves features
- * down to ~0.017", which is plenty for "do these two layers overlap"
- * and per-layer area. Far cheaper than the production analysis (240
- * ppi) — for an 18" design that's 1080 px wide instead of 4320,
- * roughly 16× less compute.
+ * Erosion radius applied to each layer polygon before pairwise
+ * overlap testing. Strips shared-boundary near-touches from counting
+ * as a constraint — only inlays whose carved regions ACTUALLY
+ * overlap (not just kiss along an edge) get a precedence constraint.
+ *
+ * The bitmap predecessor used 1 px at 60 ppi = ~0.017"; this preserves
+ * the same tolerance in inches.
  */
-const PRE_ANALYSIS_PIXELS_PER_INCH = 60;
-
-/**
- * Erosion radius applied to each layer mask before pairwise overlap
- * testing. Strips boundary anti-aliasing without removing real
- * interior overlap — at 60 ppi 1 px = ~0.017", a fair tolerance for
- * "shared boundary" vs "real overlap."
- */
-const OVERLAP_EROSION_PX = 1;
+const OVERLAP_EROSION_INCHES = 1 / 60;
 
 export interface PreAnalysisResult {
   /** Total carved area per inlay color, in². Used as the topological
@@ -32,70 +27,67 @@ export interface PreAnalysisResult {
 /**
  * Cheap pre-pass that collects everything `topoSortByArea` needs to
  * pick the carving order: per-layer surface area + which pairs of
- * layers overlap in the user's artwork. Runs at a low fixed
- * resolution (60 ppi) so it stays inexpensive even at the production
- * 240-ppi target for the full DFM analysis that comes later.
+ * layers overlap in the user's artwork.
+ *
+ * Polygon-native: parses each layer's `svgFragment` directly, computes
+ * area via `multiPolygonArea`, and tests overlap via Clipper boolean
+ * intersection on inward-eroded copies. Faster and more accurate than
+ * the prior 60-ppi rasterize + pixel-AND path — no anti-aliasing
+ * artifacts to erode away, no per-pixel sweeps over a half-MB mask.
  */
 export async function preAnalyzeLayerOrder(
   vector: VectorData,
   designWidthInches: number,
   initialOrder: string[],
 ): Promise<PreAnalysisResult> {
-  const canvasW = Math.max(1, Math.ceil(designWidthInches * PRE_ANALYSIS_PIXELS_PER_INCH));
-  const aspect  = vector.naturalHeight / vector.naturalWidth;
-  const canvasH = Math.max(1, Math.round(canvasW * aspect));
-  const ppiSq   = PRE_ANALYSIS_PIXELS_PER_INCH * PRE_ANALYSIS_PIXELS_PER_INCH;
+  const inchesPerUnit = designWidthInches / vector.naturalWidth;
+  const sqInchesPerSqUnit = inchesPerUnit * inchesPerUnit;
+  const erosionUnits = OVERLAP_EROSION_INCHES / inchesPerUnit;
 
-  // Rasterize each layer in `initialOrder` to a binary mask via the
-  // shared transparent-canvas + alpha-threshold helper.
-  const masks = new Map<string, Uint8Array>();
+  // Parse each layer in `initialOrder` to a MultiPolygon.
+  const polygonByColor = new Map<string, ReturnType<typeof svgFragmentToMultiPolygon>>();
   for (const colorHex of initialOrder) {
     const layer = vector.layers.find(l => l.colorHex === colorHex);
     if (!layer) {
-      masks.set(colorHex, new Uint8Array(canvasW * canvasH));
+      polygonByColor.set(colorHex, []);
       continue;
     }
-    const mask = await rasterizeLayerToBinaryMask(
-      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-      canvasW, canvasH,
-    );
-    masks.set(colorHex, mask);
+    polygonByColor.set(colorHex, svgFragmentToMultiPolygon(layer.svgFragment));
   }
 
   // Per-color area in square inches.
   const areaSqInByColor = new Map<string, number>();
-  for (const [colorHex, mask] of masks) {
-    let count = 0;
-    for (let i = 0; i < mask.length; i++) if (mask[i]) count++;
-    areaSqInByColor.set(colorHex, count / ppiSq);
+  for (const [colorHex, mp] of polygonByColor) {
+    areaSqInByColor.set(colorHex, multiPolygonArea(mp) * sqInchesPerSqUnit);
   }
 
-  // Pairwise overlap (eroded). Iterate in `initialOrder` so any
-  // emitted constraint (a, b) implies a precedes b in user's stack.
-  const erodedByColor = new Map<string, Uint8Array>();
-  for (const [colorHex, mask] of masks) {
-    erodedByColor.set(colorHex, erodeMask(mask, canvasW, canvasH, OVERLAP_EROSION_PX));
+  // Pairwise overlap on inward-eroded polygons. The erosion strips
+  // shared-boundary near-touches (≈ a 0.017" tolerance) so only inlays
+  // with real interior overlap emit a precedence constraint. Iterate
+  // in `initialOrder` so any constraint (a, b) means `a` precedes `b`.
+  const erodedByColor = new Map<string, ReturnType<typeof svgFragmentToMultiPolygon>>();
+  for (const [colorHex, mp] of polygonByColor) {
+    if (multiPolygonIsEmpty(mp) || erosionUnits <= 0) {
+      erodedByColor.set(colorHex, mp);
+    } else {
+      erodedByColor.set(colorHex, multiPolygonOffset(mp, -erosionUnits, { joinType: 'round' }));
+    }
   }
   const overlapConstraints: Array<[string, string]> = [];
   for (let i = 0; i < initialOrder.length; i++) {
     const a = initialOrder[i];
     const eA = erodedByColor.get(a);
-    if (!eA) continue;
+    if (!eA || multiPolygonIsEmpty(eA)) continue;
     for (let j = i + 1; j < initialOrder.length; j++) {
       const b = initialOrder[j];
       const eB = erodedByColor.get(b);
-      if (!eB) continue;
-      if (anyIntersection(eA, eB)) overlapConstraints.push([a, b]);
+      if (!eB || multiPolygonIsEmpty(eB)) continue;
+      const inter = multiPolygonIntersection(eA, eB);
+      if (!multiPolygonIsEmpty(inter)) overlapConstraints.push([a, b]);
     }
   }
 
   return { areaSqInByColor, overlapConstraints };
-}
-
-function anyIntersection(a: Uint8Array, b: Uint8Array): boolean {
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) if (a[i] && b[i]) return true;
-  return false;
 }
 
 /**

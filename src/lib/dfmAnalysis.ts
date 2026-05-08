@@ -1,168 +1,41 @@
 import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, PerPresetSingleSide, MachiningTimeMatrix } from '@/types';
-import { distanceTransform } from './distanceTransform';
-import { layerToStandaloneSvg, rasterizeLayerToBinaryMask, renderSvgToCanvas } from './svgLayers';
-import { detectAlignmentRisk } from './alignmentRisk';
+import { layerToStandaloneSvg, renderSvgToCanvas } from './svgLayers';
 import { CLEARANCE_BIT_MRR, CLEARANCE_BIT_OPTIONS, getVbitRates, VBIT_PRESET_ANGLES, VBIT_RATES } from './machiningRates';
-import { buildMachiningTimeMatrix, machiningTimeForMask } from './machiningTime';
-import { computePlugCarvedMask, computePlugStockMask } from './plugStock';
-import { computeBoundary, findEnclosedHoles } from './morphology';
-import { maskToSvgPath } from './maskToPath';
+import { polygonMachiningTime, buildMachiningTimeMatrixPolygon } from './polygonMachiningTime';
+import { computePlugStockPolygon, computePlugStockUsageSqInPolygon } from './polygonPlugStock';
 import { parseViewBox } from './svgLayers';
-import { computePlugStockUsageSqIn } from './plugStockPacking';
 import { findMaskComponentCentroids } from './maskComponents';
-import { dilateMask } from './maskOps';
+import { svgFragmentToMultiPolygon, multiPolygonToSvgFragment } from './polygonParser';
+import { multiPolygonDifference, multiPolygonIntersection, multiPolygonOffset, multiPolygonUnion, multiPolygonUnionAll, walkPolygonHoles } from './clipperOps';
+import { multiPolygonArea, multiPolygonIsEmpty, multiPolygonPerimeter, type MultiPolygon } from './polygon';
+import { polygonProblemStats, type PolygonProblemStats } from './polygonPocketStats';
+import {
+  polygonToPath2D,
+  rasterizeMultiPolygonToMask,
+  renderDepthMapToContext,
+  type DesignToCanvasTransform,
+} from './polygonRender';
+import { detectAlignmentRiskPolygon } from './polygonAlignmentRisk';
+import { polygonThinWalls } from './polygonThinWalls';
 
-const DEFAULT_CANVAS_WIDTH = 1200;
+export const DEFAULT_CANVAS_WIDTH = 1200;
 const THIN_WALL_THRESHOLD_INCHES = 0.05;
 const MIN_THIN_WALL_AREA_SQ_IN = 0.25;
 const MIN_VBIT_ANGLE_SIDE_GRAIN = 60;
 const ALIGNMENT_THRESHOLD_INCHES = 0.01;
+// Mirror `fillEnclosedHoles`'s `HOLE_MARGIN_INCHES`. The eroded-empty
+// predicate uses half this radius (= half-bit-clearance disc) so the
+// stats display counts exactly the holes the optimizer would fill.
+const HOLE_MARGIN_INCHES_FOR_FILLABLE = 0.13;
 // A piece passes when less than this fraction of its carved area is flagged.
 // Using a percentage threshold (not exact-zero) avoids false failures from
 // a handful of anti-aliased or border pixels that round to "0.00%" in the UI.
 const PASS_THRESHOLD_PERCENT = 0.1;
 
-/**
- * Component-connectivity radius in pixels (Chebyshev / chess metric).
- *
- * We use 2 (5×5 neighborhood) instead of strict 8-connectivity so that
- * single-pixel gaps introduced by anti-aliased rasterization don't break
- * a continuous carved feature into many tiny pseudo-components. A thin
- * diagonal stroke at an awkward angle often rasterizes with intermediate
- * anti-aliased pixels that fall just above the in-mask brightness
- * threshold, leaving every other pixel "missing" — under 8-conn the
- * stroke looks like a chain of disconnected dots. Two carved pixels are
- * considered connected if at most one empty pixel separates them.
- *
- * Used by `monotonicAscentReachable` (level-set component for the red-
- * pixel problem overlay) and `carvedHasComponentWithoutFullDepth` (the
- * tool-feasibility check). Keeping these two consistent keeps the
- * analysis self-consistent: anything connected for one is connected for
- * the other.
- */
-const CONNECTIVITY_RADIUS_PX = 2;
-
 // ---------------------------------------------------------------------------
-// Level-set reachability — connected component check at each pixel's depth.
-//
-// `reachable[k] === 1` iff pixel k's connected component (8-connectivity)
-// of `{carved q : dist1(q) >= dist1(k)}` contains a full-depth pixel. In
-// other words, there exists a path through the carved region from k to a
-// full-depth pixel along which `dist1` never dips below `dist1(k)` — the
-// topological version of "this pixel is on a slope toward full depth."
-//
-// We previously used a strict ≥-monotonic descent BFS, which is the right
-// criterion in continuous space but fragile in practice: the 4-pass
-// approximate EDT introduces small ~1px local-maximum bumps along the
-// centerline of thin features that aren't axis-aligned. A single bump
-// blocks the BFS and strands the entire downstream tip. Level-set
-// reachability handles bumps gracefully — they just stick up inside the
-// level cut without disconnecting it.
-//
-// Implementation: bucket carved pixels by floor(dist1), then sweep from
-// the highest bucket downward. Within each bucket: union every pixel with
-// 8-neighbors whose floor(dist1) >= the current bucket (so any neighbor
-// already at the current level set joins the component), then read each
-// pixel's reachable status in a second pass so bucket-mates' seed status
-// propagates fully. O(n · α(n) + maxDist).
-// ---------------------------------------------------------------------------
-export function monotonicAscentReachable(
-  carvedMask: Uint8Array,
-  dist1: Float32Array,
-  isFullDepth: Uint8Array,
-  canvasW: number,
-  canvasH: number,
-): Uint8Array {
-  const n = canvasW * canvasH;
-
-  // Bucket index = floor(dist1). Find the highest bucket index in use.
-  let maxBucket = 0;
-  for (let k = 0; k < n; k++) {
-    if (carvedMask[k]) {
-      const b = Math.floor(dist1[k]);
-      if (b > maxBucket) maxBucket = b;
-    }
-  }
-
-  // Linked-list buckets so we can iterate carved pixels at each level
-  // without allocating per-bucket arrays.
-  const bucketHead = new Int32Array(maxBucket + 1).fill(-1);
-  const bucketNext = new Int32Array(n);
-  for (let k = 0; k < n; k++) {
-    if (!carvedMask[k]) continue;
-    const b = Math.floor(dist1[k]);
-    bucketNext[k] = bucketHead[b];
-    bucketHead[b] = k;
-  }
-
-  // Union-find. Each pixel is its own root; hasSeed[root] is true iff that
-  // component currently contains a full-depth pixel.
-  const parent = new Int32Array(n);
-  const hasSeed = new Uint8Array(n);
-  for (let k = 0; k < n; k++) {
-    parent[k] = k;
-    if (isFullDepth[k]) hasSeed[k] = 1;
-  }
-  const find = (x: number): number => {
-    let r = x;
-    while (parent[r] !== r) r = parent[r];
-    // Two-pass path compression.
-    while (parent[x] !== r) { const nx = parent[x]; parent[x] = r; x = nx; }
-    return r;
-  };
-  const unionMerge = (a: number, b: number): void => {
-    const ra = find(a), rb = find(b);
-    if (ra === rb) return;
-    parent[ra] = rb;
-    if (hasSeed[ra]) hasSeed[rb] = 1;
-  };
-
-  const reachable = new Uint8Array(n);
-
-  for (let b = maxBucket; b >= 0; b--) {
-    // Pass 1 — unions. Every neighbor whose floor(dist1) >= b is either
-    // already processed (in higher bucket) or will be processed in this
-    // bucket; either way it belongs in the level-set at this level. We use
-    // a Chebyshev radius of CONNECTIVITY_RADIUS_PX so single-pixel
-    // anti-aliasing gaps in narrow diagonal strokes don't fragment the
-    // level-set component (see CONNECTIVITY_RADIUS_PX docs).
-    let p = bucketHead[b];
-    while (p !== -1) {
-      const x = p % canvasW;
-      const y = (p - x) / canvasW;
-      for (let dy = -CONNECTIVITY_RADIUS_PX; dy <= CONNECTIVITY_RADIUS_PX; dy++) {
-        const ny = y + dy;
-        if (ny < 0 || ny >= canvasH) continue;
-        for (let dx = -CONNECTIVITY_RADIUS_PX; dx <= CONNECTIVITY_RADIUS_PX; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const nx = x + dx;
-          if (nx < 0 || nx >= canvasW) continue;
-          const nk = ny * canvasW + nx;
-          if (!carvedMask[nk]) continue;
-          if (Math.floor(dist1[nk]) >= b) unionMerge(p, nk);
-        }
-      }
-      p = bucketNext[p];
-    }
-
-    // Pass 2 — read each bucket member's component seed flag.
-    p = bucketHead[b];
-    while (p !== -1) {
-      if (hasSeed[find(p)]) reachable[p] = 1;
-      p = bucketNext[p];
-    }
-  }
-
-  return reachable;
-}
-
-// ---------------------------------------------------------------------------
-// Lightweight problem-area % for a given V-bit angle, reusing an existing
-// dist1 (distance from each carved pixel to the nearest non-carved pixel).
-// Used by the bit-comparison matrix to determine whether a V-bit angle is
-// feasible (≤ FEASIBILITY_PROBLEM_PCT problem area on every layer's pocket
-// and plug). Does the same depth/threshold reasoning as analyzeMask but
-// skips thin-wall analysis and overlay generation.
+// Per-angle problem stats interface — populated by the polygon path's
+// `polygonProblemStatsBitmap`. The bitmap predecessor (`problemStatsForAngle`)
+// has been retired; the polygon path is the only producer.
 // ---------------------------------------------------------------------------
 interface ProblemStatsForAngle {
   /** Percent of carved pixels that are "problem" pixels (not full depth, no level-set path to a full-depth seed). */
@@ -177,93 +50,8 @@ interface ProblemStatsForAngle {
   passed: boolean;
   /** Per-pixel problem mask (only populated when returnMask=true). */
   problemMask?: Uint8Array;
-}
-
-/**
- * For a carved mask, mark every pixel on the canvas perimeter as
- * full-depth. Used by **plug** analysis to model the physical
- * reality that the actual stock board extends beyond the (tightly-
- * sized) analysis canvas: a thin background strip at the canvas
- * edge has plenty of v-bit clearance "off-canvas," so we treat the
- * canvas perimeter as if it bordered an unconstrained full-depth
- * region. Pocket analysis is bounded by the design's outline (its
- * EDT seeds), not by the canvas, so this doesn't apply there.
- */
-function applyOutsideFullDepthSeeds(
-  isFullDepth: Uint8Array,
-  carvedMask: Uint8Array,
-  w: number,
-  h: number,
-): void {
-  for (let x = 0; x < w; x++) {
-    if (carvedMask[x])                             isFullDepth[x] = 1;
-    const bot = (h - 1) * w + x;
-    if (h > 1 && carvedMask[bot])                  isFullDepth[bot] = 1;
-  }
-  for (let y = 1; y < h - 1; y++) {
-    const left  = y * w;
-    const right = left + w - 1;
-    if (carvedMask[left])               isFullDepth[left]  = 1;
-    if (w > 1 && carvedMask[right])     isFullDepth[right] = 1;
-  }
-}
-
-function problemStatsForAngle(
-  carvedMask: Uint8Array,
-  dist1: Float32Array,
-  fullDepthRadiusPx: number,
-  canvasW: number,
-  canvasH: number,
-  returnMask: boolean = false,
-  outsideIsFullDepth: boolean = false,
-): ProblemStatsForAngle {
-  const n = canvasW * canvasH;
-  const isFullDepth = new Uint8Array(n);
-  let carvedCount = 0;
-  let fullDepthCount = 0;
-  for (let i = 0; i < n; i++) {
-    if (!carvedMask[i]) continue;
-    carvedCount++;
-    if (dist1[i] >= fullDepthRadiusPx) { isFullDepth[i] = 1; fullDepthCount++; }
-  }
-  if (carvedCount === 0) {
-    return {
-      percent: 0,
-      hasIsolatedComponent: false,
-      fullDepthPercent: 0,
-      hasAnyFullDepth: false,
-      passed: true,
-      ...(returnMask ? { problemMask: new Uint8Array(n) } : {}),
-    };
-  }
-
-  if (outsideIsFullDepth) {
-    applyOutsideFullDepthSeeds(isFullDepth, carvedMask, canvasW, canvasH);
-  }
-
-  const reachable = monotonicAscentReachable(carvedMask, dist1, isFullDepth, canvasW, canvasH);
-  let problemCount = 0;
-  const problemMask = returnMask ? new Uint8Array(n) : undefined;
-  for (let i = 0; i < n; i++) {
-    if (carvedMask[i] && !isFullDepth[i] && !reachable[i]) {
-      problemCount++;
-      if (problemMask) problemMask[i] = 1;
-    }
-  }
-
-  const hasIsolatedComponent = carvedHasComponentWithoutFullDepth(
-    carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH, outsideIsFullDepth,
-  );
-  const percent = (problemCount / carvedCount) * 100;
-
-  return {
-    percent,
-    hasIsolatedComponent,
-    fullDepthPercent: (fullDepthCount / carvedCount) * 100,
-    hasAnyFullDepth: fullDepthCount > 0,
-    passed: percent < PASS_THRESHOLD_PERCENT && !hasIsolatedComponent,
-    ...(problemMask ? { problemMask } : {}),
-  };
+  /** Polygon problem region (only populated by the polygon path). */
+  problemMP?: MultiPolygon;
 }
 
 /** Problem-area cutoff above which a V-bit angle is considered infeasible for the design. */
@@ -297,274 +85,51 @@ export function binarySearchLargestFeasibleIdx(
   return largest;
 }
 
-// ---------------------------------------------------------------------------
-// Component feasibility check.
-//
-// Returns true iff the carved mask contains a connected component (8-conn)
-// that has NO full-depth pixel anywhere inside it — i.e. an entire piece of
-// the design is too small / narrow for this V-bit to ever reach full depth.
-//
-// This is a strictly stronger disqualification than a percent threshold: a
-// 0.1%-area isolated region is still a region the bit literally can't carve
-// faithfully, so the design isn't manufacturable with that bit regardless
-// of how small the piece is relative to the whole.
-//
-// Note this is NOT equivalent to "any problem pixel exists". A connected
-// carved component (e.g. a barbell) can have one full-depth lobe and one
-// shallower lobe joined by a thin saddle — the shallower lobe contains
-// problem pixels under the level-set criterion, but the *component* still
-// has a full-depth pixel, so it's not flagged here. We only flag the case
-// where an entire component is unreachable from any full-depth seed.
-// ---------------------------------------------------------------------------
-export function carvedHasComponentWithoutFullDepth(
-  carvedMask: Uint8Array,
-  dist1: Float32Array,
-  fullDepthRadiusPx: number,
-  canvasW: number,
-  canvasH: number,
-  outsideIsFullDepth: boolean = false,
-): boolean {
-  const n = canvasW * canvasH;
-  const visited = new Uint8Array(n);
-  for (let start = 0; start < n; start++) {
-    if (visited[start] || !carvedMask[start]) continue;
-    let hasFullDepth = false;
-    visited[start] = 1;
-    const queue: number[] = [start];
-    let head = 0;
-    while (head < queue.length) {
-      const k = queue[head++];
-      const x = k % canvasW;
-      const y = (k - x) / canvasW;
-      if (!hasFullDepth) {
-        if (dist1[k] >= fullDepthRadiusPx) {
-          hasFullDepth = true;
-        } else if (outsideIsFullDepth
-            && (x === 0 || y === 0 || x === canvasW - 1 || y === canvasH - 1)) {
-          // Plug analysis on a tightly-sized canvas: any carved
-          // pixel touching the canvas perimeter has an implicit
-          // off-canvas full-depth neighbor (the actual stock board
-          // extends past the rasterized area).
-          hasFullDepth = true;
-        }
-      }
-      for (let dy = -CONNECTIVITY_RADIUS_PX; dy <= CONNECTIVITY_RADIUS_PX; dy++) {
-        const ny = y + dy;
-        if (ny < 0 || ny >= canvasH) continue;
-        for (let dx = -CONNECTIVITY_RADIUS_PX; dx <= CONNECTIVITY_RADIUS_PX; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          const nx = x + dx;
-          if (nx < 0 || nx >= canvasW) continue;
-          const nk = ny * canvasW + nx;
-          if (carvedMask[nk] && !visited[nk]) {
-            visited[nk] = 1;
-            queue.push(nk);
-          }
-        }
-      }
-    }
-    if (!hasFullDepth) return true;
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Inner analysis — runs on any binary "carved mask" (1 = area being carved).
-// For the pocket: carved = design (dark pixels).
-// For the plug:   carved = background (light pixels, the waste around the plug).
-// ---------------------------------------------------------------------------
-function analyzeMask(
-  carvedMask: Uint8Array,
-  canvasW: number,
-  canvasH: number,
-  pixelsPerInch: number,
-  fullDepthRadiusPx: number,
-  thinWallThresholdPx: number,
-  grainDirection: GrainDirection,
-  vbitAngleDegrees: number,
-  outsideIsFullDepth: boolean = false,
-): {
-  isProblem: Uint8Array;
-  isThinWall: Uint8Array;
-  dist1: Float32Array;
-  fullDepthPercent: number;
-  problemAreaPercent: number;
-  hasAnyFullDepth: boolean;
-  hasIsolatedUnreachableComponent: boolean;
-  thinWallPixelCount: number;
-  vbitAngleWarning: boolean;
-  passed: boolean;
-} {
-  const n = canvasW * canvasH;
-
-  // EDT 1: distance from each carved pixel to the nearest un-carved pixel
-  const dist1 = distanceTransform(carvedMask, canvasW, canvasH);
-
-  // Full-depth classification
-  const isFullDepth = new Uint8Array(n);
-  let carvedCount = 0, fullDepthCount = 0;
-  for (let i = 0; i < n; i++) {
-    if (!carvedMask[i]) continue;
-    carvedCount++;
-    if (dist1[i] >= fullDepthRadiusPx) { isFullDepth[i] = 1; fullDepthCount++; }
-  }
-  if (outsideIsFullDepth) {
-    applyOutsideFullDepthSeeds(isFullDepth, carvedMask, canvasW, canvasH);
-  }
-
-  // Topological reachability through the carved region. A non-full-depth
-  // pixel passes only if its level-set component contains a full-depth seed
-  // — i.e., there's a path within this carved region (no shortcuts through
-  // walls into a different pocket) along which dist1 never dips below the
-  // pixel's own dist1.
-  const reachable = monotonicAscentReachable(carvedMask, dist1, isFullDepth, canvasW, canvasH);
-
-  // Problem pixels: carved, not full-depth, no level-set path to a
-  // full-depth pixel within this same carved region.
-  const isProblem = new Uint8Array(n);
-  let problemCount = 0;
-  for (let i = 0; i < n; i++) {
-    if (carvedMask[i] && !isFullDepth[i] && !reachable[i]) {
-      isProblem[i] = 1;
-      problemCount++;
-    }
-  }
-
-  // Thin wall check (side grain only).
-  // Looks for thin runs of !carvedMask (the un-carved material) bounded on both sides
-  // by carved pixels in the direction perpendicular to the grain.
-  // - pocket: un-carved = background → detects thin un-carved walls between pocket features
-  // - plug:   un-carved = design   → detects thin raised plug features
-  const isThinWall = new Uint8Array(n);
-  let thinWallPixelCount = 0;
-
-  if (grainDirection !== 'end') {
-    if (grainDirection === 'vertical') {
-      for (let x = 0; x < canvasW; x++) {
-        let y = 0;
-        while (y < canvasH) {
-          if (!carvedMask[y * canvasW + x]) {
-            const runStart = y;
-            while (y < canvasH && !carvedMask[y * canvasW + x]) y++;
-            const bounded =
-              runStart > 0 && !!carvedMask[(runStart - 1) * canvasW + x] &&
-              y < canvasH   && !!carvedMask[y * canvasW + x];
-            if (bounded && (y - runStart) < thinWallThresholdPx) {
-              for (let yy = runStart; yy < y; yy++) {
-                isThinWall[yy * canvasW + x] = 1;
-                thinWallPixelCount++;
-              }
-            }
-          } else {
-            y++;
-          }
-        }
-      }
-    } else {
-      for (let y = 0; y < canvasH; y++) {
-        let x = 0;
-        while (x < canvasW) {
-          if (!carvedMask[y * canvasW + x]) {
-            const runStart = x;
-            while (x < canvasW && !carvedMask[y * canvasW + x]) x++;
-            const bounded =
-              runStart > 0 && !!carvedMask[y * canvasW + runStart - 1] &&
-              x < canvasW   && !!carvedMask[y * canvasW + x];
-            if (bounded && (x - runStart) < thinWallThresholdPx) {
-              for (let xx = runStart; xx < x; xx++) {
-                isThinWall[y * canvasW + xx] = 1;
-                thinWallPixelCount++;
-              }
-            }
-          } else {
-            x++;
-          }
-        }
-      }
-    }
-
-    // Filter connected components below the minimum area threshold
-    if (thinWallPixelCount > 0) {
-      const minPixels = MIN_THIN_WALL_AREA_SQ_IN * pixelsPerInch * pixelsPerInch;
-      const visited = new Uint8Array(n);
-      for (let start = 0; start < n; start++) {
-        if (!isThinWall[start] || visited[start]) continue;
-        const queue: number[] = [start];
-        visited[start] = 1;
-        let head = 0;
-        while (head < queue.length) {
-          const idx = queue[head++];
-          const x = idx % canvasW;
-          const y = (idx - x) / canvasW;
-          const nb = [
-            y > 0           ? idx - canvasW : -1,
-            y < canvasH - 1 ? idx + canvasW : -1,
-            x > 0           ? idx - 1       : -1,
-            x < canvasW - 1 ? idx + 1       : -1,
-          ];
-          for (const n of nb) {
-            if (n >= 0 && isThinWall[n] && !visited[n]) { visited[n] = 1; queue.push(n); }
-          }
-        }
-        if (queue.length < minPixels) for (const idx of queue) isThinWall[idx] = 0;
-      }
-      thinWallPixelCount = 0;
-      for (let i = 0; i < n; i++) if (isThinWall[i]) thinWallPixelCount++;
-    }
-  }
-
-  // Component-level feasibility: a connected piece of the carved area that
-  // contains no full-depth pixel at all means the V-bit literally cannot
-  // carve that piece — disqualifies regardless of the percentage threshold.
-  const hasIsolatedUnreachableComponent = carvedHasComponentWithoutFullDepth(
-    carvedMask, dist1, fullDepthRadiusPx, canvasW, canvasH, outsideIsFullDepth,
-  );
-  const problemAreaPercent = carvedCount > 0 ? (problemCount / carvedCount) * 100 : 0;
-
-  return {
-    isProblem,
-    isThinWall,
-    dist1,
-    fullDepthPercent:   carvedCount > 0 ? (fullDepthCount / carvedCount) * 100 : 0,
-    problemAreaPercent,
-    hasAnyFullDepth: fullDepthCount > 0,
-    hasIsolatedUnreachableComponent,
-    thinWallPixelCount,
-    vbitAngleWarning: grainDirection !== 'end' && vbitAngleDegrees < MIN_VBIT_ANGLE_SIDE_GRAIN,
-    passed: problemAreaPercent < PASS_THRESHOLD_PERCENT && !hasIsolatedUnreachableComponent,
-  };
-}
-
+/**
+ * Polygon-native overlay PNG builder. Replaces the per-pixel
+ * `getImageData` / `putImageData` composite with `Path2D` fills.
+ *
+ * Channels render in priority-ascending order (= suggestion bottom,
+ * problem top). Each channel first runs `destination-out` to erase
+ * the canvas under its polygon (including any earlier overlay), then
+ * `source-over` to paint at the channel's color and alpha. Net pixel
+ * behavior matches the bitmap version's "topmost wins" + alpha-replace
+ * semantics: an overlay-area pixel = (channel.rgb, channel.alpha)
+ * over empty; a non-overlay pixel = base canvas at full alpha.
+ */
 async function buildOverlay(
   base: OffscreenCanvas,
   canvasW: number,
   canvasH: number,
-  isProblem: Uint8Array,
-  isThinWall: Uint8Array,
-  isAlignment?: Uint8Array,
-  /** Pixels only an infeasible smaller v-bit can't reach — Step 2 artist
-      callouts. Rendered in teal/cyan, beneath the other channels so any
-      pixel that's *also* a real problem at the user's current angle wins
-      and stays red. */
-  isSmallerBitInfeasible?: Uint8Array,
+  problemMP: MultiPolygon,
+  thinWallMP: MultiPolygon,
+  transform: DesignToCanvasTransform,
+  alignmentMP?: MultiPolygon,
+  smallerBitInfeasibleMP?: MultiPolygon,
 ): Promise<string> {
   const oc = new OffscreenCanvas(canvasW, canvasH);
   const ctx = oc.getContext('2d')!;
   ctx.drawImage(base, 0, 0);
-  const img = ctx.getImageData(0, 0, canvasW, canvasH);
-  const d = img.data;
-  for (let i = 0, n = canvasW * canvasH; i < n; i++) {
-    if (isProblem[i]) {
-      d[i*4]=220; d[i*4+1]=50;  d[i*4+2]=50;  d[i*4+3]=210;
-    } else if (isThinWall[i]) {
-      d[i*4]=220; d[i*4+1]=150; d[i*4+2]=30;  d[i*4+3]=210;
-    } else if (isAlignment?.[i]) {
-      d[i*4]=210; d[i*4+1]=50;  d[i*4+2]=210; d[i*4+3]=210;
-    } else if (isSmallerBitInfeasible?.[i]) {
-      d[i*4]=40;  d[i*4+1]=200; d[i*4+2]=210; d[i*4+3]=180;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
+
+  const drawChannel = (mp: MultiPolygon | undefined, fillStyle: string): void => {
+    if (!mp || multiPolygonIsEmpty(mp)) return;
+    const path = polygonToPath2D(mp, transform);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.fill(path, 'evenodd');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = fillStyle;
+    ctx.fill(path, 'evenodd');
+  };
+
+  // Priority ascending — later draws overwrite earlier in the polygon
+  // overlap. (Same priority as the bitmap version: problem highest.)
+  drawChannel(smallerBitInfeasibleMP, 'rgba(40, 200, 210, 0.71)'); // teal/cyan
+  drawChannel(alignmentMP,            'rgba(210, 50, 210, 0.82)'); // magenta
+  drawChannel(thinWallMP,             'rgba(220, 150, 30, 0.82)'); // orange
+  drawChannel(problemMP,              'rgba(220, 50, 50, 0.82)');  // red
+
+  ctx.globalCompositeOperation = 'source-over';
   return canvasToDataUrl(oc);
 }
 
@@ -583,81 +148,122 @@ interface DepthMapPlugFit {
   inlayDepthInches: number;
 }
 
-async function buildDepthMap(
+/**
+ * Polygon-native depth map. Renders successive inward offsets of
+ * `carvedMP` in increasingly green tones over `base` so the visible
+ * color at each pixel encodes the bit's reachable depth there.
+ */
+async function buildPolygonDepthMap(
   base: OffscreenCanvas,
   canvasW: number,
   canvasH: number,
-  carvedMask: Uint8Array,
-  dist1: Float32Array,
-  fullDepthRadiusPx: number,
+  carvedMP: MultiPolygon,
+  fullDepthRadiusUnits: number,
+  transform: DesignToCanvasTransform,
   plugFit?: DepthMapPlugFit,
 ): Promise<string> {
   const oc = new OffscreenCanvas(canvasW, canvasH);
   const ctx = oc.getContext('2d')!;
   ctx.drawImage(base, 0, 0);
-  const img = ctx.getImageData(0, 0, canvasW, canvasH);
-  const d = img.data;
-
-  // Without plugFit: ratio in [0,1], red → green.
-  // With plugFit on plug side: ratio can exceed 1 in the flat-bottom region
-  // (effective depth > inlayDepth). Render that range with a cyan tint so
-  // the step-down at the foot of the slope is visually distinguishable.
-  const inlay = plugFit?.inlayDepthInches ?? 0;
-  const glueGap = plugFit?.glueGapInches ?? 0;
-  const surfaceGap = plugFit?.surfaceGapInches ?? 0;
-  // ratio_max for color saturation; floor at 1 so color stays in normal
-  // gradient when surfaceGap is 0.
-  const overshootRatio = inlay > 0 ? Math.max(0, surfaceGap / inlay) : 0;
-
-  for (let i = 0, n = canvasW * canvasH; i < n; i++) {
-    if (!carvedMask[i]) continue;
-    const baseRatio = dist1[i] / fullDepthRadiusPx; // 0 at wall, 1 at full-depth boundary
-
-    let r: number, g: number, b: number, a: number;
-
-    if (!plugFit) {
-      const ratio = Math.min(1, baseRatio);
-      r = Math.round(220 - 180 * ratio);
-      g = Math.round(40  + 160 * ratio);
-      b = 30;
-      a = 220;
-    } else {
-      // Effective depth in inches; capped/floored.
-      const baseDepth = Math.min(1, baseRatio) * inlay;
-      let effDepth: number;
-      if (baseRatio >= 1) {
-        // Flat-bottom region: drop by glueGap then add surfaceGap (uniform).
-        effDepth = Math.max(0, inlay - glueGap + surfaceGap);
-      } else {
-        // Tapered region: just drop by glueGap (clamp at no-carve).
-        effDepth = Math.max(0, baseDepth - glueGap);
-      }
-      const ratio = inlay > 0 ? effDepth / inlay : 0;
-
-      if (ratio <= 1) {
-        // Standard red → green for [0, 1].
-        const r0 = Math.min(1, ratio);
-        r = Math.round(220 - 180 * r0);
-        g = Math.round(40  + 160 * r0);
-        b = 30;
-      } else {
-        // Above nominal full depth — surface-gap region. Lerp from full
-        // green toward a green-cyan tint scaled by how far past 1 we are.
-        const over = Math.min(1, (ratio - 1) / Math.max(overshootRatio, 1e-6));
-        r = Math.round(40   - 30  * over);  // 40 → 10
-        g = Math.round(200);
-        b = Math.round(30   + 180 * over);  // 30 → 210 (cyan-ward)
-      }
-      a = 220;
-    }
-
-    d[i*4]   = r;
-    d[i*4+1] = g;
-    d[i*4+2] = b;
-    d[i*4+3] = a;
-  }
-  ctx.putImageData(img, 0, 0);
+  renderDepthMapToContext(ctx, carvedMP, fullDepthRadiusUnits, transform, { plugFit });
   return canvasToDataUrl(oc);
+}
+
+/**
+ * Polygon-native per-preset problem-stats wrapper. Internally calls
+ * `polygonProblemStats` and rasterizes the resulting problem polygon
+ * into a Uint8Array so the existing bitmap-based overlay PNG builder
+ * and component-centroid finder can consume it without modification.
+ *
+ * The shape mirrors `problemStatsForAngle`'s return type so Phase 5
+ * call sites stay almost identical; only the inputs change from
+ * (mask, dist1) to (carvedMP).
+ */
+function polygonProblemStatsBitmap(
+  carvedMP: MultiPolygon,
+  fullDepthRadiusUnits: number,
+  canvasW: number,
+  canvasH: number,
+  transform: DesignToCanvasTransform,
+  options: {
+    plugMode: boolean;
+    designBounds: { x0: number; y0: number; x1: number; y1: number };
+    returnMask: boolean;
+  },
+): ProblemStatsForAngle {
+  const stats: PolygonProblemStats = polygonProblemStats(carvedMP, fullDepthRadiusUnits, {
+    plugMode: options.plugMode,
+    designBounds: options.designBounds,
+    returnPolygon: options.returnMask,
+  });
+  const out: ProblemStatsForAngle = {
+    percent: stats.percent,
+    fullDepthPercent: stats.fullDepthPercent,
+    hasAnyFullDepth: stats.hasAnyFullDepth,
+    hasIsolatedComponent: stats.hasIsolatedComponent,
+    passed: stats.passed,
+  };
+  if (options.returnMask) {
+    out.problemMask = rasterizeMultiPolygonToMask(
+      stats.problemPolygon ?? [], canvasW, canvasH, transform,
+    );
+    out.problemMP = stats.problemPolygon ?? [];
+  }
+  return out;
+}
+
+interface PolygonAnalyzeMaskResult {
+  problemMP: MultiPolygon;
+  thinWallMP: MultiPolygon;
+  fullDepthPercent: number;
+  problemAreaPercent: number;
+  hasAnyFullDepth: boolean;
+  hasIsolatedUnreachableComponent: boolean;
+  thinWallAreaSqUnits: number;
+  vbitAngleWarning: boolean;
+  passed: boolean;
+}
+
+/**
+ * Polygon-native analog of `analyzeMask`. Composes
+ * `polygonProblemStats` (full-depth + bit-body coverage + problem
+ * region) and `polygonThinWalls` (grain-perpendicular thin runs).
+ * Replaces the bitmap-EDT + monotonic-ascent BFS + row/column scan
+ * pipeline for the per-side analysis.
+ */
+function analyzeMaskPolygon(
+  carvedMP: MultiPolygon,
+  fullDepthRadiusUnits: number,
+  thinWallThresholdUnits: number,
+  thinWallMinAreaSqUnits: number,
+  grainDirection: GrainDirection,
+  vbitAngleDegrees: number,
+  designBounds: { x0: number; y0: number; x1: number; y1: number },
+  plugMode: boolean,
+): PolygonAnalyzeMaskResult {
+  const stats = polygonProblemStats(carvedMP, fullDepthRadiusUnits, {
+    plugMode,
+    designBounds,
+    returnPolygon: true,
+  });
+  const thinWallMP = polygonThinWalls(carvedMP, {
+    grainDirection,
+    thresholdUnits: thinWallThresholdUnits,
+    designBounds,
+    minAreaSqUnits: thinWallMinAreaSqUnits,
+  });
+  const thinWallAreaSqUnits = multiPolygonArea(thinWallMP);
+  return {
+    problemMP: stats.problemPolygon ?? [],
+    thinWallMP,
+    fullDepthPercent: stats.fullDepthPercent,
+    problemAreaPercent: stats.percent,
+    hasAnyFullDepth: stats.hasAnyFullDepth,
+    hasIsolatedUnreachableComponent: stats.hasIsolatedComponent,
+    thinWallAreaSqUnits,
+    vbitAngleWarning: grainDirection !== 'end' && vbitAngleDegrees < MIN_VBIT_ANGLE_SIDE_GRAIN,
+    passed: stats.percent < PASS_THRESHOLD_PERCENT && !stats.hasIsolatedComponent,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -721,9 +327,13 @@ export async function runDfmAnalysis(
   const canvasW = canvasWidth;
   const canvasH = Math.max(1, Math.round(canvasWidth * aspect));
   const pixelsPerInch = canvasW / designWidthInches;
-  const fullDepthRadiusPx = fullDepthRadiusInches * pixelsPerInch;
-  const thinWallThresholdPx = THIN_WALL_THRESHOLD_INCHES * pixelsPerInch;
-  const alignThresholdPx = ALIGNMENT_THRESHOLD_INCHES * pixelsPerInch;
+
+  // Polygon-native R values in design units (= the unit Clipper
+  // offsets work in). Threshold + min-area constants in design
+  // units squared.
+  const fullDepthRadiusUnits = fullDepthRadiusInches * (vector.naturalWidth / designWidthInches);
+  const thinWallThresholdUnits = THIN_WALL_THRESHOLD_INCHES * (vector.naturalWidth / designWidthInches);
+  const thinWallMinAreaSqUnits = MIN_THIN_WALL_AREA_SQ_IN * (vector.naturalWidth / designWidthInches) ** 2;
 
   // Combined render — used only as a fallback visual backdrop if a layer's
   // per-layer canvas is missing. Per-layer canvases are now the source of
@@ -736,6 +346,26 @@ export async function runDfmAnalysis(
   // lands in the same coordinate system as the unchanged layer fragments.
   const vb = parseViewBox(vector.viewBox);
 
+  // Design (= SVG viewBox) units per inch. Used by the polygon-
+  // native per-preset path to convert R from inches into design
+  // units (where Clipper offsets operate).
+  const designUnitsPerInch = vb.w / designWidthInches;
+  const polygonTransform: DesignToCanvasTransform = {
+    scaleX: canvasW / vb.w,
+    scaleY: canvasH / vb.h,
+    offsetX: vb.x,
+    offsetY: vb.y,
+  };
+  const designBounds = {
+    x0: vb.x, y0: vb.y, x1: vb.x + vb.w, y1: vb.y + vb.h,
+  };
+  const canvasBoxMP: MultiPolygon = [[
+    { x: designBounds.x0, y: designBounds.y0 },
+    { x: designBounds.x1, y: designBounds.y0 },
+    { x: designBounds.x1, y: designBounds.y1 },
+    { x: designBounds.x0, y: designBounds.y1 },
+  ]];
+
   // Per-layer base canvases — each shows only that layer's geometry. Used as the
   // visual backdrop for each wood's overlay/depth-map so the WoodSection canvas
   // displays only that single inlay rather than the full mixed design.
@@ -744,8 +374,6 @@ export async function runDfmAnalysis(
     const layerSvg = layerToStandaloneSvg(layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight);
     perLayerBases.set(layer.colorHex, await renderSvgToCanvas(layerSvg, canvasW, canvasH));
   }
-
-  const args = [canvasW, canvasH, pixelsPerInch, fullDepthRadiusPx, thinWallThresholdPx, grainDirection, vbitAngleDegrees] as const;
 
   const plugDepthMapFit: DepthMapPlugFit | undefined =
     (settings.plugGlueGapInches > 0 || settings.plugSurfaceGapInches > 0)
@@ -756,55 +384,50 @@ export async function runDfmAnalysis(
         }
       : undefined;
 
-  const toSingle = async (
-    mask: Uint8Array,
-    maskData: ReturnType<typeof analyzeMask>,
+  const toSinglePolygon = async (
+    carvedMP: MultiPolygon,
+    maskData: PolygonAnalyzeMaskResult,
+    problemMask: Uint8Array,
+    thinWallMask: Uint8Array,
+    fullDepthRadiusUnits: number,
     layerBase: OffscreenCanvas,
-    alignPixels?: Uint8Array,
+    alignmentMP: MultiPolygon | undefined,
     plugFit?: DepthMapPlugFit,
-  ): Promise<SingleAnalysis> => ({
-    fullDepthPercent:   maskData.fullDepthPercent,
-    problemAreaPercent: maskData.problemAreaPercent,
-    passed:             maskData.passed,
-    hasAnyFullDepth:    maskData.hasAnyFullDepth,
-    hasIsolatedUnreachableComponent: maskData.hasIsolatedUnreachableComponent,
-    vbitAngleWarning:   maskData.vbitAngleWarning,
-    thinWallPixelCount: maskData.thinWallPixelCount,
-    overlayDataUrl: produceOverlays
-      ? await buildOverlay(layerBase, canvasW, canvasH, maskData.isProblem, maskData.isThinWall, alignPixels)
-      : '',
-    // Populated in Phase 5.5 once the largest-feasible angle is known.
-    suggestionOverlayDataUrl: '',
-    problemComponents: findMaskComponentCentroids(maskData.isProblem, canvasW, canvasH),
-    depthMapDataUrl: produceOverlays
-      ? await buildDepthMap(layerBase, canvasW, canvasH, mask, maskData.dist1, fullDepthRadiusPx, plugFit)
-      : '',
-  });
+  ): Promise<SingleAnalysis> => {
+    let thinWallPixelCount = 0;
+    for (let i = 0; i < thinWallMask.length; i++) thinWallPixelCount += thinWallMask[i];
+    return {
+      fullDepthPercent:   maskData.fullDepthPercent,
+      problemAreaPercent: maskData.problemAreaPercent,
+      passed:             maskData.passed,
+      hasAnyFullDepth:    maskData.hasAnyFullDepth,
+      hasIsolatedUnreachableComponent: maskData.hasIsolatedUnreachableComponent,
+      vbitAngleWarning:   maskData.vbitAngleWarning,
+      thinWallPixelCount,
+      overlayDataUrl: produceOverlays
+        ? await buildOverlay(layerBase, canvasW, canvasH, maskData.problemMP, maskData.thinWallMP, polygonTransform, alignmentMP)
+        : '',
+      suggestionOverlayDataUrl: '',
+      problemComponents: findMaskComponentCentroids(problemMask, canvasW, canvasH),
+      depthMapDataUrl: produceOverlays
+        ? await buildPolygonDepthMap(layerBase, canvasW, canvasH, carvedMP, fullDepthRadiusUnits, polygonTransform, plugFit)
+        : '',
+    };
+  };
 
   // -----------------------------------------------------------------------
-  // Phase 1: Build all pocket masks via per-layer rasterization.
+  // Phase 1: Parse every layer's polygon. The full polygon pipeline
+  // consumes these directly — no per-layer rasterization needed.
   //
-  // We deliberately do NOT use color-matching from the combined render here.
-  // Color-matching gives the *visible* extent of each layer (what survives
-  // SVG z-order), but for DFM and especially staged-alignment risk detection
-  // we need each layer's *physical* extent — including any portion that the
-  // extend-for-registration algorithm has placed under a later layer.
-  //
-  // Each layer rasterizes through `rasterizeLayerToBinaryMask` (transparent
-  // canvas + alpha threshold) so antialiased edge pixels register in both
-  // adjacent layers' masks consistently — independent of layer color, so
-  // adjacent layers don't leave the boundary gaps that color-dependent
-  // luma thresholding produces.
+  // We deliberately use each layer's *physical* extent (including any
+  // portion the extend-for-registration algorithm has placed under a
+  // later layer), not its visible extent under SVG z-order. The
+  // svgFragment is the source of truth for physical extent.
   // -----------------------------------------------------------------------
-  const pocketMasks: Uint8Array[] = [];
-  for (const colorHex of orderedColors) {
+  const pocketPolygons: MultiPolygon[] = orderedColors.map(colorHex => {
     const layer = vector.layers.find(l => l.colorHex === colorHex);
-    if (!layer) { pocketMasks.push(new Uint8Array(n)); continue; }
-    pocketMasks.push(await rasterizeLayerToBinaryMask(
-      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-      canvasW, canvasH,
-    ));
-  }
+    return layer ? svgFragmentToMultiPolygon(layer.svgFragment) : [];
+  });
 
   // -----------------------------------------------------------------------
   // Phase 2: Cross-pair alignment check.
@@ -819,38 +442,47 @@ export async function runDfmAnalysis(
   // within the inlay mask so it renders clearly. affectedPercent represents
   // the fraction of layer-i's perimeter at risk, using the un-dilated set.
   // -----------------------------------------------------------------------
-  const alignVisualPx = Math.max(5, alignThresholdPx * 3);
+  // Polygon-native alignment risk: walk each pair of polygon edges
+  // and flag A's edges within `alignThresholdUnits` of any B-edge
+  // that's within ~15° of parallel. Output is per-A union of bands
+  // along at-risk edges, rasterized once at the end for the
+  // existing buildOverlay pipeline.
+  const alignThresholdUnits = ALIGNMENT_THRESHOLD_INCHES * designUnitsPerInch;
+  const alignVisualHalfWidthUnits = Math.max(
+    5 / polygonTransform.scaleX,                  // floor the band at ~5 px wide
+    alignThresholdUnits * 1.5,                    // = 3× threshold full-width
+  );
 
-  const alignPixelsPerInlay: Uint8Array[] = orderedColors.map(() => new Uint8Array(n));
+  const alignRiskPolygonsPerInlay: MultiPolygon[] = orderedColors.map(() => []);
   const alignIssues: AlignmentIssue[][] = orderedColors.map(() => []);
 
   for (let i = 0; i < orderedColors.length; i++) {
+    const ringsForI: MultiPolygon[] = [];
     for (let j = i + 1; j < orderedColors.length; j++) {
-      const { riskMask, affectedCount, totalBoundaryCount } = detectAlignmentRisk(
-        pocketMasks[i], pocketMasks[j],
-        canvasW, canvasH, alignThresholdPx,
+      const r = detectAlignmentRiskPolygon(
+        pocketPolygons[i], pocketPolygons[j],
+        alignThresholdUnits, alignVisualHalfWidthUnits,
       );
-
-      if (affectedCount > 0) {
-        for (let k = 0; k < n; k++) if (riskMask[k]) alignPixelsPerInlay[i][k] = 1;
+      if (r.affectedPerimeter > 0) {
+        ringsForI.push(r.riskPolygon);
         alignIssues[i].push({
           otherColorHex: orderedColors[j],
-          affectedPercent: totalBoundaryCount > 0 ? (affectedCount / totalBoundaryCount) * 100 : 0,
+          affectedPercent: r.affectedFraction * 100,
         });
       }
     }
+    if (ringsForI.length > 0) {
+      alignRiskPolygonsPerInlay[i] = multiPolygonUnionAll(ringsForI);
+    }
   }
 
-  // Dilate alignment pixels within the inlay mask for visual clarity.
-  const alignVisualPerInlay: Uint8Array[] = alignPixelsPerInlay.map((raw, i) => {
-    if (!raw.some(v => v)) return raw; // no issues → skip
-    const dilated = dilateMask(raw, canvasW, canvasH, alignVisualPx);
-    // Clip to the inlay mask so the dilated band doesn't bleed into the
-    // base-board area on the rendered overlay.
-    const clipped = new Uint8Array(n);
-    const pocket = pocketMasks[i];
-    for (let k = 0; k < n; k++) if (dilated[k] && pocket[k]) clipped[k] = 1;
-    return clipped;
+  // Clip each inlay's risk polygon to the inlay's pocket polygon so
+  // the band doesn't bleed into the base-board region on the
+  // rendered overlay.
+  const alignVisualPolygons: MultiPolygon[] = orderedColors.map((_, i) => {
+    const mp = alignRiskPolygonsPerInlay[i];
+    if (mp.length === 0) return [];
+    return multiPolygonIntersection(mp, pocketPolygons[i]);
   });
 
   // -----------------------------------------------------------------------
@@ -870,23 +502,14 @@ export async function runDfmAnalysis(
   // -----------------------------------------------------------------------
   // Phase 4: Run DFM analysis and assemble WoodAnalysis entries.
   // -----------------------------------------------------------------------
-  // Plug-stock margin in pixels. Used to dilate each pocket's convex hull
-  // into the modeled plug stock for the plug-side time computation.
-  const plugMarginPx = settings.plugStockMarginInches * pixelsPerInch;
-
-  // For each layer i, the union of pocket masks for all layers j > i. Used
-  // to detect "fillable" holes — holes in layer i fully covered by some
-  // combination of later layers (so filling them in i changes nothing
-  // visible in the final design but saves V-bit perimeter time).
+  // For each layer i, the union of pocket polygons for all layers j > i.
+  // Used to detect "fillable" holes — holes in layer i fully covered by
+  // some combination of later layers (so filling them in i changes
+  // nothing visible in the final design but saves V-bit perimeter time).
   // Computed once by sweeping from highest index down.
-  const laterUnions: Uint8Array[] = orderedColors.map(() => new Uint8Array(n));
+  const laterPolygonUnions: MultiPolygon[] = orderedColors.map(() => []);
   for (let i = orderedColors.length - 2; i >= 0; i--) {
-    const next = pocketMasks[i + 1];
-    const acc = laterUnions[i];
-    const accNext = laterUnions[i + 1];
-    for (let k = 0; k < n; k++) {
-      if (next[k] || accNext[k]) acc[k] = 1;
-    }
+    laterPolygonUnions[i] = multiPolygonUnion(pocketPolygons[i + 1], laterPolygonUnions[i + 1]);
   }
 
   const woods: WoodAnalysis[] = [];
@@ -895,89 +518,79 @@ export async function runDfmAnalysis(
   // as the V-bit perimeter pass length for both pocket and plug since the
   // V-bit only traces the plug *shape* boundary, not the outer stock edge).
   const matrixLayers: {
-    pocketMask: Uint8Array;
-    pocketDist1: Float32Array;
-    plugCarvedMask: Uint8Array;
-    plugDist1: Float32Array;
-    pocketPerimeterIn: number;
+    pocketMP: MultiPolygon;
+    plugCarvedMP: MultiPolygon;
+    pocketPerimeterUnits: number;
+    plugPerimeterUnits: number;
   }[] = [];
-  // Pocket+plug masks and their dist1's, kept for the per-V-bit feasibility check.
-  const layerSidesForFeasibility: { mask: Uint8Array; dist1: Float32Array }[] = [];
   // Inputs needed to rebuild each wood's overlay later (after the matrix
   // pass tells us the largest infeasible smaller-bit angle, whose mask is
-  // a fourth color channel in the overlay PNG).
+  // pocketBase / plugBase: the per-layer rendered canvases used as
+  // visual backdrops. pocketMP / plugMP / thin-wall / alignment
+  // polygons feed buildOverlay's polygon-native fill paths in
+  // Phase 5 + 5.5.
   const overlayRebuildInputs: {
     pocketBase: OffscreenCanvas;
     plugBase: OffscreenCanvas;
-    pocketIsProblem: Uint8Array;
-    pocketIsThinWall: Uint8Array;
-    pocketAlign?: Uint8Array;
-    plugIsProblem: Uint8Array;
-    plugIsThinWall: Uint8Array;
-    pocketMask: Uint8Array;
-    plugMask: Uint8Array;
-    pocketDist1: Float32Array;
-    plugDist1: Float32Array;
+    /** Pocket polygon (design units) for the polygon-native per-preset path. */
+    pocketMP: MultiPolygon;
+    /** Plug polygon (= canvas frame − pocket) for the polygon-native per-preset path. */
+    plugMP: MultiPolygon;
+    /** Per-side thin-wall polygon (= for `buildOverlay` polygon path). */
+    pocketThinWallMP: MultiPolygon;
+    plugThinWallMP: MultiPolygon;
+    /** Per-side alignment polygon clipped to the layer's pocket. */
+    pocketAlignMP: MultiPolygon;
   }[] = [];
   let totalMachineTime = 0;
   let anyMachineTimeMissing = false;
 
   for (let idx = 0; idx < orderedColors.length; idx++) {
     const colorHex = orderedColors[idx];
-    const pocketMask = pocketMasks[idx];
 
-    // Existing plug mask used for the DFM (depth/thin-wall) analysis: this
-    // is the *base-board* side, the complement of the inlay color.
-    const plugMaskForDfm = new Uint8Array(n);
-    for (let i = 0; i < n; i++) plugMaskForDfm[i] = pocketMask[i] ? 0 : 1;
+    // Polygon-native per-side analysis for stats + thin-wall + problem
+    // region. For pocket: layer mass; for plug: canvas-frame minus pocket.
+    // dist1 is computed separately below for machiningTimeForMask only.
+    const pocketMP = pocketPolygons[idx];
+    const plugMP = multiPolygonDifference(canvasBoxMP, pocketMP);
+    const pocketAnalysis = analyzeMaskPolygon(
+      pocketMP, fullDepthRadiusUnits, thinWallThresholdUnits, thinWallMinAreaSqUnits,
+      grainDirection, vbitAngleDegrees, designBounds, /* plugMode */ false,
+    );
+    const plugAnalysis = analyzeMaskPolygon(
+      plugMP, fullDepthRadiusUnits, thinWallThresholdUnits, thinWallMinAreaSqUnits,
+      grainDirection, vbitAngleDegrees, designBounds, /* plugMode */ true,
+    );
 
-    const pocketAnalysis = analyzeMask(pocketMask,        ...args);
-    // Plug analysis: tell `analyzeMask` to treat the canvas
-    // perimeter as full-depth. The plug's carved region is the
-    // background around the design, and the actual inlay stock
-    // extends beyond the (tightly-sized) analysis canvas, so a
-    // thin background strip touching the canvas edge isn't really
-    // a hard-to-carve sliver — it just looks that way to the EDT.
-    const plugAnalysis   = analyzeMask(plugMaskForDfm,    ...args, true);
+    // Rasterize the per-side problem + thin-wall polygons once and
+    // share with both `toSinglePolygon` (= per-side overlay PNG) and
+    // `overlayRebuildInputs` (= Phase 5's per-preset overlay rebuild).
+    const pocketIsProblem  = rasterizeMultiPolygonToMask(pocketAnalysis.problemMP,  canvasW, canvasH, polygonTransform);
+    const pocketIsThinWall = rasterizeMultiPolygonToMask(pocketAnalysis.thinWallMP, canvasW, canvasH, polygonTransform);
+    const plugIsProblem    = rasterizeMultiPolygonToMask(plugAnalysis.problemMP,    canvasW, canvasH, polygonTransform);
+    const plugIsThinWall   = rasterizeMultiPolygonToMask(plugAnalysis.thinWallMP,   canvasW, canvasH, polygonTransform);
 
     // Plug stock for *machining-time* purposes: convex hull of the plug
-    // shape dilated by the user's margin. The carved area is stock − plug.
-    const plugStockMask = computePlugStockMask(pocketMask, plugMarginPx, canvasW, canvasH);
-    const plugCarvedMask = new Uint8Array(n);
-    for (let k = 0; k < n; k++) {
-      if (plugStockMask[k] && !pocketMask[k]) plugCarvedMask[k] = 1;
-    }
-    const plugCarvedDist1 = distanceTransform(plugCarvedMask, canvasW, canvasH);
+    // shape dilated by the user's margin. Carved area = stock − pocket.
+    const plugStockMP = computePlugStockPolygon(pocketMP, settings.plugStockMarginInches, designUnitsPerInch);
+    const plugCarvedMP = multiPolygonDifference(plugStockMP, pocketMP);
 
-    // Stock outline path (for the plug-side display), traced from the stock
-    // mask via marching squares + Douglas-Peucker. Stored as a fully-formed
-    // <path> SVG fragment ready to drop into the per-layer SVG. Stroke and
-    // dash-array are sized as fractions of viewBox width so the outline is
-    // visually similar across designs of different scales.
+    // Stock outline path (for the plug-side display), emitted as a flat
+    // <path> with fill=none + dashed orange stroke. Stroke + dash sizes
+    // are fractions of viewBox width so the outline scales sensibly
+    // across designs.
     const strokeW = Math.max(0.5, vector.naturalWidth * 0.003);
     const dashOn  = Math.max(2,   vector.naturalWidth * 0.012);
     const dashOff = Math.max(1.5, vector.naturalWidth * 0.008);
-    const plugStockOutlineSvg = maskToSvgPath(plugStockMask, canvasW, canvasH, {
-      fill: 'none',
-      scaleX: vector.naturalWidth  / canvasW,
-      scaleY: vector.naturalHeight / canvasH,
-      offsetX: vb.x,
-      offsetY: vb.y,
-      simplifyEpsilonPx: 1,
-      minAreaPx: 4,
-      extraAttrs: `stroke="rgb(255,140,0)" stroke-width="${strokeW.toFixed(3)}" stroke-dasharray="${dashOn.toFixed(3)},${dashOff.toFixed(3)}"`,
-    });
+    const plugStockOutlineSvg = multiPolygonToSvgFragment(
+      plugStockMP, '',
+      `fill="none" stroke="rgb(255,140,0)" stroke-width="${strokeW.toFixed(3)}" stroke-dasharray="${dashOn.toFixed(3)},${dashOff.toFixed(3)}"`,
+    );
 
-    // Compute pocket perimeter once (it doesn't depend on bit rates) so
-    // the matrix builder can reuse it for cells using preset V-bit rates
-    // even when the user's current settings have no V-bit rates set.
-    const pocketBoundary = computeBoundary(pocketMask, canvasW, canvasH);
-    let pocketBoundaryPx = 0;
-    for (let k = 0; k < n; k++) if (pocketBoundary[k]) pocketBoundaryPx++;
-    const pocketPerimeterIn = pocketBoundaryPx / pixelsPerInch;
-
-    layerSidesForFeasibility.push({ mask: pocketMask,     dist1: pocketAnalysis.dist1 });
-    layerSidesForFeasibility.push({ mask: plugMaskForDfm, dist1: plugAnalysis.dist1   });
+    // Polygon-derived perimeter (in inches) for the v-bit perimeter pass.
+    const pocketPerimeterUnits = multiPolygonPerimeter(pocketMP);
+    const plugPerimeterUnits   = multiPolygonPerimeter(plugCarvedMP);
+    const pocketPerimeterIn    = pocketPerimeterUnits / designUnitsPerInch;
 
     // Machining time — pocket and plug are computed independently on their
     // own carved masks. Both perimeter passes use the pocket's perimeter
@@ -988,33 +601,37 @@ export async function runDfmAnalysis(
     let plugClearanceAreaSqIn = 0, plugVbitAreaSqIn = 0;
 
     if (haveMachiningRates && vbitRates) {
-      const tPocket = machiningTimeForMask(
-        pocketMask, pocketAnalysis.dist1,
-        canvasW, canvasH, pixelsPerInch,
-        inlayDepthInches,
-        settings.clearanceBitDiameterInches,
-        clearanceMRR,
-        vbitRates.mrr,
-        vbitRates.feed,
-        pocketPerimeterIn,
-      );
+      const userVbitFullDepthRadiusUnits = inlayDepthInches * Math.tan(halfAngleRad) * designUnitsPerInch;
+      const clearanceMrrByDiameter = new Map<number, number>([[settings.clearanceBitDiameterInches, clearanceMRR]]);
+      const tPocket = polygonMachiningTime({
+        carvedMP: pocketMP,
+        perimeterUnits: pocketPerimeterUnits,
+        designUnitsPerInch,
+        clearanceBitDiametersIn: [settings.clearanceBitDiameterInches],
+        clearanceMrrByDiameter,
+        vbitFullDepthRadiusUnits: userVbitFullDepthRadiusUnits,
+        vbitMrr: vbitRates.mrr,
+        vbitFeedInchesPerMin: vbitRates.feed,
+        effectiveDepthIn: inlayDepthInches,
+      });
       // Plug side: the carve goes inlayDepth - glueGap + surfaceGap deep
-      // (uniform). machiningTimeForMask just multiplies area × depth, so
+      // (uniform). polygonMachiningTime just multiplies area × depth, so
       // pass the effective depth here.
       const effectivePlugDepthInches = Math.max(
         0,
         inlayDepthInches - settings.plugGlueGapInches + settings.plugSurfaceGapInches,
       );
-      const tPlug = machiningTimeForMask(
-        plugCarvedMask, plugCarvedDist1,
-        canvasW, canvasH, pixelsPerInch,
-        effectivePlugDepthInches,
-        settings.clearanceBitDiameterInches,
-        clearanceMRR,
-        vbitRates.mrr,
-        vbitRates.feed,
-        pocketPerimeterIn,
-      );
+      const tPlug = polygonMachiningTime({
+        carvedMP: plugCarvedMP,
+        perimeterUnits: plugPerimeterUnits,
+        designUnitsPerInch,
+        clearanceBitDiametersIn: [settings.clearanceBitDiameterInches],
+        clearanceMrrByDiameter,
+        vbitFullDepthRadiusUnits: userVbitFullDepthRadiusUnits,
+        vbitMrr: vbitRates.mrr,
+        vbitFeedInchesPerMin: vbitRates.feed,
+        effectiveDepthIn: effectivePlugDepthInches,
+      });
       pocketMachineTimeMinutes = tPocket.totalTimeMin;
       plugMachineTimeMinutes   = tPlug.totalTimeMin;
       layerMachineTimeMinutes  = pocketMachineTimeMinutes + plugMachineTimeMinutes;
@@ -1028,42 +645,46 @@ export async function runDfmAnalysis(
     }
 
     matrixLayers.push({
-      pocketMask,
-      pocketDist1: pocketAnalysis.dist1,
-      plugCarvedMask,
-      plugDist1: plugCarvedDist1,
-      pocketPerimeterIn,
+      pocketMP,
+      plugCarvedMP,
+      pocketPerimeterUnits,
+      plugPerimeterUnits,
     });
 
     // Fillable enclosed holes — holes in this layer's pocket that are fully
     // covered by the union of later inlay layers. Filling them saves V-bit
     // perimeter time on both pocket and plug; net-zero clearance change
     // (pocket gains the area, plug loses it equivalently).
+    //
+    // The "fully covered" predicate mirrors `fillEnclosedHoles` (the
+    // optimizer that actually does the fill): empty `uncovered`, OR an
+    // uncovered region too narrow to fit a half-bit-clearance disc. The
+    // eroded-empty step rejects sub-bit-clearance numerical slivers
+    // Clipper's int arithmetic leaves along the boundary, so the stats
+    // count exactly the holes the optimizer would fill.
     let fillableHoleCount = 0;
-    let fillableHolePixelCount = 0;
-    let fillableHolePerimeterPx = 0;
+    let fillableHoleAreaUnits = 0;
+    let fillableHolePerimeterUnits = 0;
     if (idx < orderedColors.length - 1) {
-      const holes = findEnclosedHoles(pocketMask, canvasW, canvasH);
-      const laterUnion = laterUnions[idx];
-      for (const hole of holes) {
-        let covered = true;
-        for (const k of hole.pixels) {
-          if (!laterUnion[k]) { covered = false; break; }
+      const allLayersUnion = multiPolygonUnion(pocketPolygons[idx], laterPolygonUnions[idx]);
+      const holeMarginUnits = HOLE_MARGIN_INCHES_FOR_FILLABLE * designUnitsPerInch;
+      walkPolygonHoles(pocketPolygons[idx], holeRing => {
+        const holeMP: MultiPolygon = [holeRing];
+        const uncovered = multiPolygonDifference(holeMP, allLayersUnion);
+        let fullyCovered = multiPolygonIsEmpty(uncovered);
+        if (!fullyCovered) {
+          const eroded = multiPolygonOffset(uncovered, -holeMarginUnits / 2, { joinType: 'round' });
+          fullyCovered = multiPolygonIsEmpty(eroded);
         }
-        if (!covered) continue;
-        // Build a mask for this hole and count its boundary pixels.
-        const holeMask = new Uint8Array(n);
-        for (const k of hole.pixels) holeMask[k] = 1;
-        const holeBoundary = computeBoundary(holeMask, canvasW, canvasH);
-        let perimPx = 0;
-        for (let k = 0; k < n; k++) if (holeBoundary[k]) perimPx++;
+        if (!fullyCovered) return false; // descend so nested holes still count
         fillableHoleCount++;
-        fillableHolePixelCount += hole.pixels.length;
-        fillableHolePerimeterPx += perimPx;
-      }
+        fillableHoleAreaUnits += multiPolygonArea(holeMP);
+        fillableHolePerimeterUnits += multiPolygonPerimeter(holeMP);
+        return true; // skip descending — full-fill absorbs nested geometry
+      });
     }
-    const fillableHoleAreaSqIn = fillableHolePixelCount / (pixelsPerInch * pixelsPerInch);
-    const fillableHolePerimeterIn = fillableHolePerimeterPx / pixelsPerInch;
+    const fillableHoleAreaSqIn = fillableHoleAreaUnits / (designUnitsPerInch * designUnitsPerInch);
+    const fillableHolePerimeterIn = fillableHolePerimeterUnits / designUnitsPerInch;
     // Net-zero clearance model: savings is purely the V-bit perimeter time
     // on pocket + plug. NaN when V-bit feed rate is missing.
     const fillableSavedTimeMin = (vbitRates && vbitRates.feed > 0)
@@ -1083,22 +704,21 @@ ${plugStockOutlineSvg}
 </svg>`;
       plugBase = await renderSvgToCanvas(plugBaseSvg, canvasW, canvasH);
     }
-    // Plug-stock packing estimate: per-component OBB sum of the plug
-    // shapes dilated by the user's plug margin. Disjoint plug regions
-    // far apart enough to be cut from separate stock pieces (i.e.,
-    // their dilated versions don't intersect) contribute their own
-    // smaller OBB instead of being absorbed into one big design-wide
-    // hull. Drives the fractional inlay cost in the guided quote
-    // pipeline; harmless to compute for the expert flow.
-    const plugStockUsageSqIn = computePlugStockUsageSqIn(
-      pocketMask, canvasW, canvasH, pixelsPerInch,
-      settings.plugStockMarginInches,
+    // Plug-stock packing estimate: per-component OBB sum of the
+    // plug shapes outward-offset by the user's plug margin.
+    // Disjoint plug regions far enough apart to cut from separate
+    // stock pieces (= their offset bands don't intersect) get their
+    // own smaller OBB instead of being absorbed into one design-
+    // wide hull. Drives the fractional inlay cost in the guided
+    // quote pipeline; harmless to compute for the expert flow.
+    const plugStockUsageSqIn = computePlugStockUsageSqInPolygon(
+      pocketMP, settings.plugStockMarginInches, designUnitsPerInch,
     );
 
     woods.push({
       colorHex,
-      pocket: await toSingle(pocketMask, pocketAnalysis, pocketBase, alignVisualPerInlay[idx]),
-      plug:   await toSingle(plugMaskForDfm, plugAnalysis, plugBase, undefined, plugDepthMapFit),
+      pocket: await toSinglePolygon(pocketMP, pocketAnalysis, pocketIsProblem, pocketIsThinWall, fullDepthRadiusUnits, pocketBase, alignRiskPolygonsPerInlay[idx]),
+      plug:   await toSinglePolygon(plugMP,   plugAnalysis,   plugIsProblem,   plugIsThinWall,   fullDepthRadiusUnits, plugBase, undefined, plugDepthMapFit),
       perPresetAnalysis: [], // populated in Phase 5 below
       widerBitInfeasibleMask: null, // populated in Phase 5.5 below if applicable
       irreducibleProblemMask: null, // populated in Phase 5.5 only when no preset is feasible
@@ -1121,15 +741,11 @@ ${plugStockOutlineSvg}
     overlayRebuildInputs.push({
       pocketBase,
       plugBase,
-      pocketIsProblem: pocketAnalysis.isProblem,
-      pocketIsThinWall: pocketAnalysis.isThinWall,
-      pocketAlign: alignVisualPerInlay[idx],
-      plugIsProblem: plugAnalysis.isProblem,
-      plugIsThinWall: plugAnalysis.isThinWall,
-      pocketMask,
-      plugMask: plugMaskForDfm,
-      pocketDist1: pocketAnalysis.dist1,
-      plugDist1:   plugAnalysis.dist1,
+      pocketMP,
+      plugMP,
+      pocketThinWallMP: pocketAnalysis.thinWallMP,
+      plugThinWallMP:   plugAnalysis.thinWallMP,
+      pocketAlignMP:    alignVisualPolygons[idx],
     });
   }
 
@@ -1159,14 +775,16 @@ ${plugStockOutlineSvg}
   interface PresetData {
     angleDegrees: number;
     angleVbitWarning: boolean;
-    angleFdrPx: number;
+    /** R = inlayDepth × tan(angle/2), in design units (= the unit
+     *  Clipper offsets work in). */
+    angleFdrUnits: number;
     /** Worst per-side problem-area percent across all woods. */
     maxProblem: number;
     /** OR of `hasIsolatedComponent` across all woods × pocket/plug. */
     anyIsolatedComponent: boolean;
     perWood: Array<{
-      pocketStats: ReturnType<typeof problemStatsForAngle>;
-      plugStats:   ReturnType<typeof problemStatsForAngle>;
+      pocketStats: ProblemStatsForAngle;
+      plugStats:   ProblemStatsForAngle;
       pocketComponents: ReturnType<typeof findMaskComponentCentroids>;
       plugComponents:   ReturnType<typeof findMaskComponentCentroids>;
     }>;
@@ -1178,7 +796,8 @@ ${plugStockOutlineSvg}
     if (cached) return cached;
     const angleDeg = VBIT_PRESET_ANGLES[aIdx];
     const half = (angleDeg / 2) * (Math.PI / 180);
-    const angleFdrPx = inlayDepthInches * Math.tan(half) * pixelsPerInch;
+    // R in design units (Clipper offsets operate in design units).
+    const angleFdrUnits = inlayDepthInches * Math.tan(half) * designUnitsPerInch;
     const angleVbitWarning = grainDirection !== 'end' && angleDeg < MIN_VBIT_ANGLE_SIDE_GRAIN;
 
     let maxProblem = 0;
@@ -1187,13 +806,15 @@ ${plugStockOutlineSvg}
 
     for (let wIdx = 0; wIdx < woods.length; wIdx++) {
       const inp = overlayRebuildInputs[wIdx];
-      const pocketStats = problemStatsForAngle(
-        inp.pocketMask, inp.pocketDist1, angleFdrPx, canvasW, canvasH, true,
+      const pocketStats = polygonProblemStatsBitmap(
+        inp.pocketMP, angleFdrUnits, canvasW, canvasH, polygonTransform,
+        { plugMode: false, designBounds, returnMask: true },
       );
-      // Plug analysis: outsideIsFullDepth = true. See `analyzeMask`
-      // call site for the rationale.
-      const plugStats = problemStatsForAngle(
-        inp.plugMask, inp.plugDist1, angleFdrPx, canvasW, canvasH, true, true,
+      // Plug analysis: bit can come in from off-canvas, so the
+      // canvas-perimeter band counts as a full-depth seed.
+      const plugStats = polygonProblemStatsBitmap(
+        inp.plugMP, angleFdrUnits, canvasW, canvasH, polygonTransform,
+        { plugMode: true, designBounds, returnMask: true },
       );
       if (pocketStats.percent > maxProblem) maxProblem = pocketStats.percent;
       if (plugStats.percent   > maxProblem) maxProblem = plugStats.percent;
@@ -1210,7 +831,7 @@ ${plugStockOutlineSvg}
     const data: PresetData = {
       angleDegrees: angleDeg,
       angleVbitWarning,
-      angleFdrPx,
+      angleFdrUnits,
       maxProblem,
       anyIsolatedComponent,
       perWood,
@@ -1264,22 +885,22 @@ ${plugStockOutlineSvg}
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketOverlay',
           promise: buildOverlay(inp.pocketBase, canvasW, canvasH,
-            w.pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign),
+            w.pocketStats.problemMP ?? [], inp.pocketThinWallMP, polygonTransform, inp.pocketAlignMP),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'plugOverlay',
           promise: buildOverlay(inp.plugBase, canvasW, canvasH,
-            w.plugStats.problemMask!, inp.plugIsThinWall),
+            w.plugStats.problemMP ?? [], inp.plugThinWallMP, polygonTransform),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketDepth',
-          promise: buildDepthMap(inp.pocketBase, canvasW, canvasH,
-            inp.pocketMask, inp.pocketDist1, data.angleFdrPx),
+          promise: buildPolygonDepthMap(inp.pocketBase, canvasW, canvasH,
+            inp.pocketMP, data.angleFdrUnits, polygonTransform),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'plugDepth',
-          promise: buildDepthMap(inp.plugBase, canvasW, canvasH,
-            inp.plugMask, inp.plugDist1, data.angleFdrPx, plugDepthMapFit),
+          promise: buildPolygonDepthMap(inp.plugBase, canvasW, canvasH,
+            inp.plugMP, data.angleFdrUnits, polygonTransform, plugDepthMapFit),
         });
       }
     }
@@ -1384,10 +1005,11 @@ ${plugStockOutlineSvg}
     woods[wIdx].perPresetAnalysis = perPresetByWood[wIdx];
   }
 
-  const machiningTimeTable = buildMachiningTimeMatrix({
+  const machiningTimeTable = buildMachiningTimeMatrixPolygon({
     layers: matrixLayers,
-    canvasW, canvasH, pixelsPerInch,
+    designUnitsPerInch,
     inlayDepthInches,
+    inlayDepthForVbit: inlayDepthInches,
     plugFit: (settings.plugGlueGapInches > 0 || settings.plugSurfaceGapInches > 0)
       ? {
           glueGapInches: settings.plugGlueGapInches,
@@ -1435,23 +1057,23 @@ ${plugStockOutlineSvg}
     for (let i = 0; i < woods.length; i++) {
       const inp = overlayRebuildInputs[i];
       const dw = displayData.perWood[i];
-      const pocketDisplayProblem = dw.pocketStats.problemMask!;
-      const plugDisplayProblem   = dw.plugStats.problemMask!;
+      const pocketDisplayProblemMP = dw.pocketStats.problemMP ?? [];
+      const plugDisplayProblemMP   = dw.plugStats.problemMP ?? [];
 
-      let pocketSuggestion: Uint8Array | undefined;
-      let plugSuggestion: Uint8Array | undefined;
+      let pocketSuggestionMP: MultiPolygon = [];
+      let plugSuggestionMP: MultiPolygon = [];
       if (suggestionData) {
         const sw = suggestionData.perWood[i];
-        const pocketWider = sw.pocketStats.problemMask!;
-        const plugWider   = sw.plugStats.problemMask!;
+        // Suggestion = (next-wider preset's problem) − (display preset's problem) =
+        // regions that ONLY the next-wider preset can't reach. Polygon
+        // difference replaces the bitmap per-pixel diff above.
+        pocketSuggestionMP = multiPolygonDifference(sw.pocketStats.problemMP ?? [], pocketDisplayProblemMP);
+        plugSuggestionMP   = multiPolygonDifference(sw.plugStats.problemMP   ?? [], plugDisplayProblemMP);
 
-        pocketSuggestion = new Uint8Array(canvasW * canvasH);
-        plugSuggestion   = new Uint8Array(canvasW * canvasH);
-        for (let k = 0; k < canvasW * canvasH; k++) {
-          if (pocketWider[k] && !pocketDisplayProblem[k]) pocketSuggestion[k] = 1;
-          if (plugWider[k]   && !plugDisplayProblem[k])   plugSuggestion[k]   = 1;
-        }
-
+        // Rasterized version still needed for the guided UI (= React
+        // overlay reads the Uint8Array directly).
+        const pocketSuggestion = rasterizeMultiPolygonToMask(pocketSuggestionMP, canvasW, canvasH, polygonTransform);
+        const plugSuggestion   = rasterizeMultiPolygonToMask(plugSuggestionMP,   canvasW, canvasH, polygonTransform);
         woods[i].widerBitInfeasibleMask = {
           angleDegrees: step2SuggestionAngleDegrees!,
           pocket: pocketSuggestion,
@@ -1465,13 +1087,13 @@ ${plugStockOutlineSvg}
       if (produceOverlays) {
         woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
           inp.pocketBase, canvasW, canvasH,
-          pocketDisplayProblem, inp.pocketIsThinWall, inp.pocketAlign,
-          pocketSuggestion,
+          pocketDisplayProblemMP, inp.pocketThinWallMP, polygonTransform,
+          inp.pocketAlignMP, pocketSuggestionMP,
         );
         woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
           inp.plugBase, canvasW, canvasH,
-          plugDisplayProblem, inp.plugIsThinWall, undefined,
-          plugSuggestion,
+          plugDisplayProblemMP, inp.plugThinWallMP, polygonTransform,
+          undefined, plugSuggestionMP,
         );
       }
     }
@@ -1485,17 +1107,21 @@ ${plugStockOutlineSvg}
     for (let i = 0; i < woods.length; i++) {
       const inp = overlayRebuildInputs[i];
       const fw = fallbackData.perWood[i];
-      const pocketProblem = fw.pocketStats.problemMask!;
-      const plugProblem   = fw.plugStats.problemMask!;
+      const pocketProblem   = fw.pocketStats.problemMask!;
+      const plugProblem     = fw.plugStats.problemMask!;
+      const pocketProblemMP = fw.pocketStats.problemMP ?? [];
+      const plugProblemMP   = fw.plugStats.problemMP ?? [];
       if (produceOverlays) {
         woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
           inp.pocketBase, canvasW, canvasH,
-          pocketProblem, inp.pocketIsThinWall, inp.pocketAlign,
+          pocketProblemMP, inp.pocketThinWallMP, polygonTransform,
+          inp.pocketAlignMP,
           undefined, // no teal suggestion — there's no upgrade path
         );
         woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
           inp.plugBase, canvasW, canvasH,
-          plugProblem, inp.plugIsThinWall, undefined,
+          plugProblemMP, inp.plugThinWallMP, polygonTransform,
+          undefined,
           undefined,
         );
       }
@@ -1544,180 +1170,86 @@ async function canvasToDataUrl(canvas: OffscreenCanvas): Promise<string> {
 // ---------------------------------------------------------------------------
 // LITE analysis path
 //
-// The guided optimizer needs only `fillableHoleCount` and
-// `alignmentIssues` per layer to enumerate fill / extend targets.
-// Running the full `runDfmAnalysis` (per-preset overlays + machining
-// matrix + depth maps + suggestion overlays) just to read those two
-// fields is wasteful — those alone account for ~36 PNG encodes per
-// design.
+// The guided optimizer needs only `fillableHoleCount` per layer to
+// enumerate fill targets for `applyFillAll`. Running the full
+// `runDfmAnalysis` to read that one field would be wasteful (per-
+// preset overlays + machining matrix + depth maps account for ~36
+// PNG encodes per design).
 //
-// `runDfmAnalysisLite` mirrors Phase 0/1/2 of the full pipeline plus a
-// minimal fillable-hole enumeration, and stops there. It returns the
-// per-layer pocket masks too so the optimizer can re-rasterize ONLY
-// the layers `applyFillAll` modified, then call `redetectAlignmentRisks`
-// on the patched mask set without re-rasterizing the entire design.
+// Polygon-native: parses each layer's `svgFragment` directly and
+// walks the PolyTree for fully-covered holes (same predicate as
+// Phase 4 of the full pipeline + as `fillEnclosedHoles`). No
+// rasterization, no alignment-risk detection (the optimizer doesn't
+// consume it), no per-pixel sweeps.
 // ---------------------------------------------------------------------------
 
 export interface LiteWoodAnalysis {
   colorHex: string;
-  alignmentIssues: AlignmentIssue[];
   fillableHoleCount: number;
 }
 
 export interface LiteAnalysisResult {
   woods: LiteWoodAnalysis[];
-  /** Per-color rasterized pocket masks at the lite canvas resolution.
-   *  Reused by the optimizer for the post-fill alignment redetect. */
-  pocketMasks: Map<string, Uint8Array>;
-  canvasW: number;
-  canvasH: number;
-  pixelsPerInch: number;
-  alignThresholdPx: number;
 }
 
 /**
- * Rasterize one layer's standalone SVG to a pocket mask at the given
- * canvas dimensions. Returns an empty mask if the layer isn't found
- * in `vector.layers`. Thin wrapper over the shared
- * `rasterizeLayerToBinaryMask` helper (transparent canvas + alpha
- * threshold) so adjacent layers' masks overlap consistently at
- * shared boundaries.
- */
-export async function rasterizeLayerMask(
-  vector: VectorData,
-  colorHex: string,
-  canvasW: number,
-  canvasH: number,
-): Promise<Uint8Array> {
-  const layer = vector.layers.find(l => l.colorHex === colorHex);
-  if (!layer) return new Uint8Array(canvasW * canvasH);
-  return rasterizeLayerToBinaryMask(
-    layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-    canvasW, canvasH,
-  );
-}
-
-/**
- * Re-run pairwise alignment-risk detection from a pre-rasterized mask
- * set. Pure function — no SVG rendering, no canvas allocation. Used
- * after fill modifies a layer to figure out which alignment issues
- * the modification eliminated, so extend doesn't fire on already-
- * resolved cases.
- *
- * Returns a map keyed by colorHex, whose value is the list of
- * alignment issues with later layers. Mirrors the orchestration in
- * Phase 2 of `runDfmAnalysis` but skips the dilation / clipping that
- * Phase 2 does for visual rendering (we don't render here).
- */
-export function redetectAlignmentRisks(
-  pocketMasksByColor: Map<string, Uint8Array>,
-  colorOrder: readonly string[],
-  canvasW: number,
-  canvasH: number,
-  alignThresholdPx: number,
-): Map<string, AlignmentIssue[]> {
-  const out = new Map<string, AlignmentIssue[]>();
-  for (const c of colorOrder) out.set(c, []);
-  for (let i = 0; i < colorOrder.length; i++) {
-    const a = pocketMasksByColor.get(colorOrder[i]);
-    if (!a) continue;
-    for (let j = i + 1; j < colorOrder.length; j++) {
-      const b = pocketMasksByColor.get(colorOrder[j]);
-      if (!b) continue;
-      const { affectedCount, totalBoundaryCount } = detectAlignmentRisk(
-        a, b, canvasW, canvasH, alignThresholdPx,
-      );
-      if (affectedCount > 0) {
-        out.get(colorOrder[i])!.push({
-          otherColorHex: colorOrder[j],
-          affectedPercent: totalBoundaryCount > 0 ? (affectedCount / totalBoundaryCount) * 100 : 0,
-        });
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * Lightweight first pass of the guided pipeline. Identifies fill
- * targets (enclosed holes covered by later layers) and alignment
- * targets (boundary-to-boundary proximity to other layers) at lower
- * resolution than the final analysis. Skips per-preset analysis,
- * overlay PNGs, depth maps, and the machining matrix — those run
- * once at full resolution after fill + extend have committed.
+ * Lightweight first pass of the guided pipeline. Counts fill targets
+ * (= holes covered by later layers — the optimizer feeds these to
+ * `applyFillAll`). Polygon-native: parses each layer's svgFragment
+ * directly and walks the PolyTree for fully-covered holes. No
+ * rasterization, no per-pixel sweeps, no alignment detection — the
+ * full analysis pass picks up alignment from the production-resolution
+ * polygon pipeline once fill + extend have committed.
  */
 export async function runDfmAnalysisLite(
   vector: VectorData,
   settings: DFMSettings,
   colorOrder: readonly string[],
-  canvasWidth: number,
 ): Promise<LiteAnalysisResult> {
-  const aspect = vector.naturalHeight / vector.naturalWidth;
-  const canvasW = canvasWidth;
-  const canvasH = Math.max(1, Math.round(canvasWidth * aspect));
-  const pixelsPerInch = canvasW / settings.designWidthInches;
-  const alignThresholdPx = ALIGNMENT_THRESHOLD_INCHES * pixelsPerInch;
-  const n = canvasW * canvasH;
+  const inchesPerUnit = settings.designWidthInches / vector.naturalWidth;
+  const designUnitsPerInch = 1 / inchesPerUnit;
+  const holeMarginUnits = HOLE_MARGIN_INCHES_FOR_FILLABLE * designUnitsPerInch;
 
-  // Phase 1: per-layer rasterization, mirroring runDfmAnalysis Phase 1.
-  // Each layer renders independently so we capture extended-for-
-  // registration regions even when later layers cover them.
-  const pocketMasks = new Map<string, Uint8Array>();
-  for (const colorHex of colorOrder) {
-    pocketMasks.set(colorHex, await rasterizeLayerMask(vector, colorHex, canvasW, canvasH));
-  }
+  // Parse each layer to a MultiPolygon in colorOrder.
+  const polygonsByOrder = colorOrder.map(colorHex => {
+    const layer = vector.layers.find(l => l.colorHex === colorHex);
+    return layer ? svgFragmentToMultiPolygon(layer.svgFragment) : [];
+  });
 
-  // Phase 2: alignment-risk detection (no dilation — we don't render).
-  const issuesByColor = redetectAlignmentRisks(
-    pocketMasks, colorOrder, canvasW, canvasH, alignThresholdPx,
-  );
-
-  // Fillable-hole enumeration: same predicate as Phase 4 of the full
-  // pipeline — a hole counts when every pixel of it is covered by the
-  // union of later layers, since filling it then changes nothing
-  // visible but saves V-bit perimeter time.
-  const orderedMasks = colorOrder.map(c => pocketMasks.get(c) ?? new Uint8Array(n));
-  const laterUnions: Uint8Array[] = colorOrder.map(() => new Uint8Array(n));
+  // laterPolygonUnions[i] = union of layers j > i. Same incremental
+  // sweep as Phase 4 of the full pipeline.
+  const laterPolygonUnions: MultiPolygon[] = colorOrder.map(() => []);
   for (let i = colorOrder.length - 2; i >= 0; i--) {
-    const next = orderedMasks[i + 1];
-    const acc = laterUnions[i];
-    const accNext = laterUnions[i + 1];
-    for (let k = 0; k < n; k++) if (next[k] || accNext[k]) acc[k] = 1;
+    laterPolygonUnions[i] = multiPolygonUnion(polygonsByOrder[i + 1], laterPolygonUnions[i + 1]);
   }
 
   const woods: LiteWoodAnalysis[] = colorOrder.map((colorHex, idx) => {
-    const mask = orderedMasks[idx];
     let fillableHoleCount = 0;
     if (idx < colorOrder.length - 1) {
-      const holes = findEnclosedHoles(mask, canvasW, canvasH);
-      const laterUnion = laterUnions[idx];
-      // Mirror `fillEnclosedHoles`'s 99.5% coverage threshold so the
-      // optimizer's `holeFillTargets` includes layers whose holes
-      // are mostly-covered (sub-pixel stragglers tolerated). A
-      // strict all-or-nothing here would flag layer 0 as having
-      // zero fillable holes and skip running `fillEnclosedHoles`
-      // on it entirely, even when 99.9%+ of every hole is covered.
-      for (const hole of holes) {
-        let coveredPx = 0;
-        for (const k of hole.pixels) {
-          if (laterUnion[k]) coveredPx++;
-        }
-        if (coveredPx / hole.pixels.length >= 0.995) fillableHoleCount++;
+      const target = polygonsByOrder[idx];
+      if (!multiPolygonIsEmpty(target)) {
+        // `allLayersUnion` = target ∪ laterUnion, mirroring
+        // `fillEnclosedHoles`. Same-layer islands sitting inside a
+        // hole count as covering it.
+        const allLayersUnion = multiPolygonUnion(target, laterPolygonUnions[idx]);
+        walkPolygonHoles(target, holeRing => {
+          const holeMP: MultiPolygon = [holeRing];
+          const uncovered = multiPolygonDifference(holeMP, allLayersUnion);
+          let fullyCovered = multiPolygonIsEmpty(uncovered);
+          if (!fullyCovered) {
+            const eroded = multiPolygonOffset(uncovered, -holeMarginUnits / 2, { joinType: 'round' });
+            fullyCovered = multiPolygonIsEmpty(eroded);
+          }
+          if (fullyCovered) {
+            fillableHoleCount++;
+            return true; // skip descending — full-fill absorbs nested geometry
+          }
+          return false;
+        });
       }
     }
-    return {
-      colorHex,
-      alignmentIssues: issuesByColor.get(colorHex) ?? [],
-      fillableHoleCount,
-    };
+    return { colorHex, fillableHoleCount };
   });
 
-  return {
-    woods,
-    pocketMasks,
-    canvasW,
-    canvasH,
-    pixelsPerInch,
-    alignThresholdPx,
-  };
+  return { woods };
 }

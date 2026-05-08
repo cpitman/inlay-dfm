@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { DFMSettings, VectorData, AnalysisResult, WoodConfig, WoodSpeciesKey, Layer, LayerSnapshot, Placement } from '@/types';
 import { parseVectorFile } from '@/lib/vectorParser';
-import { runDfmAnalysis } from '@/lib/dfmAnalysis';
+import { runDfmAnalysis, DEFAULT_CANVAS_WIDTH } from '@/lib/dfmAnalysis';
 import { generateComposite } from '@/lib/compositeRenderer';
 import { WOOD_SPECIES, guessSpecies } from '@/lib/woodSpecies';
 import { combineLayers } from '@/lib/svgLayers';
@@ -22,7 +22,6 @@ const DEFAULT_SETTINGS: DFMSettings = {
   vbitAngleDegrees: 60,
   inlayDepthInches: 0.125,
   grainDirection: 'horizontal',
-  analysisResolution: 'default',
   clearanceBitDiameterInches: 0.25,
   clearanceStrategy: [0.25],
   toolChangeMinutes: 5,
@@ -88,11 +87,6 @@ interface ExpertDesign {
    * that read those settings fields keep working unchanged.
    */
   placement: Placement;
-}
-
-/** Convert the user's resolution preset into the canvas pixel width used by the analyzer/extender. */
-function resolvedCanvasWidth(res: DFMSettings['analysisResolution']): number {
-  return res === 'low' ? 600 : res === 'high' ? 2400 : 1200;
 }
 
 type Status = 'idle' | 'parsing' | 'analyzing' | 'done' | 'error';
@@ -194,7 +188,6 @@ export default function Home() {
   const sessionSettingsKey = useMemo(() => [
     settings.inlayDepthInches,
     settings.grainDirection,
-    settings.analysisResolution,
     settings.plugStockMarginInches,
     settings.plugGlueGapInches,
     settings.plugSurfaceGapInches,
@@ -203,7 +196,6 @@ export default function Home() {
   ].join('|'), [
     settings.inlayDepthInches,
     settings.grainDirection,
-    settings.analysisResolution,
     settings.plugStockMarginInches,
     settings.plugGlueGapInches,
     settings.plugSurfaceGapInches,
@@ -440,8 +432,7 @@ export default function Home() {
     setErrorMsg('');
     try {
       const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
-      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
-      const res = await fillEnclosedHoles(vector, colorHex, settings.designWidthInches, colorOrder, canvasWidth);
+      const res = await fillEnclosedHoles(vector, colorHex, settings.designWidthInches, colorOrder);
       if (res.filledHoleCount === 0) {
         setErrorMsg('No fillable enclosed holes found on this layer.');
         setStatus('error');
@@ -458,7 +449,7 @@ export default function Home() {
     } finally {
       setBusyModification(false);
     }
-  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+  }, [vector, activeDesign, settings.designWidthInches, pushSnapshot]);
 
   const handleFillAll = useCallback(async (colorHexes: string[]) => {
     if (!vector || !activeDesign || colorHexes.length === 0) return;
@@ -466,7 +457,6 @@ export default function Home() {
     setErrorMsg('');
     try {
       const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
-      const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
       let workingLayers = vector.layers;
       let totalFilled = 0;
       let totalArea = 0;
@@ -480,7 +470,7 @@ export default function Home() {
           ),
         };
         const res = await fillEnclosedHoles(
-          workingVector, colorHex, settings.designWidthInches, colorOrder, canvasWidth,
+          workingVector, colorHex, settings.designWidthInches, colorOrder,
         );
         if (res.filledHoleCount > 0) {
           workingLayers = res.layers;
@@ -504,7 +494,7 @@ export default function Home() {
     } finally {
       setBusyModification(false);
     }
-  }, [vector, activeDesign, settings.designWidthInches, settings.analysisResolution, pushSnapshot]);
+  }, [vector, activeDesign, settings.designWidthInches, pushSnapshot]);
 
   const handleExportSvg = useCallback(() => {
     if (vector) downloadSvg(vector);
@@ -537,7 +527,7 @@ export default function Home() {
       designOffsetYInches:  design.placement.offsetYInches,
     };
     const colorOrder = design.woodConfigs.map(wc => wc.colorHex);
-    const canvasWidth = resolvedCanvasWidth(settings.analysisResolution);
+    const canvasWidth = DEFAULT_CANVAS_WIDTH;
     const designIdAtStart = design.id;
     const snapshotIndexAtStart = design.historyIndex;
     try {

@@ -1,137 +1,121 @@
 import { describe, it, expect } from 'vitest';
-import { computeHullFillMask } from './fillConvexHullCovered';
+import { fillConvexHullCovered } from './fillConvexHullCovered';
+import { svgFragmentToMultiPolygon } from './polygonParser';
+import { multiPolygonArea } from './polygon';
+import type { VectorData } from '@/types';
 
-const W = 64;
-const H = 64;
-const N = W * H;
-
-/** Set every pixel in [x0, x1) × [y0, y1) on `mask`. */
-function rect(mask: Uint8Array, x0: number, y0: number, x1: number, y1: number): void {
-  for (let y = y0; y < y1; y++) {
-    for (let x = x0; x < x1; x++) {
-      mask[y * W + x] = 1;
-    }
-  }
+function fixture(layers: Array<{ colorHex: string; svgFragment: string }>): VectorData {
+  return {
+    svgString: '',
+    layers: layers.map(l => ({ colorHex: l.colorHex, svgFragment: l.svgFragment })),
+    naturalWidth: 100,
+    naturalHeight: 100,
+    viewBox: '0 0 100 100',
+    fileName: 'test.svg',
+    fileType: 'svg',
+    detectedColors: layers.map(l => l.colorHex),
+  };
 }
 
-function popcount(mask: Uint8Array): number {
-  let c = 0;
-  for (let i = 0; i < mask.length; i++) if (mask[i]) c++;
-  return c;
-}
+const RED = '#ff0000';
+const BLUE = '#0000ff';
 
-describe('computeHullFillMask', () => {
-  it('U-shape covered by a later layer fills the open mouth', () => {
-    // U-shape: left wall, bottom wall, right wall (no top).
-    const target = new Uint8Array(N);
-    rect(target, 10, 10, 20, 55);  // left wall
-    rect(target, 10, 45, 55, 55);  // bottom (overlaps left wall — fine)
-    rect(target, 45, 10, 55, 55);  // right wall
-    // Later layer covers the U's interior + open mouth at top.
-    const later = new Uint8Array(N);
-    rect(later, 10, 5, 55, 55);
+/** A C-shape (open on the right) at (10, 10)–(50, 50), inner cavity (15, 15)–(45, 45) but with a gap on the right. */
+const cShape =
+  `<path d="M 10 10 L 50 10 L 50 15 L 15 15 L 15 45 L 50 45 L 50 50 L 10 50 Z" fill="#ff0000" />`;
 
-    const fill = computeHullFillMask(target, later, W, H);
-    // Hull of the U is its bounding rect 10..55 × 10..55 (45×45 = 2025 px).
-    // Original component has the three walls (~ 10×45 + 45×10 + 10×45 - overlaps).
-    // Added (covered) pixels = hull - component, which is the interior + mouth.
-    // Should be a meaningful number of pixels (well over the 16-pixel min).
-    expect(popcount(fill)).toBeGreaterThan(500);
-    // Interior of the U (e.g. middle of the empty cavity) should be filled.
-    expect(fill[27 * W + 30]).toBe(1);
-    // Outside the hull should NOT be filled.
-    expect(fill[5 * W + 5]).toBe(0);
-    expect(fill[60 * W + 60]).toBe(0);
+const uShape =
+  // U opening upward: bottom + two side walls.
+  `<path d="M 10 10 L 20 10 L 20 40 L 50 40 L 50 10 L 60 10 L 60 50 L 10 50 Z" fill="#ff0000" />`;
+
+describe('fillConvexHullCovered (polygon-native)', () => {
+  it('a C-shape with its cavity covered by a later layer fills to a rectangle', async () => {
+    // C-shape outer bbox = 10..50 × 10..50, area before fill = 600 (rectangle 40×40 = 1600, minus interior).
+    const v = fixture([
+      { colorHex: RED, svgFragment: cShape },
+      // Later layer covers the C's open mouth + interior.
+      { colorHex: BLUE, svgFragment: `<path d="M 14 14 L 50 14 L 50 46 L 14 46 Z" />` },
+    ]);
+
+    const beforeArea = multiPolygonArea(svgFragmentToMultiPolygon(cShape));
+    const r = await fillConvexHullCovered(v, RED, /* designWidthInches */ 10);
+
+    expect(r.filledHoleCount).toBe(1);
+    const afterArea = multiPolygonArea(svgFragmentToMultiPolygon(r.layers[0].svgFragment));
+    // Hull of the C is the 40×40 rect = 1600. The fill should bring the
+    // area up close to the hull (modulo the parts the later layer doesn't
+    // cover). Given the later layer covers everything inside, the filled
+    // C should be very close to 1600.
+    expect(afterArea).toBeGreaterThan(beforeArea);
+    expect(afterArea).toBeCloseTo(1600, 0);
+    // Sq-inch conversion: 1600 sq SVG units − 600 = 1000. At 0.01 sq in/unit² → 10 sq in.
+    expect(r.filledAreaSqIn).toBeCloseTo((afterArea - beforeArea) * 0.01, 4);
   });
 
-  it('U-shape uncovered by later layers gets no fill', () => {
-    const target = new Uint8Array(N);
-    rect(target, 10, 10, 20, 55);
-    rect(target, 10, 45, 55, 55);
-    rect(target, 45, 10, 55, 55);
-    const later = new Uint8Array(N);  // empty
-
-    const fill = computeHullFillMask(target, later, W, H);
-    expect(popcount(fill)).toBe(0);
+  it('a U-shape with its cavity uncovered yields no fill', async () => {
+    const v = fixture([
+      { colorHex: RED,  svgFragment: uShape },
+      { colorHex: BLUE, svgFragment: `<path d="M 80 80 L 90 80 L 90 90 L 80 90 Z" />` }, // far away
+    ]);
+    const r = await fillConvexHullCovered(v, RED, 10);
+    expect(r.filledHoleCount).toBe(0);
   });
 
-  it('already-convex rectangle yields no fill (hull = mask)', () => {
-    const target = new Uint8Array(N);
-    rect(target, 10, 10, 30, 30);
-    const later = new Uint8Array(N);
-    rect(later, 0, 0, W, H);  // covers everything
-
-    const fill = computeHullFillMask(target, later, W, H);
-    // Hull == component == 20×20 rect. Added pixels = empty.
-    expect(popcount(fill)).toBe(0);
+  it('already-convex shape gets no fill (hull = component)', async () => {
+    const v = fixture([
+      { colorHex: RED,  svgFragment: `<path d="M 10 10 L 50 10 L 50 50 L 10 50 Z" />` },
+      { colorHex: BLUE, svgFragment: `<path d="M 0 0 L 100 0 L 100 100 L 0 100 Z" />` },
+    ]);
+    const r = await fillConvexHullCovered(v, RED, 10);
+    expect(r.filledHoleCount).toBe(0);
   });
 
-  it('U opening to canvas edge fills the part covered by later layers', () => {
-    // U opens to the RIGHT edge of the canvas at x = W = 64.
-    // Walls at top, left, bottom; right side missing.
-    const target = new Uint8Array(N);
-    rect(target, 10, 20, 64, 25);  // top wall (extends to right edge)
-    rect(target, 10, 20, 15, 50);  // left wall
-    rect(target, 10, 45, 64, 50);  // bottom wall (extends to right edge)
-    // Later layer covers the interior cavity.
-    const later = new Uint8Array(N);
-    rect(later, 15, 25, 64, 45);
-
-    const fill = computeHullFillMask(target, later, W, H);
-    expect(popcount(fill)).toBeGreaterThan(50);
-    // A point inside the cavity should be filled.
-    expect(fill[35 * W + 30]).toBe(1);
+  it('partial coverage: only the covered part fills', async () => {
+    // C-shape; later only covers the LEFT half of the C's cavity.
+    // The filled region should equal exactly that LEFT half.
+    const v = fixture([
+      { colorHex: RED,  svgFragment: cShape },
+      { colorHex: BLUE, svgFragment: `<path d="M 14 14 L 30 14 L 30 46 L 14 46 Z" />` },
+    ]);
+    const before = multiPolygonArea(svgFragmentToMultiPolygon(cShape));
+    const r = await fillConvexHullCovered(v, RED, 10);
+    const after = multiPolygonArea(svgFragmentToMultiPolygon(r.layers[0].svgFragment));
+    expect(after).toBeGreaterThan(before);
+    // Filled some, but less than the full hull (which is 1600).
+    expect(after).toBeLessThan(1600);
   });
 
-  it('multiple components: only the covered one fills', () => {
-    // Two disjoint U-shapes. Only the LEFT one's mouth is covered.
-    const target = new Uint8Array(N);
-    // Left U at x=2..15
-    rect(target, 2, 5, 5, 25);
-    rect(target, 2, 22, 15, 25);
-    rect(target, 12, 5, 15, 25);
-    // Right U at x=40..55
-    rect(target, 40, 5, 43, 25);
-    rect(target, 40, 22, 55, 25);
-    rect(target, 52, 5, 55, 25);
-    const later = new Uint8Array(N);
-    // Cover only the LEFT U's cavity.
-    rect(later, 5, 5, 12, 22);
-
-    const fill = computeHullFillMask(target, later, W, H);
-    // Left U interior gets some fill.
-    expect(fill[10 * W + 7]).toBe(1);
-    // Right U interior is NOT covered → not filled.
-    expect(fill[10 * W + 47]).toBe(0);
-    // Filled pixels should ONLY be in the left half.
-    let rightHalfFill = 0;
-    for (let y = 0; y < H; y++) {
-      for (let x = 32; x < W; x++) {
-        if (fill[y * W + x]) rightHalfFill++;
-      }
-    }
-    expect(rightHalfFill).toBe(0);
+  it('disjoint fill piece (not adjacent to component) is dropped', async () => {
+    // Convex 40×40 square. Hull = component (no hull-added pixels).
+    // Even if a later layer covers a faraway region, no fill happens
+    // since hull−component is empty.
+    const v = fixture([
+      { colorHex: RED,  svgFragment: `<path d="M 10 10 L 50 10 L 50 50 L 10 50 Z" />` },
+      { colorHex: BLUE, svgFragment: `<path d="M 70 70 L 80 70 L 80 80 L 70 80 Z" />` },
+    ]);
+    const r = await fillConvexHullCovered(v, RED, 10);
+    expect(r.filledHoleCount).toBe(0);
   });
 
-  it('fill below the MIN_FILL_PIXELS threshold is skipped', () => {
-    // Tiny near-convex blob with a single uncovered pixel "concavity"
-    // smaller than the 16-pixel minimum.
-    const target = new Uint8Array(N);
-    rect(target, 10, 10, 14, 14);  // 4×4 = 16 px component
-    target[11 * W + 11] = 0;       // poke a single hole
-    const later = new Uint8Array(N);
-    rect(later, 0, 0, W, H);
-
-    const fill = computeHullFillMask(target, later, W, H);
-    // The "added by hull" diff is just 1 pixel → below MIN_FILL_PIXELS = 16 → skipped.
-    expect(popcount(fill)).toBe(0);
+  it('multiple components: only the one with covered concavity fills', async () => {
+    // Two C-shapes: left one's cavity covered, right one's not.
+    const leftC = `<path d="M 5 5 L 25 5 L 25 8 L 8 8 L 8 22 L 25 22 L 25 25 L 5 25 Z" />`;
+    const rightC = `<path d="M 40 5 L 60 5 L 60 8 L 43 8 L 43 22 L 60 22 L 60 25 L 40 25 Z" />`;
+    const v = fixture([
+      { colorHex: RED, svgFragment: leftC + rightC },
+      // Later only covers the left C's cavity.
+      { colorHex: BLUE, svgFragment: `<path d="M 7 7 L 25 7 L 25 23 L 7 23 Z" />` },
+    ]);
+    const r = await fillConvexHullCovered(v, RED, 10);
+    expect(r.filledHoleCount).toBe(1);
   });
 
-  it('empty target yields empty fill', () => {
-    const target = new Uint8Array(N);
-    const later = new Uint8Array(N);
-    rect(later, 0, 0, W, H);
-    const fill = computeHullFillMask(target, later, W, H);
-    expect(popcount(fill)).toBe(0);
+  it('no-op when target is the last layer', async () => {
+    const v = fixture([
+      { colorHex: BLUE, svgFragment: `<path d="M 0 0 L 100 0 L 100 100 L 0 100 Z" />` },
+      { colorHex: RED,  svgFragment: cShape },
+    ]);
+    const r = await fillConvexHullCovered(v, RED, 10);
+    expect(r.filledHoleCount).toBe(0);
   });
 });
