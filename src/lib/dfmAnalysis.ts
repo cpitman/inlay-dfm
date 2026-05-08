@@ -10,10 +10,11 @@ import { parseViewBox } from './svgLayers';
 import { computePlugStockUsageSqIn } from './plugStockPacking';
 import { findMaskComponentCentroids } from './maskComponents';
 import { svgFragmentToMultiPolygon, multiPolygonToSvgFragment } from './polygonParser';
-import { multiPolygonDifference, multiPolygonUnionAll } from './clipperOps';
-import { multiPolygonArea, multiPolygonPerimeter, type MultiPolygon } from './polygon';
+import { multiPolygonDifference, multiPolygonIntersection, multiPolygonUnionAll } from './clipperOps';
+import { multiPolygonArea, multiPolygonIsEmpty, multiPolygonPerimeter, type MultiPolygon } from './polygon';
 import { polygonProblemStats, type PolygonProblemStats } from './polygonPocketStats';
 import {
+  polygonToPath2D,
   rasterizeMultiPolygonToMask,
   renderDepthMapToContext,
   type DesignToCanvasTransform,
@@ -186,6 +187,8 @@ interface ProblemStatsForAngle {
   passed: boolean;
   /** Per-pixel problem mask (only populated when returnMask=true). */
   problemMask?: Uint8Array;
+  /** Polygon problem region (only populated by the polygon path). */
+  problemMP?: MultiPolygon;
 }
 
 /**
@@ -544,36 +547,51 @@ function analyzeMask(
   };
 }
 
+/**
+ * Polygon-native overlay PNG builder. Replaces the per-pixel
+ * `getImageData` / `putImageData` composite with `Path2D` fills.
+ *
+ * Channels render in priority-ascending order (= suggestion bottom,
+ * problem top). Each channel first runs `destination-out` to erase
+ * the canvas under its polygon (including any earlier overlay), then
+ * `source-over` to paint at the channel's color and alpha. Net pixel
+ * behavior matches the bitmap version's "topmost wins" + alpha-replace
+ * semantics: an overlay-area pixel = (channel.rgb, channel.alpha)
+ * over empty; a non-overlay pixel = base canvas at full alpha.
+ */
 async function buildOverlay(
   base: OffscreenCanvas,
   canvasW: number,
   canvasH: number,
-  isProblem: Uint8Array,
-  isThinWall: Uint8Array,
-  isAlignment?: Uint8Array,
-  /** Pixels only an infeasible smaller v-bit can't reach — Step 2 artist
-      callouts. Rendered in teal/cyan, beneath the other channels so any
-      pixel that's *also* a real problem at the user's current angle wins
-      and stays red. */
-  isSmallerBitInfeasible?: Uint8Array,
+  problemMP: MultiPolygon,
+  thinWallMP: MultiPolygon,
+  transform: DesignToCanvasTransform,
+  alignmentMP?: MultiPolygon,
+  smallerBitInfeasibleMP?: MultiPolygon,
 ): Promise<string> {
   const oc = new OffscreenCanvas(canvasW, canvasH);
   const ctx = oc.getContext('2d')!;
   ctx.drawImage(base, 0, 0);
-  const img = ctx.getImageData(0, 0, canvasW, canvasH);
-  const d = img.data;
-  for (let i = 0, n = canvasW * canvasH; i < n; i++) {
-    if (isProblem[i]) {
-      d[i*4]=220; d[i*4+1]=50;  d[i*4+2]=50;  d[i*4+3]=210;
-    } else if (isThinWall[i]) {
-      d[i*4]=220; d[i*4+1]=150; d[i*4+2]=30;  d[i*4+3]=210;
-    } else if (isAlignment?.[i]) {
-      d[i*4]=210; d[i*4+1]=50;  d[i*4+2]=210; d[i*4+3]=210;
-    } else if (isSmallerBitInfeasible?.[i]) {
-      d[i*4]=40;  d[i*4+1]=200; d[i*4+2]=210; d[i*4+3]=180;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
+
+  const drawChannel = (mp: MultiPolygon | undefined, fillStyle: string): void => {
+    if (!mp || multiPolygonIsEmpty(mp)) return;
+    const path = polygonToPath2D(mp, transform);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.fill(path, 'evenodd');
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = fillStyle;
+    ctx.fill(path, 'evenodd');
+  };
+
+  // Priority ascending — later draws overwrite earlier in the polygon
+  // overlap. (Same priority as the bitmap version: problem highest.)
+  drawChannel(smallerBitInfeasibleMP, 'rgba(40, 200, 210, 0.71)'); // teal/cyan
+  drawChannel(alignmentMP,            'rgba(210, 50, 210, 0.82)'); // magenta
+  drawChannel(thinWallMP,             'rgba(220, 150, 30, 0.82)'); // orange
+  drawChannel(problemMP,              'rgba(220, 50, 50, 0.82)');  // red
+
+  ctx.globalCompositeOperation = 'source-over';
   return canvasToDataUrl(oc);
 }
 
@@ -730,6 +748,7 @@ function polygonProblemStatsBitmap(
     out.problemMask = rasterizeMultiPolygonToMask(
       stats.problemPolygon ?? [], canvasW, canvasH, transform,
     );
+    out.problemMP = stats.problemPolygon ?? [];
   }
   return out;
 }
@@ -917,7 +936,7 @@ export async function runDfmAnalysis(
     thinWallMask: Uint8Array,
     fullDepthRadiusUnits: number,
     layerBase: OffscreenCanvas,
-    alignPixels?: Uint8Array,
+    alignmentMP: MultiPolygon | undefined,
     plugFit?: DepthMapPlugFit,
   ): Promise<SingleAnalysis> => {
     let thinWallPixelCount = 0;
@@ -931,7 +950,7 @@ export async function runDfmAnalysis(
       vbitAngleWarning:   maskData.vbitAngleWarning,
       thinWallPixelCount,
       overlayDataUrl: produceOverlays
-        ? await buildOverlay(layerBase, canvasW, canvasH, problemMask, thinWallMask, alignPixels)
+        ? await buildOverlay(layerBase, canvasW, canvasH, maskData.problemMP, maskData.thinWallMP, polygonTransform, alignmentMP)
         : '',
       suggestionOverlayDataUrl: '',
       problemComponents: findMaskComponentCentroids(problemMask, canvasW, canvasH),
@@ -1021,18 +1040,20 @@ export async function runDfmAnalysis(
     }
   }
 
-  // Rasterize the per-inlay risk polygon to a Uint8Array, clipped to
-  // the inlay's pocket mask so the band doesn't bleed into the
-  // base-board region on the rendered overlay.
-  const alignVisualPerInlay: Uint8Array[] = orderedColors.map((_, i) => {
+  // Clip each inlay's risk polygon to the inlay's pocket polygon so
+  // the band doesn't bleed into the base-board region on the
+  // rendered overlay. Mirrors the bitmap path's mask AND-clip.
+  const alignVisualPolygons: MultiPolygon[] = orderedColors.map((_, i) => {
     const mp = alignRiskPolygonsPerInlay[i];
-    if (mp.length === 0) return new Uint8Array(n);
-    const raw = rasterizeMultiPolygonToMask(mp, canvasW, canvasH, polygonTransform);
-    const clipped = new Uint8Array(n);
-    const pocket = pocketMasks[i];
-    for (let k = 0; k < n; k++) if (raw[k] && pocket[k]) clipped[k] = 1;
-    return clipped;
+    if (mp.length === 0) return [];
+    return multiPolygonIntersection(mp, pocketPolygons[i]);
   });
+  // Bitmap version of the same — still consumed by the legacy bitmap
+  // overlay code path in Phase 5 / Phase 5.5 PNG encoders. Rasterized
+  // once and reused.
+  const alignVisualPerInlay: Uint8Array[] = alignVisualPolygons.map(mp =>
+    mp.length === 0 ? new Uint8Array(n) : rasterizeMultiPolygonToMask(mp, canvasW, canvasH, polygonTransform),
+  );
 
   // -----------------------------------------------------------------------
   // Phase 3: Machining-time rates (constant across layers for one analysis).
@@ -1101,6 +1122,11 @@ export async function runDfmAnalysis(
     pocketMP: MultiPolygon;
     /** Plug polygon (= canvas frame − pocket) for the polygon-native per-preset path. */
     plugMP: MultiPolygon;
+    /** Per-side thin-wall polygon (= for `buildOverlay` polygon path). */
+    pocketThinWallMP: MultiPolygon;
+    plugThinWallMP: MultiPolygon;
+    /** Per-side alignment polygon clipped to the layer's pocket. */
+    pocketAlignMP: MultiPolygon;
   }[] = [];
   let totalMachineTime = 0;
   let anyMachineTimeMissing = false;
@@ -1279,7 +1305,7 @@ ${plugStockOutlineSvg}
 
     woods.push({
       colorHex,
-      pocket: await toSinglePolygon(pocketMP, pocketAnalysis, pocketIsProblem, pocketIsThinWall, fullDepthRadiusUnits, pocketBase, alignVisualPerInlay[idx]),
+      pocket: await toSinglePolygon(pocketMP, pocketAnalysis, pocketIsProblem, pocketIsThinWall, fullDepthRadiusUnits, pocketBase, alignRiskPolygonsPerInlay[idx]),
       plug:   await toSinglePolygon(plugMP,   plugAnalysis,   plugIsProblem,   plugIsThinWall,   fullDepthRadiusUnits, plugBase, undefined, plugDepthMapFit),
       perPresetAnalysis: [], // populated in Phase 5 below
       widerBitInfeasibleMask: null, // populated in Phase 5.5 below if applicable
@@ -1312,6 +1338,9 @@ ${plugStockOutlineSvg}
       plugMask: plugMaskForDfm,
       pocketMP,
       plugMP,
+      pocketThinWallMP: pocketAnalysis.thinWallMP,
+      plugThinWallMP:   plugAnalysis.thinWallMP,
+      pocketAlignMP:    alignVisualPolygons[idx],
     });
   }
 
@@ -1453,12 +1482,12 @@ ${plugStockOutlineSvg}
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketOverlay',
           promise: buildOverlay(inp.pocketBase, canvasW, canvasH,
-            w.pocketStats.problemMask!, inp.pocketIsThinWall, inp.pocketAlign),
+            w.pocketStats.problemMP ?? [], inp.pocketThinWallMP, polygonTransform, inp.pocketAlignMP),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'plugOverlay',
           promise: buildOverlay(inp.plugBase, canvasW, canvasH,
-            w.plugStats.problemMask!, inp.plugIsThinWall),
+            w.plugStats.problemMP ?? [], inp.plugThinWallMP, polygonTransform),
         });
         encodeJobs.push({
           aIdx, wIdx, kind: 'pocketDepth',
@@ -1625,23 +1654,23 @@ ${plugStockOutlineSvg}
     for (let i = 0; i < woods.length; i++) {
       const inp = overlayRebuildInputs[i];
       const dw = displayData.perWood[i];
-      const pocketDisplayProblem = dw.pocketStats.problemMask!;
-      const plugDisplayProblem   = dw.plugStats.problemMask!;
+      const pocketDisplayProblemMP = dw.pocketStats.problemMP ?? [];
+      const plugDisplayProblemMP   = dw.plugStats.problemMP ?? [];
 
-      let pocketSuggestion: Uint8Array | undefined;
-      let plugSuggestion: Uint8Array | undefined;
+      let pocketSuggestionMP: MultiPolygon = [];
+      let plugSuggestionMP: MultiPolygon = [];
       if (suggestionData) {
         const sw = suggestionData.perWood[i];
-        const pocketWider = sw.pocketStats.problemMask!;
-        const plugWider   = sw.plugStats.problemMask!;
+        // Suggestion = (next-wider preset's problem) − (display preset's problem) =
+        // regions that ONLY the next-wider preset can't reach. Polygon
+        // difference replaces the bitmap per-pixel diff above.
+        pocketSuggestionMP = multiPolygonDifference(sw.pocketStats.problemMP ?? [], pocketDisplayProblemMP);
+        plugSuggestionMP   = multiPolygonDifference(sw.plugStats.problemMP   ?? [], plugDisplayProblemMP);
 
-        pocketSuggestion = new Uint8Array(canvasW * canvasH);
-        plugSuggestion   = new Uint8Array(canvasW * canvasH);
-        for (let k = 0; k < canvasW * canvasH; k++) {
-          if (pocketWider[k] && !pocketDisplayProblem[k]) pocketSuggestion[k] = 1;
-          if (plugWider[k]   && !plugDisplayProblem[k])   plugSuggestion[k]   = 1;
-        }
-
+        // Rasterized version still needed for the guided UI (= React
+        // overlay reads the Uint8Array directly).
+        const pocketSuggestion = rasterizeMultiPolygonToMask(pocketSuggestionMP, canvasW, canvasH, polygonTransform);
+        const plugSuggestion   = rasterizeMultiPolygonToMask(plugSuggestionMP,   canvasW, canvasH, polygonTransform);
         woods[i].widerBitInfeasibleMask = {
           angleDegrees: step2SuggestionAngleDegrees!,
           pocket: pocketSuggestion,
@@ -1655,13 +1684,13 @@ ${plugStockOutlineSvg}
       if (produceOverlays) {
         woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
           inp.pocketBase, canvasW, canvasH,
-          pocketDisplayProblem, inp.pocketIsThinWall, inp.pocketAlign,
-          pocketSuggestion,
+          pocketDisplayProblemMP, inp.pocketThinWallMP, polygonTransform,
+          inp.pocketAlignMP, pocketSuggestionMP,
         );
         woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
           inp.plugBase, canvasW, canvasH,
-          plugDisplayProblem, inp.plugIsThinWall, undefined,
-          plugSuggestion,
+          plugDisplayProblemMP, inp.plugThinWallMP, polygonTransform,
+          undefined, plugSuggestionMP,
         );
       }
     }
@@ -1675,17 +1704,21 @@ ${plugStockOutlineSvg}
     for (let i = 0; i < woods.length; i++) {
       const inp = overlayRebuildInputs[i];
       const fw = fallbackData.perWood[i];
-      const pocketProblem = fw.pocketStats.problemMask!;
-      const plugProblem   = fw.plugStats.problemMask!;
+      const pocketProblem   = fw.pocketStats.problemMask!;
+      const plugProblem     = fw.plugStats.problemMask!;
+      const pocketProblemMP = fw.pocketStats.problemMP ?? [];
+      const plugProblemMP   = fw.plugStats.problemMP ?? [];
       if (produceOverlays) {
         woods[i].pocket.suggestionOverlayDataUrl = await buildOverlay(
           inp.pocketBase, canvasW, canvasH,
-          pocketProblem, inp.pocketIsThinWall, inp.pocketAlign,
+          pocketProblemMP, inp.pocketThinWallMP, polygonTransform,
+          inp.pocketAlignMP,
           undefined, // no teal suggestion — there's no upgrade path
         );
         woods[i].plug.suggestionOverlayDataUrl = await buildOverlay(
           inp.plugBase, canvasW, canvasH,
-          plugProblem, inp.plugIsThinWall, undefined,
+          plugProblemMP, inp.plugThinWallMP, polygonTransform,
+          undefined,
           undefined,
         );
       }

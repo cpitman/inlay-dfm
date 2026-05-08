@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.1';
+export const CODE_VERSION = '2026-05-08.2';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Machining time polygon-native: per-bit covered area = inwardArea + perimeter × R (Steiner minus the π R² corner-cap term); incremental subtraction across bits drives clearance + v-bit time. Plug stock = polygon convex hull + outward offset. Bitmap dist1 fully retired from per-layer pipeline.';
+  'buildOverlay polygon-native: Path2D fills replace per-pixel getImageData/putImageData composite. Each channel uses destination-out + source-over to match bitmap alpha-replace semantics; per-preset and per-side problem polygons threaded through alongside thin-wall and alignment polygons.';
