@@ -478,18 +478,12 @@ export async function runDfmAnalysis(
 
   // Clip each inlay's risk polygon to the inlay's pocket polygon so
   // the band doesn't bleed into the base-board region on the
-  // rendered overlay. Mirrors the bitmap path's mask AND-clip.
+  // rendered overlay.
   const alignVisualPolygons: MultiPolygon[] = orderedColors.map((_, i) => {
     const mp = alignRiskPolygonsPerInlay[i];
     if (mp.length === 0) return [];
     return multiPolygonIntersection(mp, pocketPolygons[i]);
   });
-  // Bitmap version of the same — still consumed by the legacy bitmap
-  // overlay code path in Phase 5 / Phase 5.5 PNG encoders. Rasterized
-  // once and reused.
-  const alignVisualPerInlay: Uint8Array[] = alignVisualPolygons.map(mp =>
-    mp.length === 0 ? new Uint8Array(n) : rasterizeMultiPolygonToMask(mp, canvasW, canvasH, polygonTransform),
-  );
 
   // -----------------------------------------------------------------------
   // Phase 3: Machining-time rates (constant across layers for one analysis).
@@ -531,18 +525,13 @@ export async function runDfmAnalysis(
   }[] = [];
   // Inputs needed to rebuild each wood's overlay later (after the matrix
   // pass tells us the largest infeasible smaller-bit angle, whose mask is
-  // a fourth color channel in the overlay PNG). Phase 5's per-preset path
-  // reads `pocketMP` / `plugMP` for polygon-native problem stats; the
-  // `pocketIsProblem` / `pocketIsThinWall` masks are passed through to the
-  // existing bitmap `buildOverlay` composite.
+  // pocketBase / plugBase: the per-layer rendered canvases used as
+  // visual backdrops. pocketMP / plugMP / thin-wall / alignment
+  // polygons feed buildOverlay's polygon-native fill paths in
+  // Phase 5 + 5.5.
   const overlayRebuildInputs: {
     pocketBase: OffscreenCanvas;
     plugBase: OffscreenCanvas;
-    pocketIsProblem: Uint8Array;
-    pocketIsThinWall: Uint8Array;
-    pocketAlign?: Uint8Array;
-    plugIsProblem: Uint8Array;
-    plugIsThinWall: Uint8Array;
     /** Pocket polygon (design units) for the polygon-native per-preset path. */
     pocketMP: MultiPolygon;
     /** Plug polygon (= canvas frame − pocket) for the polygon-native per-preset path. */
@@ -752,11 +741,6 @@ ${plugStockOutlineSvg}
     overlayRebuildInputs.push({
       pocketBase,
       plugBase,
-      pocketIsProblem,
-      pocketIsThinWall,
-      pocketAlign: alignVisualPerInlay[idx],
-      plugIsProblem,
-      plugIsThinWall,
       pocketMP,
       plugMP,
       pocketThinWallMP: pocketAnalysis.thinWallMP,
@@ -1216,17 +1200,12 @@ export interface LiteAnalysisResult {
  * rasterization, no per-pixel sweeps, no alignment detection — the
  * full analysis pass picks up alignment from the production-resolution
  * polygon pipeline once fill + extend have committed.
- *
- * `canvasWidth` is no longer used (the polygon path needs no raster
- * resolution); kept in the signature for call-site stability.
  */
 export async function runDfmAnalysisLite(
   vector: VectorData,
   settings: DFMSettings,
   colorOrder: readonly string[],
-  canvasWidth: number,
 ): Promise<LiteAnalysisResult> {
-  void canvasWidth;
   const inchesPerUnit = settings.designWidthInches / vector.naturalWidth;
   const designUnitsPerInch = 1 / inchesPerUnit;
   const holeMarginUnits = HOLE_MARGIN_INCHES_FOR_FILLABLE * designUnitsPerInch;

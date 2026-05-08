@@ -134,8 +134,7 @@ async function runSingleDesignOptimization(
   // Scale the analysis canvas with the design — bigger designs need
   // more pixels to keep the same physical resolution. No upper cap;
   // very large designs trade some optimizer wall-time for fidelity.
-  const canvasWidth     = DEFAULT_CANVAS_WIDTH;
-  const liteCanvasWidth = DEFAULT_CANVAS_WIDTH;
+  const canvasWidth = DEFAULT_CANVAS_WIDTH;
 
   const settings: DFMSettings = {
     designWidthInches,
@@ -173,7 +172,7 @@ async function runSingleDesignOptimization(
   // Skips per-preset overlay encoding, depth maps, and the machining
   // matrix — those run once at the end after fill + extend commit.
   onProgress?.(`Inspecting your design${suffix}…`);
-  const lite = await runDfmAnalysisLite(workingVector, settings, order, liteCanvasWidth);
+  const lite = await runDfmAnalysisLite(workingVector, settings, order);
 
   // Phase 2: layer-mask expansion. Two passes inside `applyFillAll`:
   // closed-hole fill on lite-flagged layers, then convex-hull fill on
@@ -185,7 +184,7 @@ async function runSingleDesignOptimization(
   const holeFillTargets = lite.woods.filter(w => w.fillableHoleCount > 0).map(w => w.colorHex);
   if (order.length >= 2) {
     onProgress?.(`Optimizing layer geometry${suffix}…`);
-    workingVector = await applyFillAll(workingVector, holeFillTargets, designWidthInches, order, liteCanvasWidth);
+    workingVector = await applyFillAll(workingVector, holeFillTargets, designWidthInches, order);
     appliedFill = true;
   }
 
@@ -343,7 +342,6 @@ async function applyFillAll(
   holeFillTargets: string[],
   designWidthInches: number,
   colorOrder: string[],
-  canvasWidth: number,
 ): Promise<VectorData> {
   // Pass 2 (convex-hull fill) is currently DEFERRED. Its previous
   // partial-fill semantics (= absorb the covered fraction of a
@@ -370,7 +368,7 @@ async function applyFillAll(
   // partially covered are left intact. Limited to layers the lite
   // analysis already flagged.
   for (const colorHex of holeFillTargets) {
-    const res = await fillEnclosedHoles(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
+    const res = await fillEnclosedHoles(buildVector(), colorHex, designWidthInches, colorOrder);
     if (res.filledHoleCount > 0 || res.partiallyFilledHoleCount > 0) {
       workingLayers = res.layers;
     }
@@ -391,7 +389,7 @@ async function applyFillAll(
   if (ENABLE_OCCLUDED_REMOVAL) {
     for (let i = 0; i < colorOrder.length - 1; i++) {
       const colorHex = colorOrder[i];
-      const res = await removeFullyOccludedRegions(buildVector(), colorHex, designWidthInches, colorOrder, canvasWidth);
+      const res = await removeFullyOccludedRegions(buildVector(), colorHex, designWidthInches, colorOrder);
       if (res.removedComponentCount > 0) workingLayers = res.layers;
     }
   }

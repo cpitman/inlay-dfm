@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.11';
+export const CODE_VERSION = '2026-05-08.12';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Hardcode canvas resolution to 1200 px everywhere; remove the analysisResolution setting, AnalysisResolution type, AdvancedSettingsPanel resolution UI, and GUIDED_PIXELS_PER_INCH / LITE_PIXELS_PER_INCH from quoteOptimizer (after the polygon migration the canvas resolution affects only overlay PNG appearance, not analysis numbers). Cut dead px constants + buildDepthMap function from dfmAnalysis.ts.';
+  'Post-migration scaffolding cleanup: drop dead overlayRebuildInputs mask + pocketAlign fields (struct stored bitmap channels never read post-migration), drop alignVisualPerInlay rasterization (only consumer was the dead pocketAlign), drop _rasterWidth params from fillEnclosedHoles + removeFullyOccludedRegions, drop unused canvasWidth from runDfmAnalysisLite + applyFillAll. Callers updated through expert/page.tsx + quoteOptimizer.ts.';

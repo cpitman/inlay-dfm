@@ -432,8 +432,7 @@ export default function Home() {
     setErrorMsg('');
     try {
       const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
-      const canvasWidth = DEFAULT_CANVAS_WIDTH;
-      const res = await fillEnclosedHoles(vector, colorHex, settings.designWidthInches, colorOrder, canvasWidth);
+      const res = await fillEnclosedHoles(vector, colorHex, settings.designWidthInches, colorOrder);
       if (res.filledHoleCount === 0) {
         setErrorMsg('No fillable enclosed holes found on this layer.');
         setStatus('error');
@@ -458,7 +457,6 @@ export default function Home() {
     setErrorMsg('');
     try {
       const colorOrder = activeDesign.woodConfigs.map(wc => wc.colorHex);
-      const canvasWidth = DEFAULT_CANVAS_WIDTH;
       let workingLayers = vector.layers;
       let totalFilled = 0;
       let totalArea = 0;
@@ -472,7 +470,7 @@ export default function Home() {
           ),
         };
         const res = await fillEnclosedHoles(
-          workingVector, colorHex, settings.designWidthInches, colorOrder, canvasWidth,
+          workingVector, colorHex, settings.designWidthInches, colorOrder,
         );
         if (res.filledHoleCount > 0) {
           workingLayers = res.layers;

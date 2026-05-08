@@ -135,12 +135,7 @@ export async function fillEnclosedHoles(
   targetColorHex: string,
   designWidthInches: number,
   colorOrder?: string[],
-  // Kept for signature compatibility with the optimizer call site
-  // and any tests that pass it. The polygon implementation has no
-  // raster step. Underscore prefix silences unused-arg lint.
-  _rasterWidth?: number,
 ): Promise<FillResult> {
-  void _rasterWidth;
   const order = colorOrder ?? vector.detectedColors;
   const targetIndex = order.indexOf(targetColorHex);
   if (targetIndex < 0) {

@@ -51,9 +51,7 @@ export async function removeFullyOccludedRegions(
   targetColorHex: string,
   designWidthInches: number,
   colorOrder?: string[],
-  _rasterWidth?: number,
 ): Promise<RemoveResult> {
-  void _rasterWidth;
   const order = colorOrder ?? vector.detectedColors;
   const targetIndex = order.indexOf(targetColorHex);
   if (targetIndex < 0) {
