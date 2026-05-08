@@ -94,53 +94,6 @@
     "rank": 5
   },
   {
-    "id": "pika",
-    "title": "Pika",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "pika",
-      "mammal"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355610/pika",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#5f3f2c",
-      "#c27e57",
-      "#000000"
-    ],
-    "aspectRatio": 1.049692259748545,
-    "rank": 6
-  },
-  {
-    "id": "hyrax",
-    "title": "Hyrax",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "hyrax",
-      "mammal"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355609/hyrax",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#654631",
-      "#bbbbbb",
-      "#000000",
-      "#ca8c63"
-    ],
-    "aspectRatio": 0.8364059441754018,
-    "rank": 7
-  },
-  {
     "id": "dog",
     "title": "Dog",
     "tags": [
@@ -162,33 +115,7 @@
       "#86664c"
     ],
     "aspectRatio": 1.0942717626477843,
-    "rank": 8
-  },
-  {
-    "id": "ibis",
-    "title": "Ibis",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "ibis",
-      "bird",
-      "wetland"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355584/ibis",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#ec1c2c",
-      "#bbbbbb",
-      "#ba8711",
-      "#191919",
-      "#010101"
-    ],
-    "aspectRatio": 0.6743598384256657,
-    "rank": 9
+    "rank": 6
   },
   {
     "id": "bass",
@@ -216,7 +143,7 @@
       "#000000"
     ],
     "aspectRatio": 1.349731100742049,
-    "rank": 10
+    "rank": 7
   },
   {
     "id": "no-kings-crown-symbol-on-yellow-square",
@@ -257,7 +184,7 @@
       "#000000"
     ],
     "aspectRatio": 1,
-    "rank": 11
+    "rank": 8
   },
   {
     "id": "no-kings-crown-profile-picture",
@@ -295,7 +222,7 @@
       "#f5060b"
     ],
     "aspectRatio": 1,
-    "rank": 12
+    "rank": 9
   },
   {
     "id": "no-kings-protest-poster-anti-monarchy",
@@ -347,7 +274,7 @@
       "#000000"
     ],
     "aspectRatio": 0.618,
-    "rank": 13
+    "rank": 10
   },
   {
     "id": "yellow-no-kings-symbol-placard",
@@ -397,7 +324,7 @@
       "#000000"
     ],
     "aspectRatio": 0.618,
-    "rank": 14
+    "rank": 11
   },
   {
     "id": "fawn",
@@ -424,7 +351,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.9672707624049159,
-    "rank": 15
+    "rank": 12
   },
   {
     "id": "rainbow-color-animated-heart",
@@ -459,7 +386,7 @@
       "#ff0000"
     ],
     "aspectRatio": 0.9969774195460201,
-    "rank": 16
+    "rank": 13
   },
   {
     "id": "puma",
@@ -487,7 +414,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.9866750585565971,
-    "rank": 17
+    "rank": 14
   },
   {
     "id": "snow-leopard",
@@ -513,38 +440,7 @@
       "#a6a6a6"
     ],
     "aspectRatio": 0.633862619252368,
-    "rank": 18
-  },
-  {
-    "id": "lion",
-    "title": "Lion",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "lion",
-      "cat",
-      "yellow",
-      "savanna",
-      "pride",
-      "grassland",
-      "forest",
-      "wetland"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355524/lion",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#ffc84b",
-      "#785e24",
-      "#000000",
-      "#bbbbbb",
-      "#af8934"
-    ],
-    "aspectRatio": 0.5933901061625488,
-    "rank": 19
+    "rank": 15
   },
   {
     "id": "enzo",
@@ -567,32 +463,7 @@
       "#132028"
     ],
     "aspectRatio": 0.850314465408805,
-    "rank": 20
-  },
-  {
-    "id": "finch",
-    "title": "Finch",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "finch",
-      "bird"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355496/finch",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#ec822e",
-      "#ffc84b",
-      "#c3bdd5",
-      "#000000",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.6300790771811361,
-    "rank": 21
+    "rank": 16
   },
   {
     "id": "kid",
@@ -618,89 +489,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.91080391522045,
-    "rank": 22
-  },
-  {
-    "id": "firefly",
-    "title": "Firefly",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "firefly",
-      "insect",
-      "bug",
-      "light",
-      "night"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355438/firefly",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#ffcd01",
-      "#333333",
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 0.9382678107671878,
-    "rank": 23
-  },
-  {
-    "id": "elephant",
-    "title": "Elephant",
-    "tags": [
-      "elephant",
-      "cartoon",
-      "animal",
-      "safari",
-      "tusks"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355430/elephant",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#8f99a2",
-      "#bbbbbb",
-      "#6c767e",
-      "#000000"
-    ],
-    "aspectRatio": 0.9360040858811935,
-    "rank": 24
-  },
-  {
-    "id": "lion-head-african-animal",
-    "title": "Lion head African animal",
-    "tags": [
-      "lion",
-      "leo",
-      "africa",
-      "african",
-      "head",
-      "power",
-      "majestic",
-      "safari",
-      "wildlife",
-      "animal",
-      "strength",
-      "symbol",
-      "nature",
-      "king",
-      "plains",
-      "mane",
-      "male"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355417/lion-head-african-animal",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#000000"
-    ],
-    "aspectRatio": 0.928125,
-    "rank": 25
+    "rank": 17
   },
   {
     "id": "swordfish",
@@ -730,7 +519,7 @@
       "#7ed0ff"
     ],
     "aspectRatio": 1.4496410486111808,
-    "rank": 26
+    "rank": 18
   },
   {
     "id": "ibex",
@@ -764,7 +553,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.856271197384078,
-    "rank": 27
+    "rank": 19
   },
   {
     "id": "salamander",
@@ -796,7 +585,7 @@
       "#000000"
     ],
     "aspectRatio": 0.5666820414678401,
-    "rank": 28
+    "rank": 20
   },
   {
     "id": "protest-clenched-fist-triangle-solidarity",
@@ -822,7 +611,7 @@
       "#000000"
     ],
     "aspectRatio": 0.6518,
-    "rank": 29
+    "rank": 21
   },
   {
     "id": "square-palestine-flag-icon",
@@ -849,7 +638,7 @@
       "#ce1126"
     ],
     "aspectRatio": 1,
-    "rank": 30
+    "rank": 22
   },
   {
     "id": "green-engineering-climate-solution-tree-with-gears",
@@ -881,7 +670,7 @@
       "#338d22"
     ],
     "aspectRatio": 0.6457800511508951,
-    "rank": 31
+    "rank": 23
   },
   {
     "id": "hummingbird",
@@ -911,7 +700,7 @@
       "#ffc84b"
     ],
     "aspectRatio": 0.6902718480049805,
-    "rank": 32
+    "rank": 24
   },
   {
     "id": "red-panda",
@@ -941,105 +730,7 @@
       "#635c5c"
     ],
     "aspectRatio": 1.1729771079288989,
-    "rank": 33
-  },
-  {
-    "id": "arctic-fox",
-    "title": "Arctic Fox",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "arctic",
-      "fox",
-      "arctic fox",
-      "tundra",
-      "polar",
-      "polar fox",
-      "white fox",
-      "snow fox",
-      "blue fox"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355306/arctic-fox",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#bbbbbb",
-      "#afafaf",
-      "#000000",
-      "#010101"
-    ],
-    "aspectRatio": 0.9503864697605452,
-    "rank": 34
-  },
-  {
-    "id": "muskrat",
-    "title": "Muskrat",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "muskrat",
-      "musquash",
-      "musquash rat",
-      "marsh rat",
-      "water rat",
-      "swamp rat",
-      "mammal",
-      "wetland",
-      "marsh",
-      "swamp",
-      "bog",
-      "pond",
-      "lake"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355304/muskrat",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#502d16",
-      "#784421",
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 0.8879853685265248,
-    "rank": 35
-  },
-  {
-    "id": "gazelle",
-    "title": "Gazelle",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "gazelle",
-      "antelope",
-      "desert",
-      "shrubland",
-      "steppe",
-      "grassland",
-      "savanna",
-      "woodland",
-      "mammal"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355303/gazelle",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#b29683",
-      "#bbbbbb",
-      "#7d6a5d",
-      "#000000",
-      "#b69a88"
-    ],
-    "aspectRatio": 0.8373962909439276,
-    "rank": 36
+    "rank": 25
   },
   {
     "id": "reading-purple-book-icon",
@@ -1082,7 +773,7 @@
       "#333333"
     ],
     "aspectRatio": 1.0000999800039994,
-    "rank": 37
+    "rank": 26
   },
   {
     "id": "baboon",
@@ -1113,96 +804,7 @@
       "#000000"
     ],
     "aspectRatio": 1.0517783408306396,
-    "rank": 38
-  },
-  {
-    "id": "revolution-love-wordart-typography",
-    "title": "Revolution love wordart typography",
-    "tags": [
-      "revolution",
-      "revolutionary",
-      "typography",
-      "wordart",
-      "text",
-      "word",
-      "love",
-      "black",
-      "pink",
-      "guerrilla",
-      "resistance",
-      "militia",
-      "nationalist",
-      "graffiti",
-      "lgbt",
-      "lgbtq",
-      "gay"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355270/revolution-love-wordart-typography",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#333333",
-      "#ee1f7d"
-    ],
-    "aspectRatio": 4.682020420529312,
-    "rank": 39
-  },
-  {
-    "id": "white-open-book-being-read",
-    "title": "White open book being read",
-    "tags": [
-      "book",
-      "white",
-      "read",
-      "reading",
-      "drawing",
-      "inverted",
-      "negative",
-      "reader",
-      "open",
-      "pages",
-      "study",
-      "textbook",
-      "lookup",
-      "citations"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355258/white-open-book-being-read",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.3442102877860866,
-    "rank": 40
-  },
-  {
-    "id": "velociraptor",
-    "title": "Velociraptor",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "velociraptor",
-      "raptor",
-      "dromaeosaur",
-      "mongolian raptor",
-      "dinosaur",
-      "reptile"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355256/velociraptor",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#9f7e0d",
-      "#000000",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.9428546041021049,
-    "rank": 41
+    "rank": 27
   },
   {
     "id": "skull-and-crossbones-toxic-sign-warning-triangle",
@@ -1251,7 +853,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 42
+    "rank": 28
   },
   {
     "id": "jaekelopterus",
@@ -1281,38 +883,7 @@
       "#000000"
     ],
     "aspectRatio": 0.7053105854825178,
-    "rank": 43
-  },
-  {
-    "id": "eagle",
-    "title": "Eagle",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "eagle",
-      "bird",
-      "bald eagle",
-      "coastal",
-      "estuary",
-      "shore",
-      "beach",
-      "river",
-      "stream",
-      "lake"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355184/eagle",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#7f3f00",
-      "#000000",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.7450669580105242,
-    "rank": 44
+    "rank": 29
   },
   {
     "id": "narwhal",
@@ -1341,7 +912,7 @@
       "#000000"
     ],
     "aspectRatio": 1.6513158564915147,
-    "rank": 45
+    "rank": 30
   },
   {
     "id": "fox",
@@ -1370,28 +941,7 @@
       "#000000"
     ],
     "aspectRatio": 0.7810479070311422,
-    "rank": 46
-  },
-  {
-    "id": "to-go-cup-of-coffee",
-    "title": "To-go Cup of coffee",
-    "tags": [
-      "coffee",
-      "softcolor",
-      "basic"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/355050/to-go-cup-of-coffee",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#c9ada7",
-      "#bbbbbb",
-      "#ac7e6e",
-      "#be9a8e"
-    ],
-    "aspectRatio": 0.7423883383599024,
-    "rank": 47
+    "rank": 31
   },
   {
     "id": "albatross",
@@ -1422,7 +972,7 @@
       "#010101"
     ],
     "aspectRatio": 0.9181466221866255,
-    "rank": 48
+    "rank": 32
   },
   {
     "id": "wombat",
@@ -1453,39 +1003,7 @@
       "#000000"
     ],
     "aspectRatio": 0.8614508959759867,
-    "rank": 49
-  },
-  {
-    "id": "okapi",
-    "title": "Okapi",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "okapi",
-      "mammal",
-      "rainforest",
-      "forest",
-      "wetland",
-      "swamp",
-      "river",
-      "stream",
-      "savanna"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354990/okapi",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#784421",
-      "#010101",
-      "#000000",
-      "#bbbbbb",
-      "#522f17"
-    ],
-    "aspectRatio": 0.7652605866049546,
-    "rank": 50
+    "rank": 33
   },
   {
     "id": "seagull",
@@ -1513,7 +1031,7 @@
       "#010101"
     ],
     "aspectRatio": 0.6888874071531409,
-    "rank": 51
+    "rank": 34
   },
   {
     "id": "calf",
@@ -1540,7 +1058,7 @@
       "#333333"
     ],
     "aspectRatio": 0.9618360651394894,
-    "rank": 52
+    "rank": 35
   },
   {
     "id": "lamb",
@@ -1566,34 +1084,7 @@
       "#333333"
     ],
     "aspectRatio": 0.9635071044657564,
-    "rank": 53
-  },
-  {
-    "id": "kitten",
-    "title": "Kitten",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "cat",
-      "kitten",
-      "mammal",
-      "pet",
-      "baby"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354851/kitten",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#a05a2c",
-      "#000000",
-      "#784421",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.167605414182045,
-    "rank": 54
+    "rank": 36
   },
   {
     "id": "puppy",
@@ -1620,7 +1111,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1697208594180672,
-    "rank": 55
+    "rank": 37
   },
   {
     "id": "tokyo-winter-version-1",
@@ -1643,7 +1134,7 @@
       "#4a657a"
     ],
     "aspectRatio": 1,
-    "rank": 56
+    "rank": 38
   },
   {
     "id": "classic-puerto-rico-flag",
@@ -1665,41 +1156,7 @@
       "#3cb44b"
     ],
     "aspectRatio": 1.5,
-    "rank": 57
-  },
-  {
-    "id": "map-marker-red",
-    "title": "Map Marker Red",
-    "tags": [
-      "map",
-      "location",
-      "geography",
-      "place",
-      "pointer",
-      "pin",
-      "marker",
-      "find",
-      "locate",
-      "gps",
-      "position",
-      "grid",
-      "pinpoint",
-      "x marks the spot",
-      "map marker",
-      "drop",
-      "directions",
-      "direction",
-      "indicator"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354790/map-marker-red",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#ba1818"
-    ],
-    "aspectRatio": 0.8333333333333334,
-    "rank": 58
+    "rank": 39
   },
   {
     "id": "puerto-rico-flag-as-a-heart",
@@ -1720,7 +1177,7 @@
       "#0044ff"
     ],
     "aspectRatio": 1.134256182409558,
-    "rank": 59
+    "rank": 40
   },
   {
     "id": "radiation-symbol-rounded-corners",
@@ -1740,7 +1197,7 @@
       "#1a1a1a"
     ],
     "aspectRatio": 1.07643294373676,
-    "rank": 60
+    "rank": 41
   },
   {
     "id": "radiation-warning-round-logo",
@@ -1764,87 +1221,7 @@
       "#000000"
     ],
     "aspectRatio": 1,
-    "rank": 61
-  },
-  {
-    "id": "bird-flying-over-mountains-logo-chatgpt",
-    "title": "Bird flying Over Mountains Logo (ChatGPT)",
-    "tags": [
-      "trees",
-      "river",
-      "black and white",
-      "eye",
-      "crow",
-      "chatgpt",
-      "bird",
-      "mountain",
-      "logo",
-      "flat",
-      "black",
-      "simple",
-      "icon",
-      "circle",
-      "round",
-      "transparent",
-      "raven",
-      "clouds",
-      "sky"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354704/bird-flying-over-mountains-logo-chatgpt",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#bbbbbb",
-      "#161616"
-    ],
-    "aspectRatio": 1.01761444922565,
-    "rank": 62
-  },
-  {
-    "id": "spanners",
-    "title": "Spanners",
-    "tags": [
-      "spanner",
-      "tool",
-      "work",
-      "wrench",
-      "metal",
-      "tools"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354650/spanners",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#898989"
-    ],
-    "aspectRatio": 0.7864293337279312,
-    "rank": 63
-  },
-  {
-    "id": "patterns-3",
-    "title": "Patterns 3",
-    "tags": [
-      "lines",
-      "patterns",
-      "symmetry",
-      "squares",
-      "rectangles",
-      "geometric",
-      "abstract",
-      "seamless",
-      "tileable"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354639/patterns-3",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#000000"
-    ],
-    "aspectRatio": 1,
-    "rank": 64
+    "rank": 42
   },
   {
     "id": "blue-paint-roller-brush-icon",
@@ -1881,7 +1258,7 @@
       "#d9dbdb"
     ],
     "aspectRatio": 0.6440224518701149,
-    "rank": 65
+    "rank": 43
   },
   {
     "id": "headphones-icon",
@@ -1919,7 +1296,7 @@
       "#959fa6"
     ],
     "aspectRatio": 0.8932365897901011,
-    "rank": 66
+    "rank": 44
   },
   {
     "id": "microphone-icon",
@@ -1962,7 +1339,7 @@
       "#767d83"
     ],
     "aspectRatio": 0.5048108606827468,
-    "rank": 67
+    "rank": 45
   },
   {
     "id": "microscope-icon",
@@ -2005,47 +1382,7 @@
       "#585e62"
     ],
     "aspectRatio": 0.7978198948290972,
-    "rank": 68
-  },
-  {
-    "id": "stethoscope-icon",
-    "title": "Stethoscope Icon",
-    "tags": [
-      "icon",
-      "flat",
-      "symbol",
-      "minimal",
-      "simple",
-      "small",
-      "tiny",
-      "low-resolution",
-      "vector",
-      "cartoon",
-      "cartoony",
-      "toon",
-      "game icon",
-      "gaming icon",
-      "game asset",
-      "game assets",
-      "stethoscope",
-      "black",
-      "grey",
-      "silver",
-      "metal",
-      "medical device",
-      "kenney"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354578/stethoscope-icon",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#bbbbbb",
-      "#4c5154",
-      "#767d83"
-    ],
-    "aspectRatio": 0.7595596069610514,
-    "rank": 69
+    "rank": 46
   },
   {
     "id": "japanese-person-from-the-back",
@@ -2079,7 +1416,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3823761477372875,
-    "rank": 70
+    "rank": 47
   },
   {
     "id": "cow",
@@ -2122,53 +1459,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 71
-  },
-  {
-    "id": "all-lives-matter",
-    "title": "All Lives Matter",
-    "tags": [
-      "lives",
-      "life",
-      "trump",
-      "us",
-      "usa",
-      "united states",
-      "humanity",
-      "ethics",
-      "ethnic",
-      "ethnicity",
-      "color",
-      "colour",
-      "skin",
-      "value",
-      "dignity",
-      "ice",
-      "immigrant",
-      "immigration",
-      "race",
-      "tribalism",
-      "tribe",
-      "racism",
-      "violence",
-      "abuse",
-      "abuse of power",
-      "power",
-      "authoritarianism",
-      "facism",
-      "unity",
-      "peace",
-      "trump is a facist"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354493/all-lives-matter",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.2661691542288558,
-    "rank": 72
+    "rank": 48
   },
   {
     "id": "pig",
@@ -2208,7 +1499,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 73
+    "rank": 49
   },
   {
     "id": "chicken",
@@ -2241,7 +1532,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 74
+    "rank": 50
   },
   {
     "id": "parrot",
@@ -2270,7 +1561,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 75
+    "rank": 51
   },
   {
     "id": "parrot-icon-flat-black-simple",
@@ -2297,7 +1588,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.0133428340258652,
-    "rank": 76
+    "rank": 52
   },
   {
     "id": "frog",
@@ -2331,7 +1622,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 77
+    "rank": 53
   },
   {
     "id": "snake",
@@ -2365,7 +1656,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 78
+    "rank": 54
   },
   {
     "id": "turtle",
@@ -2399,7 +1690,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 79
+    "rank": 55
   },
   {
     "id": "rabbit",
@@ -2434,7 +1725,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 80
+    "rank": 56
   },
   {
     "id": "rooster",
@@ -2470,7 +1761,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 81
+    "rank": 57
   },
   {
     "id": "horse",
@@ -2504,7 +1795,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 82
+    "rank": 58
   },
   {
     "id": "dog",
@@ -2538,27 +1829,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 83
-  },
-  {
-    "id": "hammer",
-    "title": "hammer",
-    "tags": [
-      "hammer",
-      "carpenter",
-      "tools",
-      "tool",
-      "silhouette"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354397/hammer",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#1a1a1a"
-    ],
-    "aspectRatio": 2.388554061828959,
-    "rank": 84
+    "rank": 59
   },
   {
     "id": "red-heart-frame-with-dark-red-middle",
@@ -2582,37 +1853,7 @@
       "#5a0000"
     ],
     "aspectRatio": 1.1420362488333045,
-    "rank": 85
-  },
-  {
-    "id": "sparrow",
-    "title": "Sparrow",
-    "tags": [
-      "animal",
-      "animals",
-      "cartoon",
-      "round",
-      "sparrow",
-      "bird",
-      "city",
-      "farm",
-      "grassland",
-      "plains",
-      "forest"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354333/sparrow",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#694932",
-      "#b4a59a",
-      "#bbbbbb",
-      "#000000",
-      "#58514c"
-    ],
-    "aspectRatio": 0.9541936603784035,
-    "rank": 86
+    "rank": 60
   },
   {
     "id": "pelican",
@@ -2642,7 +1883,7 @@
       "#1b1b1b"
     ],
     "aspectRatio": 0.5633678417171832,
-    "rank": 87
+    "rank": 61
   },
   {
     "id": "bad-face",
@@ -2666,7 +1907,7 @@
       "#000000"
     ],
     "aspectRatio": 1.2208981484905164,
-    "rank": 88
+    "rank": 62
   },
   {
     "id": "snake-remix",
@@ -2693,7 +1934,7 @@
       "#b6b428"
     ],
     "aspectRatio": 0.8992184433103744,
-    "rank": 89
+    "rank": 63
   },
   {
     "id": "puma",
@@ -2725,33 +1966,7 @@
       "#010101"
     ],
     "aspectRatio": 0.6361054091046416,
-    "rank": 90
-  },
-  {
-    "id": "fire-horse",
-    "title": "Fire Horse",
-    "tags": [
-      "fire",
-      "horse",
-      "year of the horse",
-      "chinese zodiac",
-      "symbol",
-      "simple",
-      "flames",
-      "basic",
-      "2026",
-      "2086"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/354046/fire-horse",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#e32526",
-      "#020100"
-    ],
-    "aspectRatio": 1,
-    "rank": 91
+    "rank": 64
   },
   {
     "id": "grey-cat",
@@ -2777,7 +1992,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.0290950728682848,
-    "rank": 92
+    "rank": 65
   },
   {
     "id": "a-new-rotate-animation",
@@ -2795,72 +2010,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 93
-  },
-  {
-    "id": "crossword-puzzles-symbol-fix-remix",
-    "title": "Crossword Puzzles Symbol - Fix Remix",
-    "tags": [
-      "crossword",
-      "puzzle",
-      "symbol",
-      "paper",
-      "game"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/353216/crossword-puzzles-symbol-fix-remix",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.5632476705714271,
-    "rank": 94
-  },
-  {
-    "id": "happy-whale",
-    "title": "Happy Whale",
-    "tags": [
-      "whale",
-      "ocean",
-      "sperm-whale",
-      "mammal",
-      "happy",
-      "outline"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/353064/happy-whale",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#000000"
-    ],
-    "aspectRatio": 0.38598171762908295,
-    "rank": 95
-  },
-  {
-    "id": "heart-finger-gesture",
-    "title": "Heart Finger Gesture",
-    "tags": [
-      "heart",
-      "finger",
-      "gesture",
-      "hand",
-      "love",
-      "korea",
-      "k-pop"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/353059/heart-finger-gesture",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#a93a27"
-    ],
-    "aspectRatio": 0.4557355940642184,
-    "rank": 96
+    "rank": 66
   },
   {
     "id": "rotate-three-bar-animation2",
@@ -2877,7 +2027,7 @@
       "#000000"
     ],
     "aspectRatio": 1,
-    "rank": 97
+    "rank": 67
   },
   {
     "id": "atom-animation",
@@ -2895,7 +2045,7 @@
       "#ff0000"
     ],
     "aspectRatio": 1,
-    "rank": 98
+    "rank": 68
   },
   {
     "id": "double-happiness",
@@ -2921,7 +2071,7 @@
       "#c20000"
     ],
     "aspectRatio": 0.9918257963747297,
-    "rank": 99
+    "rank": 69
   },
   {
     "id": "simple-flat-hearts-love-is-in-the-air",
@@ -2955,29 +2105,7 @@
       "#ff0003"
     ],
     "aspectRatio": 1.3116562881832503,
-    "rank": 100
-  },
-  {
-    "id": "orange-isolated",
-    "title": "Orange Isolated",
-    "tags": [
-      "orange",
-      "citrus",
-      "slice"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352630/orange-isolated",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#f9a932",
-      "#57b876",
-      "#246d45",
-      "#373535",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.247854867217441,
-    "rank": 101
+    "rank": 70
   },
   {
     "id": "circle-a-red-version",
@@ -2997,7 +2125,7 @@
       "#cc0001"
     ],
     "aspectRatio": 1.0126903553299493,
-    "rank": 102
+    "rank": 71
   },
   {
     "id": "golden-angle-rotate-animation",
@@ -3016,7 +2144,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 103
+    "rank": 72
   },
   {
     "id": "two-cross-animation",
@@ -3034,7 +2162,7 @@
       "#7f7f7f"
     ],
     "aspectRatio": 1,
-    "rank": 104
+    "rank": 73
   },
   {
     "id": "cross-animate",
@@ -3053,28 +2181,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 105
-  },
-  {
-    "id": "taichi-rotate-animation",
-    "title": "taichi rotate animation",
-    "tags": [
-      "taichi",
-      "animation",
-      "yin yang"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352560/taichi-rotate-animation",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#ff0000",
-      "#242424",
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 1,
-    "rank": 106
+    "rank": 74
   },
   {
     "id": "snail-escargot-decroissance",
@@ -3092,7 +2199,7 @@
       "#000000"
     ],
     "aspectRatio": 1.8378363268561335,
-    "rank": 107
+    "rank": 75
   },
   {
     "id": "baffled-man-sitting-at-table-cartoon",
@@ -3142,7 +2249,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.8736292993651739,
-    "rank": 108
+    "rank": 76
   },
   {
     "id": "cool-cat",
@@ -3178,47 +2285,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1167411479794074,
-    "rank": 109
-  },
-  {
-    "id": "cartoon-musical-notes-jumping-flowing",
-    "title": "Cartoon Musical Notes Jumping Flowing",
-    "tags": [
-      "inspiration",
-      "creativity",
-      "music",
-      "music making",
-      "musical",
-      "melody",
-      "melodic",
-      "melodical",
-      "cartoon",
-      "comic",
-      "simple",
-      "flat",
-      "black",
-      "white",
-      "jump",
-      "jumping",
-      "flow",
-      "flowing",
-      "outpour",
-      "movement",
-      "vivid",
-      "noise",
-      "note",
-      "notes",
-      "1950s"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352443/cartoon-musical-notes-jumping-flowing",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#bbbbbb"
-    ],
-    "aspectRatio": 2.82054521903277,
-    "rank": 110
+    "rank": 77
   },
   {
     "id": "atom",
@@ -3248,7 +2315,7 @@
       "#2f4bff"
     ],
     "aspectRatio": 0.8912429378531073,
-    "rank": 111
+    "rank": 78
   },
   {
     "id": "simple-poison-bottle",
@@ -3313,7 +2380,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3314193300081251,
-    "rank": 112
+    "rank": 79
   },
   {
     "id": "bottle-simple-black-label",
@@ -3367,27 +2434,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3314193300081251,
-    "rank": 113
-  },
-  {
-    "id": "square-pattern",
-    "title": "Square pattern",
-    "tags": [
-      "square",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352203/square-pattern",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#bbbbbb",
-      "#800000",
-      "#ff8080"
-    ],
-    "aspectRatio": 1.0000000881944535,
-    "rank": 114
+    "rank": 80
   },
   {
     "id": "moosefather-versus-mountain-lion",
@@ -3422,330 +2469,7 @@
       "#000000"
     ],
     "aspectRatio": 1.5999999000000062,
-    "rank": 115
-  },
-  {
-    "id": "be-an-artist",
-    "title": "Be an Artist.",
-    "tags": [
-      "advertisement",
-      "header",
-      "lettering",
-      "text",
-      "words",
-      "written",
-      "cursive",
-      "1921",
-      "art",
-      "school",
-      "art school",
-      "judge magazine"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352117/be-an-artist",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#000000"
-    ],
-    "aspectRatio": 2.6619717814272956,
-    "rank": 116
-  },
-  {
-    "id": "dotted-pattern-3",
-    "title": "Dotted pattern 3",
-    "tags": [
-      "dots",
-      "geometric",
-      "pattern"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352018/dotted-pattern-3",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#ff5555",
-      "#ffb380"
-    ],
-    "aspectRatio": 0.9962499205491642,
-    "rank": 117
-  },
-  {
-    "id": "sailboat",
-    "title": "Sailboat",
-    "tags": [
-      "sailboat",
-      "boat",
-      "water craft",
-      "sails",
-      "rudder",
-      "ship",
-      "first upload"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351861/sailboat",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#000000",
-      "#d3d7cf",
-      "#babdb6",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.8801790832300953,
-    "rank": 118
-  },
-  {
-    "id": "angular-pattern-5",
-    "title": "Angular pattern 5",
-    "tags": [
-      "pattern",
-      "geometric",
-      "angular"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351850/angular-pattern-5",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#3f3009",
-      "#a6b502"
-    ],
-    "aspectRatio": 1.0493491244979236,
-    "rank": 119
-  },
-  {
-    "id": "angular-pattern-4",
-    "title": "Angular pattern 4",
-    "tags": [
-      "pattern",
-      "geometric",
-      "angular"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351849/angular-pattern-4",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#6eb53f",
-      "#3f3009"
-    ],
-    "aspectRatio": 1.000016316235095,
-    "rank": 120
-  },
-  {
-    "id": "angular-pattern-2",
-    "title": "Angular pattern 2",
-    "tags": [
-      "pattern",
-      "geometric",
-      "angular"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351847/angular-pattern-2",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#038650"
-    ],
-    "aspectRatio": 1.000016316235095,
-    "rank": 121
-  },
-  {
-    "id": "angular-pattern",
-    "title": "Angular pattern",
-    "tags": [
-      "pattern",
-      "geometric",
-      "angular"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351846/angular-pattern",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#0f125f"
-    ],
-    "aspectRatio": 1.0000164044324071,
-    "rank": 122
-  },
-  {
-    "id": "hexagons-6",
-    "title": "Hexagons 6",
-    "tags": [
-      "hexagon",
-      "pattern",
-      "geometric",
-      "red"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351775/hexagons-6",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#df421e"
-    ],
-    "aspectRatio": 0.8961023751155192,
-    "rank": 123
-  },
-  {
-    "id": "hexagons-5",
-    "title": "Hexagons 5",
-    "tags": [
-      "hexagon",
-      "pattern",
-      "geometric",
-      "yellow"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351774/hexagons-5",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#eed680"
-    ],
-    "aspectRatio": 1.1546864023890124,
-    "rank": 124
-  },
-  {
-    "id": "hexagons-4",
-    "title": "Hexagons 4",
-    "tags": [
-      "hexagon",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351773/hexagons-4",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#eed680"
-    ],
-    "aspectRatio": 1.1546862496336416,
-    "rank": 125
-  },
-  {
-    "id": "hexagons-3",
-    "title": "Hexagons 3",
-    "tags": [
-      "hexagon",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351772/hexagons-3",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#000000",
-      "#bbbbbb",
-      "#990000"
-    ],
-    "aspectRatio": 1.2268573496157151,
-    "rank": 126
-  },
-  {
-    "id": "hexagons-2",
-    "title": "Hexagons 2",
-    "tags": [
-      "hexagon",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351771/hexagons-2",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#d1940c"
-    ],
-    "aspectRatio": 1.1549103208189195,
-    "rank": 127
-  },
-  {
-    "id": "hexagons",
-    "title": "Hexagons",
-    "tags": [
-      "hexagon",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351770/hexagons",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#c1665a",
-      "#884631",
-      "#e0b6af",
-      "#663822"
-    ],
-    "aspectRatio": 1.1546749375071255,
-    "rank": 128
-  },
-  {
-    "id": "accordion-colour-remix",
-    "title": "Accordion - Colour Remix",
-    "tags": [
-      "accordion",
-      "music",
-      "musical instrument",
-      "purple"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351645/accordion-colour-remix",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#9170bf",
-      "#bbbbbb",
-      "#9480b0",
-      "#83a59b",
-      "#8fa29c"
-    ],
-    "aspectRatio": 1.397413850548169,
-    "rank": 129
-  },
-  {
-    "id": "angular-pattern-2",
-    "title": "Angular pattern 2",
-    "tags": [
-      "pattern",
-      "geometry"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351610/angular-pattern-2",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#333333",
-      "#fb5722"
-    ],
-    "aspectRatio": 1.236472432312298,
-    "rank": 130
-  },
-  {
-    "id": "angular-pattern",
-    "title": "Angular pattern",
-    "tags": [
-      "pattern",
-      "geometry"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351609/angular-pattern",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#f1ca00",
-      "#fb5722"
-    ],
-    "aspectRatio": 1.2425944604920631,
-    "rank": 131
+    "rank": 81
   },
   {
     "id": "blues-guitarist",
@@ -3763,317 +2487,7 @@
       "#000080"
     ],
     "aspectRatio": 0.7089700996677741,
-    "rank": 132
-  },
-  {
-    "id": "pattern-10",
-    "title": "Pattern 10",
-    "tags": [
-      "circle",
-      "segment",
-      "pattern",
-      "background",
-      "wavy"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351453/pattern-10",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1,
-    "rank": 133
-  },
-  {
-    "id": "mandala",
-    "title": "Mandala",
-    "tags": [
-      "mandala"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351444/mandala",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#bbbbbb",
-      "#00ff00",
-      "#ffb4ff",
-      "#00ffff"
-    ],
-    "aspectRatio": 1,
-    "rank": 134
-  },
-  {
-    "id": "trees",
-    "title": "Trees",
-    "tags": [
-      "tree",
-      "symbol",
-      "pattern",
-      "background",
-      "forest"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351346/trees",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#9acd32",
-      "#541800",
-      "#556b2f",
-      "#808000"
-    ],
-    "aspectRatio": 1.3794074392495785,
-    "rank": 135
-  },
-  {
-    "id": "tiles-27",
-    "title": "Tiles 27",
-    "tags": [
-      "pattern",
-      "background",
-      "tile",
-      "tiles"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351315/tiles-27",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 0.9972748628254352,
-    "rank": 136
-  },
-  {
-    "id": "checkerboard-2",
-    "title": "Checkerboard 2",
-    "tags": [
-      "pattern",
-      "background",
-      "tile",
-      "tiles",
-      "checkerboard"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351314/checkerboard-2",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#666666",
-      "#000000"
-    ],
-    "aspectRatio": 1.0000001322916687,
-    "rank": 137
-  },
-  {
-    "id": "checkerboard-pattern",
-    "title": "Checkerboard pattern",
-    "tags": [
-      "square",
-      "geometry",
-      "pattern",
-      "background",
-      "tile",
-      "tiles",
-      "checkerboard",
-      "cross"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351199/checkerboard-pattern",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#b4e029",
-      "#6eb53f",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 1.000000661458781,
-    "rank": 138
-  },
-  {
-    "id": "square-pattern",
-    "title": "Square pattern",
-    "tags": [
-      "square",
-      "geometry",
-      "pattern",
-      "background"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351143/square-pattern",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#3f3009",
-      "#04b4e6"
-    ],
-    "aspectRatio": 0.9999978392375066,
-    "rank": 139
-  },
-  {
-    "id": "rectalinear-pattern",
-    "title": "Rectalinear pattern",
-    "tags": [
-      "rectangle",
-      "geometry",
-      "pattern",
-      "background"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351141/rectalinear-pattern",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#608b74",
-      "#38a368",
-      "#86cea7"
-    ],
-    "aspectRatio": 0.7354457368357691,
-    "rank": 140
-  },
-  {
-    "id": "hearts-for-fans",
-    "title": "Hearts for fans",
-    "tags": [
-      "hearts",
-      "tile",
-      "tiles",
-      "pattern",
-      "geometry",
-      "background"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351048/hearts-for-fans",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#5091d5",
-      "#bbbbbb",
-      "#cf0444"
-    ],
-    "aspectRatio": 0.9999925476376829,
-    "rank": 141
-  },
-  {
-    "id": "squares",
-    "title": "Squares",
-    "tags": [
-      "squares",
-      "tile",
-      "tiles",
-      "geometry",
-      "pattern",
-      "background"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351019/squares",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#501616"
-    ],
-    "aspectRatio": 1,
-    "rank": 142
-  },
-  {
-    "id": "triangles-2",
-    "title": "Triangles 2",
-    "tags": [
-      "triangles",
-      "geometry",
-      "pattern",
-      "background"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/351016/triangles-2",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#b196a7",
-      "#482840"
-    ],
-    "aspectRatio": 0.9904582798563525,
-    "rank": 143
-  },
-  {
-    "id": "dotted-pattern-3",
-    "title": "Dotted pattern 3",
-    "tags": [
-      "dots",
-      "pattern",
-      "background",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350972/dotted-pattern-3",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#41a9e6"
-    ],
-    "aspectRatio": 1,
-    "rank": 144
-  },
-  {
-    "id": "dotted-pattern-2",
-    "title": "Dotted pattern 2",
-    "tags": [
-      "dots",
-      "pattern",
-      "background",
-      "geometric",
-      "squares"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350971/dotted-pattern-2",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#fe8100"
-    ],
-    "aspectRatio": 1,
-    "rank": 145
-  },
-  {
-    "id": "dotted-pattern",
-    "title": "Dotted pattern",
-    "tags": [
-      "dots",
-      "pattern",
-      "background",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350970/dotted-pattern",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#0985cd"
-    ],
-    "aspectRatio": 0.999999779513934,
-    "rank": 146
-  },
-  {
-    "id": "strip-decoration",
-    "title": "Strip decoration",
-    "tags": [
-      "decoration",
-      "strip",
-      "background",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350969/strip-decoration",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#e5071e"
-    ],
-    "aspectRatio": 3.203488778229771,
-    "rank": 147
+    "rank": 82
   },
   {
     "id": "castle",
@@ -4093,87 +2507,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.4476257496555789,
-    "rank": 148
-  },
-  {
-    "id": "pattern-4",
-    "title": "Pattern 4",
-    "tags": [
-      "pattern",
-      "background",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350778/pattern-4",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#800000"
-    ],
-    "aspectRatio": 1.0000012792332473,
-    "rank": 149
-  },
-  {
-    "id": "xmas-tree-3-in-green",
-    "title": "Xmas tree 3 in green",
-    "tags": [
-      "christmas",
-      "geometric",
-      "green",
-      "abstrait",
-      "sapin",
-      "vert",
-      "christmas tree"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350723/xmas-tree-3-in-green",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#9acd32",
-      "#541800",
-      "#808000",
-      "#6b8e23",
-      "#556b2f"
-    ],
-    "aspectRatio": 2.334300671019713,
-    "rank": 150
-  },
-  {
-    "id": "pattern-3",
-    "title": "Pattern 3",
-    "tags": [
-      "strip",
-      "pattern"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350713/pattern-3",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#000000"
-    ],
-    "aspectRatio": 6.206235461930319,
-    "rank": 151
-  },
-  {
-    "id": "clock-4",
-    "title": "Clock 4",
-    "tags": [
-      "clock",
-      "inspiration",
-      "time"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350550/clock-4",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 1,
-    "rank": 152
+    "rank": 83
   },
   {
     "id": "simple-skull",
@@ -4194,75 +2528,7 @@
       "#000000"
     ],
     "aspectRatio": 1.498335175624715,
-    "rank": 153
-  },
-  {
-    "id": "clock-2",
-    "title": "Clock 2",
-    "tags": [
-      "design idea",
-      "inspiration",
-      "time",
-      "clock"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350262/clock-2",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#bbbbbb",
-      "#000000"
-    ],
-    "aspectRatio": 1,
-    "rank": 154
-  },
-  {
-    "id": "abstract-rose-2",
-    "title": "Abstract rose 2",
-    "tags": [
-      "abstract",
-      "rose",
-      "plant",
-      "triangle",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350259/abstract-rose-2",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#ffaaaa",
-      "#800000",
-      "#ff5555",
-      "#aa0000",
-      "#ff0000"
-    ],
-    "aspectRatio": 0.9999998659964523,
-    "rank": 155
-  },
-  {
-    "id": "abstract-flower",
-    "title": "Abstract flower",
-    "tags": [
-      "abstract",
-      "flower",
-      "plant",
-      "triangle",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350258/abstract-flower",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#ffaaaa",
-      "#ff5555",
-      "#ff0000",
-      "#aa0000",
-      "#800000"
-    ],
-    "aspectRatio": 1,
-    "rank": 156
+    "rank": 84
   },
   {
     "id": "seven-pointed-star",
@@ -4285,48 +2551,7 @@
       "#1a1a1a"
     ],
     "aspectRatio": 0.9802851745720772,
-    "rank": 157
-  },
-  {
-    "id": "stars-2",
-    "title": "Stars 2",
-    "tags": [
-      "geometric",
-      "star",
-      "pattern",
-      "wallpaper"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/350000/stars-2",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#000000",
-      "#ff2a2a"
-    ],
-    "aspectRatio": 1.7142979025335652,
-    "rank": 158
-  },
-  {
-    "id": "anamorphic-optical-illusion",
-    "title": "Anamorphic Optical Illusion",
-    "tags": [
-      "anamorphic",
-      "illusion",
-      "stairs"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/349832/anamorphic-optical-illusion",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#bbbbbb",
-      "#000000",
-      "#999999",
-      "#666666"
-    ],
-    "aspectRatio": 2.4480293529938675,
-    "rank": 159
+    "rank": 85
   },
   {
     "id": "snail",
@@ -4348,50 +2573,7 @@
       "#ff7f2a"
     ],
     "aspectRatio": 1.7765812260701395,
-    "rank": 160
-  },
-  {
-    "id": "swirly-pattern-2",
-    "title": "Swirly pattern 2",
-    "tags": [
-      "swirly",
-      "background",
-      "pattern"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/349430/swirly-pattern-2",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#000000",
-      "#4d4d4d",
-      "#ff5555"
-    ],
-    "aspectRatio": 0.9999969316155289,
-    "rank": 161
-  },
-  {
-    "id": "abstract-rose-2",
-    "title": "Abstract rose 2",
-    "tags": [
-      "rose",
-      "abstract",
-      "flower",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/349343/abstract-rose-2",
-    "license": "CC0",
-    "colorCount": 5,
-    "colors": [
-      "#d40000",
-      "#ff5555",
-      "#bbbbbb",
-      "#800000",
-      "#550000"
-    ],
-    "aspectRatio": 1.1396628044353543,
-    "rank": 162
+    "rank": 86
   },
   {
     "id": "thick-red-outlined-white-heart",
@@ -4425,30 +2607,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1234731092925239,
-    "rank": 163
-  },
-  {
-    "id": "diamond-grid",
-    "title": "Diamond grid",
-    "tags": [
-      "diamond",
-      "geometric",
-      "background",
-      "abstract",
-      "floral",
-      "inspiration",
-      "wallpaper"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/349248/diamond-grid",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#b3b3b3",
-      "#550000"
-    ],
-    "aspectRatio": 1,
-    "rank": 164
+    "rank": 87
   },
   {
     "id": "yutnori",
@@ -4474,7 +2633,7 @@
       "#c62033"
     ],
     "aspectRatio": 1.0039841623512054,
-    "rank": 165
+    "rank": 88
   },
   {
     "id": "dustdfg-medal",
@@ -4494,7 +2653,7 @@
       "#ffd42a"
     ],
     "aspectRatio": 1.0005984193784125,
-    "rank": 166
+    "rank": 89
   },
   {
     "id": "chessboard-variation",
@@ -4518,7 +2677,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 167
+    "rank": 90
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -4542,7 +2701,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 168
+    "rank": 91
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -4566,7 +2725,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 169
+    "rank": 92
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -4590,187 +2749,7 @@
       "#ff8080"
     ],
     "aspectRatio": 1.0000001049868876,
-    "rank": 170
-  },
-  {
-    "id": "cyber-wolves-crew",
-    "title": "Cyber Wolves Crew",
-    "tags": [
-      "red",
-      "wolf"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348987/cyber-wolves-crew",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#ff0000",
-      "#bbbbbb"
-    ],
-    "aspectRatio": 0.9781505120973727,
-    "rank": 171
-  },
-  {
-    "id": "half-circles-variation",
-    "title": "Half circles variation",
-    "tags": [
-      "half circles",
-      "wallpaper",
-      "background",
-      "tile",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348977/half-circles-variation",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#800000",
-      "#cccccc"
-    ],
-    "aspectRatio": 1.3076997390333829,
-    "rank": 172
-  },
-  {
-    "id": "half-circles",
-    "title": "Half circles",
-    "tags": [
-      "half circles",
-      "wallpaper",
-      "background",
-      "tile",
-      "pattern",
-      "geometric"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348976/half-circles",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#800000",
-      "#cccccc"
-    ],
-    "aspectRatio": 1.3076997390333829,
-    "rank": 173
-  },
-  {
-    "id": "asklepios",
-    "title": "Asklepios",
-    "tags": [
-      "medicine",
-      "medical",
-      "asklepios",
-      "first upload"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348877/asklepios",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#6e8091",
-      "#ff0000"
-    ],
-    "aspectRatio": 0.4362596778723537,
-    "rank": 174
-  },
-  {
-    "id": "cats-eye-tile-background",
-    "title": "Cats eye tile background",
-    "tags": [
-      "abstract",
-      "pattern",
-      "retro",
-      "wallpaper",
-      "seamless",
-      "tile"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348867/cats-eye-tile-background",
-    "license": "CC0",
-    "colorCount": 3,
-    "colors": [
-      "#bbbbbb",
-      "#93a7ac",
-      "#222b00"
-    ],
-    "aspectRatio": 1.0000000454545477,
-    "rank": 175
-  },
-  {
-    "id": "dinosaur-crossing-caution-sign",
-    "title": "Dinosaur Crossing Caution Sign",
-    "tags": [
-      "dinosaur",
-      "crossing",
-      "caution",
-      "warning",
-      "sign",
-      "dino",
-      "t-rex",
-      "trex"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348847/dinosaur-crossing-caution-sign",
-    "license": "CC0",
-    "colorCount": 2,
-    "colors": [
-      "#ffde00",
-      "#000000"
-    ],
-    "aspectRatio": 1,
-    "rank": 176
-  },
-  {
-    "id": "checkered-race-flags",
-    "title": "checkered race flags",
-    "tags": [
-      "race",
-      "racing",
-      "speed",
-      "finish",
-      "win",
-      "winning",
-      "f1",
-      "motorsport",
-      "competition",
-      "shmector",
-      "eps",
-      "flags"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348613/checkered-race-flags",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#666666",
-      "#bbbbbb",
-      "#000000",
-      "#808080"
-    ],
-    "aspectRatio": 1.9919354838709677,
-    "rank": 177
-  },
-  {
-    "id": "modern-democrats-logo",
-    "title": "Modern Democrats Logo",
-    "tags": [
-      "american",
-      "politics",
-      "democrats",
-      "logo",
-      "donkey",
-      "political"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348454/modern-democrats-logo",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#0000ff"
-    ],
-    "aspectRatio": 1.0957020748567612,
-    "rank": 178
+    "rank": 93
   },
   {
     "id": "linux-tux",
@@ -4794,54 +2773,7 @@
       "#ff3e03"
     ],
     "aspectRatio": 1,
-    "rank": 179
-  },
-  {
-    "id": "run-colour-remix",
-    "title": "Run - Colour Remix",
-    "tags": [
-      "athlete",
-      "sports",
-      "run",
-      "running",
-      "runner",
-      "man",
-      "fast"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348419/run-colour-remix",
-    "license": "CC0",
-    "colorCount": 4,
-    "colors": [
-      "#caa68e",
-      "#55add9",
-      "#7d9c6e",
-      "#666666"
-    ],
-    "aspectRatio": 0.5781982882566885,
-    "rank": 180
-  },
-  {
-    "id": "grand-piano-uni-color",
-    "title": "Grand piano uni color",
-    "tags": [
-      "grand piano",
-      "grand",
-      "piano",
-      "music",
-      "musik",
-      "klavier",
-      "instrument"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/348352/grand-piano-uni-color",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#967b1f"
-    ],
-    "aspectRatio": 0.7692307692307693,
-    "rank": 181
+    "rank": 94
   },
   {
     "id": "be-your-own-hero",
@@ -4865,7 +2797,7 @@
       "#000000"
     ],
     "aspectRatio": 0.7764632394893226,
-    "rank": 182
+    "rank": 95
   },
   {
     "id": "guitar",
@@ -4887,6 +2819,6 @@
       "#967b1f"
     ],
     "aspectRatio": 0.8500569111203942,
-    "rank": 183
+    "rank": 96
   }
 ]

@@ -10,6 +10,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "scrape-clipart": "tsx scripts/clipart/scrape.ts",
+    "rescreen-clipart": "tsx scripts/clipart/rescreen.ts",
     "moderate-clipart": "tsx scripts/clipart/moderate.ts"
   },
   "dependencies": {

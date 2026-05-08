@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.13';
+export const CODE_VERSION = '2026-05-08.14';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Per-component small-corner tolerance in polygonProblemStats: components whose problem area is below 5% of their own carved area drop out of the problem region. Recovers v-bit-aware corner forgiveness lost when the bitmap monotonic-ascent rule was retired; isolated (= no-FD-seed) components still get flagged because their per-component problem ratio is 100%.';
+  'Clipart catalog re-screened against the polygon analysis (rule-rev 2026-05-08.13). 87 entries removed (47% of catalog): mostly intricate patterns and line-art SVGs the new polygon pipeline cannot process, plus genuine isolated-component / problem-area / alignment failures. Survivors: 96 of 183. New `npm run rescreen-clipart` script under scripts/clipart/. Removals logged to rejections.jsonl with reason="dfm-rescreen-2026-05-08.13".';
