@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.2';
+export const CODE_VERSION = '2026-05-08.3';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'buildOverlay polygon-native: Path2D fills replace per-pixel getImageData/putImageData composite. Each channel uses destination-out + source-over to match bitmap alpha-replace semantics; per-preset and per-side problem polygons threaded through alongside thin-wall and alignment polygons.';
+  'fillable-hole stats polygon-native: per-layer laterPolygonUnion + walkPolygonHoles BFS replaces findEnclosedHoles + computeBoundary. Predicate now mirrors fillEnclosedHoles (eroded-empty test with HOLE_MARGIN_INCHES/2) so stats count matches what the optimizer would actually fill.';

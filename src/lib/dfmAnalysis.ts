@@ -5,12 +5,12 @@ import { detectAlignmentRisk } from './alignmentRisk';
 import { CLEARANCE_BIT_MRR, CLEARANCE_BIT_OPTIONS, getVbitRates, VBIT_PRESET_ANGLES, VBIT_RATES } from './machiningRates';
 import { polygonMachiningTime, buildMachiningTimeMatrixPolygon } from './polygonMachiningTime';
 import { computePlugStockPolygon } from './polygonPlugStock';
-import { computeBoundary, findEnclosedHoles } from './morphology';
+import { findEnclosedHoles } from './morphology';
 import { parseViewBox } from './svgLayers';
 import { computePlugStockUsageSqIn } from './plugStockPacking';
 import { findMaskComponentCentroids } from './maskComponents';
 import { svgFragmentToMultiPolygon, multiPolygonToSvgFragment } from './polygonParser';
-import { multiPolygonDifference, multiPolygonIntersection, multiPolygonUnionAll } from './clipperOps';
+import { multiPolygonDifference, multiPolygonIntersection, multiPolygonOffset, multiPolygonUnion, multiPolygonUnionAll, walkPolygonHoles } from './clipperOps';
 import { multiPolygonArea, multiPolygonIsEmpty, multiPolygonPerimeter, type MultiPolygon } from './polygon';
 import { polygonProblemStats, type PolygonProblemStats } from './polygonPocketStats';
 import {
@@ -27,6 +27,10 @@ const THIN_WALL_THRESHOLD_INCHES = 0.05;
 const MIN_THIN_WALL_AREA_SQ_IN = 0.25;
 const MIN_VBIT_ANGLE_SIDE_GRAIN = 60;
 const ALIGNMENT_THRESHOLD_INCHES = 0.01;
+// Mirror `fillEnclosedHoles`'s `HOLE_MARGIN_INCHES`. The eroded-empty
+// predicate uses half this radius (= half-bit-clearance disc) so the
+// stats display counts exactly the holes the optimizer would fill.
+const HOLE_MARGIN_INCHES_FOR_FILLABLE = 0.13;
 // A piece passes when less than this fraction of its carved area is flagged.
 // Using a percentage threshold (not exact-zero) avoids false failures from
 // a handful of anti-aliased or border pixels that round to "0.00%" in the UI.
@@ -1076,19 +1080,14 @@ export async function runDfmAnalysis(
   // into the modeled plug stock for the plug-side time computation.
   const plugMarginPx = settings.plugStockMarginInches * pixelsPerInch;
 
-  // For each layer i, the union of pocket masks for all layers j > i. Used
-  // to detect "fillable" holes — holes in layer i fully covered by some
-  // combination of later layers (so filling them in i changes nothing
-  // visible in the final design but saves V-bit perimeter time).
+  // For each layer i, the union of pocket polygons for all layers j > i.
+  // Used to detect "fillable" holes — holes in layer i fully covered by
+  // some combination of later layers (so filling them in i changes
+  // nothing visible in the final design but saves V-bit perimeter time).
   // Computed once by sweeping from highest index down.
-  const laterUnions: Uint8Array[] = orderedColors.map(() => new Uint8Array(n));
+  const laterPolygonUnions: MultiPolygon[] = orderedColors.map(() => []);
   for (let i = orderedColors.length - 2; i >= 0; i--) {
-    const next = pocketMasks[i + 1];
-    const acc = laterUnions[i];
-    const accNext = laterUnions[i + 1];
-    for (let k = 0; k < n; k++) {
-      if (next[k] || accNext[k]) acc[k] = 1;
-    }
+    laterPolygonUnions[i] = multiPolygonUnion(pocketPolygons[i + 1], laterPolygonUnions[i + 1]);
   }
 
   const woods: WoodAnalysis[] = [];
@@ -1247,31 +1246,36 @@ export async function runDfmAnalysis(
     // covered by the union of later inlay layers. Filling them saves V-bit
     // perimeter time on both pocket and plug; net-zero clearance change
     // (pocket gains the area, plug loses it equivalently).
+    //
+    // The "fully covered" predicate mirrors `fillEnclosedHoles` (the
+    // optimizer that actually does the fill): empty `uncovered`, OR an
+    // uncovered region too narrow to fit a half-bit-clearance disc. The
+    // eroded-empty step rejects sub-bit-clearance numerical slivers
+    // Clipper's int arithmetic leaves along the boundary, so the stats
+    // count exactly the holes the optimizer would fill.
     let fillableHoleCount = 0;
-    let fillableHolePixelCount = 0;
-    let fillableHolePerimeterPx = 0;
+    let fillableHoleAreaUnits = 0;
+    let fillableHolePerimeterUnits = 0;
     if (idx < orderedColors.length - 1) {
-      const holes = findEnclosedHoles(pocketMask, canvasW, canvasH);
-      const laterUnion = laterUnions[idx];
-      for (const hole of holes) {
-        let covered = true;
-        for (const k of hole.pixels) {
-          if (!laterUnion[k]) { covered = false; break; }
+      const allLayersUnion = multiPolygonUnion(pocketPolygons[idx], laterPolygonUnions[idx]);
+      const holeMarginUnits = HOLE_MARGIN_INCHES_FOR_FILLABLE * designUnitsPerInch;
+      walkPolygonHoles(pocketPolygons[idx], holeRing => {
+        const holeMP: MultiPolygon = [holeRing];
+        const uncovered = multiPolygonDifference(holeMP, allLayersUnion);
+        let fullyCovered = multiPolygonIsEmpty(uncovered);
+        if (!fullyCovered) {
+          const eroded = multiPolygonOffset(uncovered, -holeMarginUnits / 2, { joinType: 'round' });
+          fullyCovered = multiPolygonIsEmpty(eroded);
         }
-        if (!covered) continue;
-        // Build a mask for this hole and count its boundary pixels.
-        const holeMask = new Uint8Array(n);
-        for (const k of hole.pixels) holeMask[k] = 1;
-        const holeBoundary = computeBoundary(holeMask, canvasW, canvasH);
-        let perimPx = 0;
-        for (let k = 0; k < n; k++) if (holeBoundary[k]) perimPx++;
+        if (!fullyCovered) return false; // descend so nested holes still count
         fillableHoleCount++;
-        fillableHolePixelCount += hole.pixels.length;
-        fillableHolePerimeterPx += perimPx;
-      }
+        fillableHoleAreaUnits += multiPolygonArea(holeMP);
+        fillableHolePerimeterUnits += multiPolygonPerimeter(holeMP);
+        return true; // skip descending — full-fill absorbs nested geometry
+      });
     }
-    const fillableHoleAreaSqIn = fillableHolePixelCount / (pixelsPerInch * pixelsPerInch);
-    const fillableHolePerimeterIn = fillableHolePerimeterPx / pixelsPerInch;
+    const fillableHoleAreaSqIn = fillableHoleAreaUnits / (designUnitsPerInch * designUnitsPerInch);
+    const fillableHolePerimeterIn = fillableHolePerimeterUnits / designUnitsPerInch;
     // Net-zero clearance model: savings is purely the V-bit perimeter time
     // on pocket + plug. NaN when V-bit feed rate is missing.
     const fillableSavedTimeMin = (vbitRates && vbitRates.feed > 0)
