@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.19';
+export const CODE_VERSION = '2026-05-07.20';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'svgFlatten: read SVG presentation attrs (stroke-width, stroke, fill-rule, etc.) via ancestor attribute walk — Pika strokes were rendering thinner because getComputedStyle in a 0-sized hidden host did not resolve inherited <g stroke-width="3"> on Chromium';
+  'Phase 4 per-side analyzeMask polygon-native: polygonProblemStats + polygonThinWalls (row/column-scan polygon edges) drive per-side stats + overlay PNG; per-side depth map renders polygon offset levels; bitmap dist1 retained only for machiningTimeForMask';
