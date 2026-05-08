@@ -39,6 +39,35 @@ const ATTRS_TO_DROP_AFTER_BAKE = new Set([
 ]);
 
 /**
+ * Resolve an SVG presentation attribute by walking element + ancestor
+ * attributes / inline styles up to (and including) the nearest `<svg>`.
+ * Returns the closest defined value, or null if none.
+ *
+ * Why not just use `getComputedStyle`? In a 0-sized hidden host the
+ * SVG can end up un-laid-out, and some browsers then return CSS
+ * defaults instead of resolving inherited values. SVG presentation
+ * attributes (stroke, stroke-width, fill-rule, etc.) inherit by
+ * spec; walking the ancestor chain explicitly is bulletproof and
+ * doesn't depend on layout.
+ */
+function readSvgPresentationAttr(el: Element, name: string): string | null {
+  let cur: Element | null = el;
+  while (cur && cur.nodeType === 1) {
+    const styleAttr = cur.getAttribute('style');
+    if (styleAttr) {
+      const re = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, 'i');
+      const m = styleAttr.match(re);
+      if (m) return m[1].trim();
+    }
+    const v = cur.getAttribute(name);
+    if (v !== null && v.length > 0) return v;
+    if (cur.tagName.toLowerCase() === 'svg') break;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+/**
  * Convert one SVG shape element into an equivalent path-`d` string.
  * Used by the transform-baking step to turn `<rect>` / `<circle>` /
  * etc. into `<path>` so the CTM can be applied via svgpath.
@@ -113,7 +142,13 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
   }
 
   const host = document.createElement('div');
-  host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;';
+  // Allow the SVG to lay out at its intrinsic size — `width:0;height:0`
+  // can collapse viewport→user-coord scale to 0 in some browsers,
+  // which then makes `getCTM()` return a scale-0 matrix and
+  // `getComputedStyle().strokeWidth` resolve to defaults instead of
+  // inherited values. `visibility:hidden` + offscreen position keeps
+  // the layout off-screen without breaking style/CTM resolution.
+  host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;';
   document.body.appendChild(host);
 
   const originalParent = svg.parentNode;
@@ -130,25 +165,57 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
       const finalD = ctm
         ? svgpath(d).transform(`matrix(${ctm.a} ${ctm.b} ${ctm.c} ${ctm.d} ${ctm.e} ${ctm.f})`).toString()
         : d;
-      // Resolve inherited fill-rule via computed style. SVG default is
-      // nonzero; ancestor <g> fill-rule="evenodd" inherits to children
-      // through CSS — copying just element attrs would silently lose
-      // it after we strip the wrappers.
-      const styles = window.getComputedStyle(el);
-      const fillRuleResolved = (styles.fillRule || 'nonzero').trim().toLowerCase();
+      // Resolve inherited SVG presentation attrs (fill-rule + the
+      // stroke styling) via ancestor walk so they survive the
+      // wrapper-stripping. Copying just element-local attrs would
+      // silently drop attributes set on a `<g>` ancestor — Pika's
+      // strokes use `<g stroke-width="3" stroke="…">` wrapping.
+      const inheritedFillRule  = readSvgPresentationAttr(el, 'fill-rule');
+      const inheritedStroke    = readSvgPresentationAttr(el, 'stroke');
+      const inheritedStrokeW   = readSvgPresentationAttr(el, 'stroke-width');
+      const inheritedLinecap   = readSvgPresentationAttr(el, 'stroke-linecap');
+      const inheritedLinejoin  = readSvgPresentationAttr(el, 'stroke-linejoin');
+
+      // CTM linear scale: bake into stroke-width so a transform with
+      // non-unit scale doesn't render thinner / thicker after wrapper-
+      // stripping. For pure translate (Pika) this is 1.
+      const det = ctm ? Math.abs(ctm.a * ctm.d - ctm.b * ctm.c) : 1;
+      const linearScale = det > 0 ? Math.sqrt(det) : 1;
+
       const newPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       newPath.setAttribute('d', finalD);
-      // Copy attributes (drop geometry-defining + transform; preserve fill/stroke/style/etc.).
+      // Copy element-local attributes (drop geometry-defining + transform; preserve fill/stroke/style/etc.).
       for (const attr of Array.from(el.attributes)) {
         const name = attr.name.toLowerCase();
         if (ATTRS_TO_DROP_AFTER_BAKE.has(name)) continue;
         newPath.setAttribute(attr.name, attr.value);
       }
-      // Bake the resolved fill-rule explicitly so downstream
-      // canonicalization treats overlapping subpaths the same way the
-      // browser would render the original SVG.
-      if (!newPath.hasAttribute('fill-rule')) {
-        newPath.setAttribute('fill-rule', fillRuleResolved === 'evenodd' ? 'evenodd' : 'nonzero');
+      // Bake inherited presentation attrs onto the new path when not
+      // already explicit. Setting them all explicitly makes the leaf
+      // self-contained, independent of any surviving `<g>` ancestor.
+      if (!newPath.hasAttribute('fill-rule') && inheritedFillRule) {
+        const v = inheritedFillRule.toLowerCase();
+        newPath.setAttribute('fill-rule', v === 'evenodd' ? 'evenodd' : 'nonzero');
+      }
+      if (!newPath.hasAttribute('stroke') && inheritedStroke) {
+        newPath.setAttribute('stroke', inheritedStroke);
+      }
+      if (!newPath.hasAttribute('stroke-width') && inheritedStrokeW) {
+        const swRaw = parseFloat(inheritedStrokeW);
+        if (Number.isFinite(swRaw) && swRaw > 0) {
+          newPath.setAttribute('stroke-width', String(swRaw * linearScale));
+        }
+      } else if (newPath.hasAttribute('stroke-width') && linearScale !== 1) {
+        const swRaw = parseFloat(newPath.getAttribute('stroke-width') ?? '');
+        if (Number.isFinite(swRaw) && swRaw > 0) {
+          newPath.setAttribute('stroke-width', String(swRaw * linearScale));
+        }
+      }
+      if (!newPath.hasAttribute('stroke-linecap') && inheritedLinecap) {
+        newPath.setAttribute('stroke-linecap', inheritedLinecap);
+      }
+      if (!newPath.hasAttribute('stroke-linejoin') && inheritedLinejoin) {
+        newPath.setAttribute('stroke-linejoin', inheritedLinejoin);
       }
       el.parentNode?.replaceChild(newPath, el);
     }
@@ -191,7 +258,13 @@ export async function flattenSvg(svgText: string): Promise<FlattenedSvgElement[]
   }
 
   const host = document.createElement('div');
-  host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;';
+  // Allow the SVG to lay out at its intrinsic size — `width:0;height:0`
+  // can collapse viewport→user-coord scale to 0 in some browsers,
+  // which then makes `getCTM()` return a scale-0 matrix and
+  // `getComputedStyle().strokeWidth` resolve to defaults instead of
+  // inherited values. `visibility:hidden` + offscreen position keeps
+  // the layout off-screen without breaking style/CTM resolution.
+  host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;';
   document.body.appendChild(host);
   host.innerHTML = svgText;
 
@@ -230,10 +303,14 @@ function walkShapeElements(node: Element, visit: (el: SVGGraphicsElement) => voi
 }
 
 function elementToFlattened(el: SVGGraphicsElement, zIndex: number): FlattenedSvgElement | null {
+  // Read SVG presentation attrs via ancestor walk so inherited
+  // stroke-width / fill-rule / etc. resolve correctly regardless
+  // of whether the host is laid out. Fall back to getComputedStyle
+  // for properties that might come from a `<style>` block (= true
+  // CSS, not attribute inheritance).
   const styles = window.getComputedStyle(el);
-
-  const stroke = (styles.stroke ?? '').toLowerCase();
-  const fill   = (styles.fill   ?? '').toLowerCase();
+  const stroke = (readSvgPresentationAttr(el, 'stroke') ?? styles.stroke ?? '').toLowerCase();
+  const fill   = (readSvgPresentationAttr(el, 'fill')   ?? styles.fill   ?? '').toLowerCase();
   const hasStroke = !!stroke && stroke !== 'none' && stroke !== 'transparent' && stroke !== 'rgba(0, 0, 0, 0)';
   const hasFill   = !!fill   && fill   !== 'none' && fill   !== 'transparent' && fill   !== 'rgba(0, 0, 0, 0)';
   if (!hasStroke && !hasFill) return null;
@@ -241,20 +318,20 @@ function elementToFlattened(el: SVGGraphicsElement, zIndex: number): FlattenedSv
   // CTM relative to the host SVG (= the element's local-to-root transform).
   const ctm = (typeof el.getCTM === 'function' ? el.getCTM() : null) ?? new DOMMatrixReadOnly();
 
-  // Stroke width in element-local units; computed style returns px in
-  // SVG user-space (= viewBox units when we're not nested inside CSS-
-  // sized container). Multiply by sqrt(|det(CTM)|) for the linear scale
-  // factor (= average scale; correct for uniform CTM, an approximation
-  // for non-uniform).
-  const swLocalRaw = parseFloat(styles.strokeWidth);
+  // Stroke width in element-local units. Multiply by sqrt(|det(CTM)|)
+  // for the linear scale factor (= average scale; correct for uniform
+  // CTM, an approximation for non-uniform).
+  const swRaw = readSvgPresentationAttr(el, 'stroke-width') ?? styles.strokeWidth;
+  const swLocalRaw = parseFloat(swRaw);
   const swLocal = Number.isFinite(swLocalRaw) && swLocalRaw > 0 ? swLocalRaw : 1;
   const det = Math.abs(ctm.a * ctm.d - ctm.b * ctm.c);
   const linearScale = det > 0 ? Math.sqrt(det) : 1;
   const strokeWidth = swLocal * linearScale;
 
-  const linecap = normalizeLinecap(styles.strokeLinecap);
-  const linejoin = normalizeLinejoin(styles.strokeLinejoin);
-  const fillRule: FillRule = (styles.fillRule || 'nonzero').trim().toLowerCase() === 'evenodd' ? 'evenodd' : 'nonzero';
+  const linecap = normalizeLinecap(readSvgPresentationAttr(el, 'stroke-linecap') ?? styles.strokeLinecap);
+  const linejoin = normalizeLinejoin(readSvgPresentationAttr(el, 'stroke-linejoin') ?? styles.strokeLinejoin);
+  const fillRuleRaw = (readSvgPresentationAttr(el, 'fill-rule') ?? styles.fillRule ?? 'nonzero').trim().toLowerCase();
+  const fillRule: FillRule = fillRuleRaw === 'evenodd' ? 'evenodd' : 'nonzero';
 
   const subpathsLocal = extractElementSubpathsLocal(el);
   if (subpathsLocal.length === 0) return null;
