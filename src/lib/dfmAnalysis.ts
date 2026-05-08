@@ -500,33 +500,14 @@ export async function runDfmAnalysis(
   };
 
   // -----------------------------------------------------------------------
-  // Phase 1: Build all pocket masks via per-layer rasterization.
+  // Phase 1: Parse every layer's polygon. The full polygon pipeline
+  // consumes these directly — no per-layer rasterization needed.
   //
-  // We deliberately do NOT use color-matching from the combined render here.
-  // Color-matching gives the *visible* extent of each layer (what survives
-  // SVG z-order), but for DFM and especially staged-alignment risk detection
-  // we need each layer's *physical* extent — including any portion that the
-  // extend-for-registration algorithm has placed under a later layer.
-  //
-  // Each layer rasterizes through `rasterizeLayerToBinaryMask` (transparent
-  // canvas + alpha threshold) so antialiased edge pixels register in both
-  // adjacent layers' masks consistently — independent of layer color, so
-  // adjacent layers don't leave the boundary gaps that color-dependent
-  // luma thresholding produces.
+  // We deliberately use each layer's *physical* extent (including any
+  // portion the extend-for-registration algorithm has placed under a
+  // later layer), not its visible extent under SVG z-order. The
+  // svgFragment is the source of truth for physical extent.
   // -----------------------------------------------------------------------
-  const pocketMasks: Uint8Array[] = [];
-  for (const colorHex of orderedColors) {
-    const layer = vector.layers.find(l => l.colorHex === colorHex);
-    if (!layer) { pocketMasks.push(new Uint8Array(n)); continue; }
-    pocketMasks.push(await rasterizeLayerToBinaryMask(
-      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-      canvasW, canvasH,
-    ));
-  }
-
-  // Polygon counterpart of pocketMasks — used by the polygon-native
-  // alignment-risk detector and the per-preset pocket analysis.
-  // Parsed once up front so Phase 2 and Phase 4 share the result.
   const pocketPolygons: MultiPolygon[] = orderedColors.map(colorHex => {
     const layer = vector.layers.find(l => l.colorHex === colorHex);
     return layer ? svgFragmentToMultiPolygon(layer.svgFragment) : [];
@@ -650,8 +631,6 @@ export async function runDfmAnalysis(
     pocketAlign?: Uint8Array;
     plugIsProblem: Uint8Array;
     plugIsThinWall: Uint8Array;
-    pocketMask: Uint8Array;
-    plugMask: Uint8Array;
     /** Pocket polygon (design units) for the polygon-native per-preset path. */
     pocketMP: MultiPolygon;
     /** Plug polygon (= canvas frame − pocket) for the polygon-native per-preset path. */
@@ -667,12 +646,6 @@ export async function runDfmAnalysis(
 
   for (let idx = 0; idx < orderedColors.length; idx++) {
     const colorHex = orderedColors[idx];
-    const pocketMask = pocketMasks[idx];
-
-    // Existing plug mask used for the DFM (depth/thin-wall) analysis: this
-    // is the *base-board* side, the complement of the inlay color.
-    const plugMaskForDfm = new Uint8Array(n);
-    for (let i = 0; i < n; i++) plugMaskForDfm[i] = pocketMask[i] ? 0 : 1;
 
     // Polygon-native per-side analysis for stats + thin-wall + problem
     // region. For pocket: layer mass; for plug: canvas-frame minus pocket.
@@ -872,8 +845,6 @@ ${plugStockOutlineSvg}
       pocketAlign: alignVisualPerInlay[idx],
       plugIsProblem,
       plugIsThinWall,
-      pocketMask,
-      plugMask: plugMaskForDfm,
       pocketMP,
       plugMP,
       pocketThinWallMP: pocketAnalysis.thinWallMP,

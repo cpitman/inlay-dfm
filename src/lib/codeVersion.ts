@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.7';
+export const CODE_VERSION = '2026-05-08.8';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'plug-stock packing polygon-native: multiPolygonOffset + multiPolygonComponents + min-area OBB replaces dilateMask + findMaskComponents + per-pixel boundary hull. Last bitmap function in the plug-stock surface area is retired; plugStockPacking.ts deleted.';
+  'Drop dead Phase 1 per-layer rasterization + plugMaskForDfm + dead pocketMask/plugMask fields on overlayRebuildInputs. The polygon pipeline never read them; ~5-10 OffscreenCanvas allocations + EDT-equivalents per design analysis are gone.';
