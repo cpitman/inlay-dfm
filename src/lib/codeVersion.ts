@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.14';
+export const CODE_VERSION = '2026-05-08.15';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Clipart catalog re-screened against the polygon analysis (rule-rev 2026-05-08.13). 87 entries removed (47% of catalog): mostly intricate patterns and line-art SVGs the new polygon pipeline cannot process, plus genuine isolated-component / problem-area / alignment failures. Survivors: 96 of 183. New `npm run rescreen-clipart` script under scripts/clipart/. Removals logged to rejections.jsonl with reason="dfm-rescreen-2026-05-08.13".';
+  'svgFlatten now expands <use href="#id"> references before the CTM bake walk + skips display:none shapes. Fixes imports of OpenClipart "animation"-style SVGs that build their visible geometry by instancing tiles defined in <defs>: previously those parsed as a solid backdrop square because <use> elements were ignored. Catalog re-screened with the fix: rotate-three-bar-animation2 correctly flips from pass to fail; net catalog 95/183 (was 96/183).';

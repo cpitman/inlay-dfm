@@ -125,6 +125,121 @@ function shapeToPathD(el: SVGGraphicsElement): string {
 }
 
 /**
+ * Resolve `<use>` references in-place, deep-cloning each target into
+ * the document tree at the `<use>`'s position. Repeats up to
+ * `maxDepth` times so a target that itself references another
+ * `<use>` resolves cleanly. Drops cycles (an unresolved `<use>` in
+ * the final pass is removed). Browser-only — relies on
+ * `querySelector` + `cloneNode`.
+ *
+ * The `<use>` element's translation (`x`/`y` attrs) and `transform`
+ * attr are composed onto a wrapper `<g>` carrying the cloned
+ * subtree. Presentation attrs (fill, stroke, …) on the `<use>`
+ * cascade onto the wrapper so they affect the cloned geometry the
+ * same way the browser would render it.
+ *
+ * Animation children (`<animate>`, `<animateTransform>`,
+ * `<animateMotion>`, `<set>`) are stripped from the cloned tree —
+ * we want a static t=0 snapshot for inlay, not an animated one.
+ *
+ * Cloned `id` attributes are stripped to avoid duplicating ids in
+ * the document (which would break a later `getElementById` lookup
+ * if the SVG happened to chain `<use>` references).
+ */
+function expandUseReferences(svg: SVGSVGElement, maxDepth = 10): void {
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const XLINK_NS = 'http://www.w3.org/1999/xlink';
+  const ANIMATION_TAGS = 'animate, animateTransform, animateMotion, set';
+  const PASSTHROUGH_SKIP = new Set(['href', 'xlink:href', 'x', 'y', 'transform', 'width', 'height']);
+
+  for (let depth = 0; depth < maxDepth; depth++) {
+    const uses = Array.from(svg.querySelectorAll('use')) as SVGUseElement[];
+    if (uses.length === 0) return;
+    for (const use of uses) {
+      const href = use.getAttribute('href') ?? use.getAttributeNS(XLINK_NS, 'href') ?? '';
+      const parent = use.parentNode;
+      if (!parent) continue;
+      if (!href.startsWith('#')) {
+        // External references unsupported (and rarely used in clipart).
+        parent.removeChild(use);
+        continue;
+      }
+      const targetId = href.slice(1);
+      const target = svg.querySelector(`[id="${cssEscape(targetId)}"]`);
+      if (!target) {
+        parent.removeChild(use);
+        continue;
+      }
+
+      const wrapper = document.createElementNS(SVG_NS, 'g');
+      const x = parseFloat(use.getAttribute('x') ?? '0') || 0;
+      const y = parseFloat(use.getAttribute('y') ?? '0') || 0;
+      const useTransform = use.getAttribute('transform') ?? '';
+      const composed = (x !== 0 || y !== 0)
+        ? `translate(${x},${y}) ${useTransform}`.trim()
+        : useTransform;
+      if (composed) wrapper.setAttribute('transform', composed);
+      // Copy presentation attrs from the <use> onto the wrapper so
+      // they cascade to the cloned subtree.
+      for (const attr of Array.from(use.attributes)) {
+        const lower = attr.name.toLowerCase();
+        if (PASSTHROUGH_SKIP.has(lower)) continue;
+        wrapper.setAttribute(attr.name, attr.value);
+      }
+
+      // Per SVG spec, `<use>` deep-clones the target's subtree.
+      // For container targets (`<g>`, `<symbol>`), lift their children
+      // into the wrapper so the wrapper acts as the cloned container.
+      // For leaf targets (`<path>`, `<rect>`, …), append the clone
+      // itself.
+      const clone = target.cloneNode(true) as Element;
+      const tag = clone.tagName.toLowerCase();
+      if (tag === 'g' || tag === 'symbol') {
+        clone.removeAttribute('display'); // <defs> targets are often display:none
+        for (const child of Array.from(clone.childNodes)) wrapper.appendChild(child);
+      } else {
+        wrapper.appendChild(clone);
+      }
+
+      // Static snapshot: drop animation drivers from the cloned tree.
+      for (const anim of Array.from(wrapper.querySelectorAll(ANIMATION_TAGS))) {
+        anim.parentNode?.removeChild(anim);
+      }
+      // Avoid duplicating ids from the cloned subtree (would clash
+      // with the original target's id and confuse later lookups).
+      for (const idEl of Array.from(wrapper.querySelectorAll('[id]'))) {
+        idEl.removeAttribute('id');
+      }
+
+      parent.replaceChild(wrapper, use);
+    }
+  }
+  // Final pass: remove any <use> elements still left after maxDepth
+  // (= a cycle, or chain longer than maxDepth).
+  for (const use of Array.from(svg.querySelectorAll('use'))) {
+    use.parentNode?.removeChild(use);
+  }
+}
+
+/** True iff the element (or any ancestor) has `display="none"`. */
+function isDisplayNone(el: Element): boolean {
+  let cur: Element | null = el;
+  while (cur && cur.tagName.toLowerCase() !== 'svg') {
+    if (cur.getAttribute('display') === 'none') return true;
+    cur = cur.parentElement;
+  }
+  return false;
+}
+
+/** Minimal CSS.escape fallback for ids that contain unusual chars. */
+function cssEscape(s: string): string {
+  // CSS.escape is widely supported, but guarded here for old browsers
+  // and the headless environments tests run in.
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(s);
+  return s.replace(/[^a-zA-Z0-9_-]/g, c => `\\${c}`);
+}
+
+/**
  * In-place: walk every leaf shape under `svg`, apply its CTM to the
  * geometry, and replace the element with a `<path>` carrying the
  * transformed `d`. After this runs, no `<g transform>` wrapper is
@@ -157,8 +272,21 @@ export async function bakeSvgTransforms(svg: SVGSVGElement): Promise<void> {
   void svg.getBoundingClientRect();
 
   try {
+    // Expand <use href="#id"> references first so the shape walk
+    // below sees the inlined geometry. Without this, SVGs that build
+    // their visible content via <defs> + <use> instances (e.g.
+    // OpenClipart "animation" tiles) collapse to whatever non-<use>
+    // shapes happen to be in the document — typically a backdrop
+    // rectangle, leaving the user with a blank-looking import.
+    expandUseReferences(svg);
+
     const shapes = Array.from(svg.querySelectorAll(SHAPE_TAGS_LIST.join(','))) as SVGGraphicsElement[];
     for (const el of shapes) {
+      // Respect display:none — SVGs commonly tuck "hidden helper"
+      // paths inside <defs> or behind a display="none" attribute,
+      // and lifting them out via <use> expansion would otherwise
+      // pull them in as visible geometry.
+      if (isDisplayNone(el)) continue;
       const ctm = (typeof el.getCTM === 'function' ? el.getCTM() : null);
       const d = shapeToPathD(el);
       if (!d) continue;

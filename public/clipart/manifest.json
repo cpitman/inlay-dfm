@@ -2013,23 +2013,6 @@
     "rank": 66
   },
   {
-    "id": "rotate-three-bar-animation2",
-    "title": "Rotate three-bar animation2",
-    "tags": [
-      "animation",
-      "rotate"
-    ],
-    "source": "openclipart",
-    "sourceUrl": "https://openclipart.org/detail/352751/rotate-three-bar-animation2",
-    "license": "CC0",
-    "colorCount": 1,
-    "colors": [
-      "#000000"
-    ],
-    "aspectRatio": 1,
-    "rank": 67
-  },
-  {
     "id": "atom-animation",
     "title": "Atom Animation",
     "tags": [
@@ -2045,7 +2028,7 @@
       "#ff0000"
     ],
     "aspectRatio": 1,
-    "rank": 68
+    "rank": 67
   },
   {
     "id": "double-happiness",
@@ -2071,7 +2054,7 @@
       "#c20000"
     ],
     "aspectRatio": 0.9918257963747297,
-    "rank": 69
+    "rank": 68
   },
   {
     "id": "simple-flat-hearts-love-is-in-the-air",
@@ -2105,7 +2088,7 @@
       "#ff0003"
     ],
     "aspectRatio": 1.3116562881832503,
-    "rank": 70
+    "rank": 69
   },
   {
     "id": "circle-a-red-version",
@@ -2125,7 +2108,7 @@
       "#cc0001"
     ],
     "aspectRatio": 1.0126903553299493,
-    "rank": 71
+    "rank": 70
   },
   {
     "id": "golden-angle-rotate-animation",
@@ -2144,7 +2127,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 72
+    "rank": 71
   },
   {
     "id": "two-cross-animation",
@@ -2162,7 +2145,7 @@
       "#7f7f7f"
     ],
     "aspectRatio": 1,
-    "rank": 73
+    "rank": 72
   },
   {
     "id": "cross-animate",
@@ -2181,7 +2164,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1,
-    "rank": 74
+    "rank": 73
   },
   {
     "id": "snail-escargot-decroissance",
@@ -2199,7 +2182,7 @@
       "#000000"
     ],
     "aspectRatio": 1.8378363268561335,
-    "rank": 75
+    "rank": 74
   },
   {
     "id": "baffled-man-sitting-at-table-cartoon",
@@ -2249,7 +2232,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.8736292993651739,
-    "rank": 76
+    "rank": 75
   },
   {
     "id": "cool-cat",
@@ -2285,7 +2268,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1167411479794074,
-    "rank": 77
+    "rank": 76
   },
   {
     "id": "atom",
@@ -2315,7 +2298,7 @@
       "#2f4bff"
     ],
     "aspectRatio": 0.8912429378531073,
-    "rank": 78
+    "rank": 77
   },
   {
     "id": "simple-poison-bottle",
@@ -2380,7 +2363,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3314193300081251,
-    "rank": 79
+    "rank": 78
   },
   {
     "id": "bottle-simple-black-label",
@@ -2434,7 +2417,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 0.3314193300081251,
-    "rank": 80
+    "rank": 79
   },
   {
     "id": "moosefather-versus-mountain-lion",
@@ -2469,7 +2452,7 @@
       "#000000"
     ],
     "aspectRatio": 1.5999999000000062,
-    "rank": 81
+    "rank": 80
   },
   {
     "id": "blues-guitarist",
@@ -2487,7 +2470,7 @@
       "#000080"
     ],
     "aspectRatio": 0.7089700996677741,
-    "rank": 82
+    "rank": 81
   },
   {
     "id": "castle",
@@ -2507,7 +2490,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.4476257496555789,
-    "rank": 83
+    "rank": 82
   },
   {
     "id": "simple-skull",
@@ -2528,7 +2511,7 @@
       "#000000"
     ],
     "aspectRatio": 1.498335175624715,
-    "rank": 84
+    "rank": 83
   },
   {
     "id": "seven-pointed-star",
@@ -2551,7 +2534,7 @@
       "#1a1a1a"
     ],
     "aspectRatio": 0.9802851745720772,
-    "rank": 85
+    "rank": 84
   },
   {
     "id": "snail",
@@ -2573,7 +2556,7 @@
       "#ff7f2a"
     ],
     "aspectRatio": 1.7765812260701395,
-    "rank": 86
+    "rank": 85
   },
   {
     "id": "thick-red-outlined-white-heart",
@@ -2607,7 +2590,7 @@
       "#bbbbbb"
     ],
     "aspectRatio": 1.1234731092925239,
-    "rank": 87
+    "rank": 86
   },
   {
     "id": "yutnori",
@@ -2633,7 +2616,7 @@
       "#c62033"
     ],
     "aspectRatio": 1.0039841623512054,
-    "rank": 88
+    "rank": 87
   },
   {
     "id": "dustdfg-medal",
@@ -2653,7 +2636,7 @@
       "#ffd42a"
     ],
     "aspectRatio": 1.0005984193784125,
-    "rank": 89
+    "rank": 88
   },
   {
     "id": "chessboard-variation",
@@ -2677,7 +2660,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 90
+    "rank": 89
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -2701,7 +2684,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 91
+    "rank": 90
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -2725,7 +2708,7 @@
       "#800000"
     ],
     "aspectRatio": 1,
-    "rank": 92
+    "rank": 91
   },
   {
     "id": "chessboard-made-out-of-set-of-squares",
@@ -2749,7 +2732,7 @@
       "#ff8080"
     ],
     "aspectRatio": 1.0000001049868876,
-    "rank": 93
+    "rank": 92
   },
   {
     "id": "linux-tux",
@@ -2773,7 +2756,7 @@
       "#ff3e03"
     ],
     "aspectRatio": 1,
-    "rank": 94
+    "rank": 93
   },
   {
     "id": "be-your-own-hero",
@@ -2797,7 +2780,7 @@
       "#000000"
     ],
     "aspectRatio": 0.7764632394893226,
-    "rank": 95
+    "rank": 94
   },
   {
     "id": "guitar",
@@ -2819,6 +2802,6 @@
       "#967b1f"
     ],
     "aspectRatio": 0.8500569111203942,
-    "rank": 96
+    "rank": 95
   }
 ]

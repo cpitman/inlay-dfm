@@ -99,7 +99,7 @@ rescreen: loaded 183 manifest entries
 [94/183] crossword-puzzles-symbol-fix-remix: ✗ FAIL (parser-or-analysis-error)
 [95/183] happy-whale: ✗ FAIL (parser-or-analysis-error)
 [96/183] heart-finger-gesture: ✗ FAIL (parser-or-analysis-error)
-[97/183] rotate-three-bar-animation2: ✓ pass
+[97/183] rotate-three-bar-animation2: ✗ FAIL (isolated-component, problem=0.19%)
 [98/183] atom-animation: ✓ pass
 [99/183] double-happiness: ✓ pass
 [100/183] simple-flat-hearts-love-is-in-the-air: ✓ pass
@@ -188,8 +188,8 @@ rescreen: loaded 183 manifest entries
 [183/183] guitar: ✓ pass
 
 rescreen summary:
-  kept:    96
-  removed: 87
+  kept:    95
+  removed: 88
   missing: 0 (manifest entries with no SVG on disk)
-wrote manifest with 96 entries
-appended 87 rejection lines to rejections.jsonl
+wrote manifest with 95 entries
+appended 88 rejection lines to rejections.jsonl
