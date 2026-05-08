@@ -3,16 +3,15 @@ import { distanceTransform } from './distanceTransform';
 import { layerToStandaloneSvg, rasterizeLayerToBinaryMask, renderSvgToCanvas } from './svgLayers';
 import { detectAlignmentRisk } from './alignmentRisk';
 import { CLEARANCE_BIT_MRR, CLEARANCE_BIT_OPTIONS, getVbitRates, VBIT_PRESET_ANGLES, VBIT_RATES } from './machiningRates';
-import { buildMachiningTimeMatrix, machiningTimeForMask } from './machiningTime';
-import { computePlugCarvedMask, computePlugStockMask } from './plugStock';
+import { polygonMachiningTime, buildMachiningTimeMatrixPolygon } from './polygonMachiningTime';
+import { computePlugStockPolygon } from './polygonPlugStock';
 import { computeBoundary, findEnclosedHoles } from './morphology';
-import { maskToSvgPath } from './maskToPath';
 import { parseViewBox } from './svgLayers';
 import { computePlugStockUsageSqIn } from './plugStockPacking';
 import { findMaskComponentCentroids } from './maskComponents';
-import { svgFragmentToMultiPolygon } from './polygonParser';
+import { svgFragmentToMultiPolygon, multiPolygonToSvgFragment } from './polygonParser';
 import { multiPolygonDifference, multiPolygonUnionAll } from './clipperOps';
-import { multiPolygonArea, type MultiPolygon } from './polygon';
+import { multiPolygonArea, multiPolygonPerimeter, type MultiPolygon } from './polygon';
 import { polygonProblemStats, type PolygonProblemStats } from './polygonPocketStats';
 import {
   rasterizeMultiPolygonToMask,
@@ -1077,11 +1076,10 @@ export async function runDfmAnalysis(
   // as the V-bit perimeter pass length for both pocket and plug since the
   // V-bit only traces the plug *shape* boundary, not the outer stock edge).
   const matrixLayers: {
-    pocketMask: Uint8Array;
-    pocketDist1: Float32Array;
-    plugCarvedMask: Uint8Array;
-    plugDist1: Float32Array;
-    pocketPerimeterIn: number;
+    pocketMP: MultiPolygon;
+    plugCarvedMP: MultiPolygon;
+    pocketPerimeterUnits: number;
+    plugPerimeterUnits: number;
   }[] = [];
   // Inputs needed to rebuild each wood's overlay later (after the matrix
   // pass tells us the largest infeasible smaller-bit angle, whose mask is
@@ -1130,10 +1128,6 @@ export async function runDfmAnalysis(
       grainDirection, vbitAngleDegrees, designBounds, /* plugMode */ true,
     );
 
-    // dist1 EDT for machiningTimeForMask. Once machining time
-    // migrates off bitmap, this can be retired entirely.
-    const pocketDist1 = distanceTransform(pocketMask, canvasW, canvasH);
-
     // Rasterize the per-side problem + thin-wall polygons once and
     // share with both `toSinglePolygon` (= per-side overlay PNG) and
     // `overlayRebuildInputs` (= Phase 5's per-preset overlay rebuild).
@@ -1143,40 +1137,26 @@ export async function runDfmAnalysis(
     const plugIsThinWall   = rasterizeMultiPolygonToMask(plugAnalysis.thinWallMP,   canvasW, canvasH, polygonTransform);
 
     // Plug stock for *machining-time* purposes: convex hull of the plug
-    // shape dilated by the user's margin. The carved area is stock − plug.
-    const plugStockMask = computePlugStockMask(pocketMask, plugMarginPx, canvasW, canvasH);
-    const plugCarvedMask = new Uint8Array(n);
-    for (let k = 0; k < n; k++) {
-      if (plugStockMask[k] && !pocketMask[k]) plugCarvedMask[k] = 1;
-    }
-    const plugCarvedDist1 = distanceTransform(plugCarvedMask, canvasW, canvasH);
+    // shape dilated by the user's margin. Carved area = stock − pocket.
+    const plugStockMP = computePlugStockPolygon(pocketMP, settings.plugStockMarginInches, designUnitsPerInch);
+    const plugCarvedMP = multiPolygonDifference(plugStockMP, pocketMP);
 
-    // Stock outline path (for the plug-side display), traced from the stock
-    // mask via marching squares + Douglas-Peucker. Stored as a fully-formed
-    // <path> SVG fragment ready to drop into the per-layer SVG. Stroke and
-    // dash-array are sized as fractions of viewBox width so the outline is
-    // visually similar across designs of different scales.
+    // Stock outline path (for the plug-side display), emitted as a flat
+    // <path> with fill=none + dashed orange stroke. Stroke + dash sizes
+    // are fractions of viewBox width so the outline scales sensibly
+    // across designs.
     const strokeW = Math.max(0.5, vector.naturalWidth * 0.003);
     const dashOn  = Math.max(2,   vector.naturalWidth * 0.012);
     const dashOff = Math.max(1.5, vector.naturalWidth * 0.008);
-    const plugStockOutlineSvg = maskToSvgPath(plugStockMask, canvasW, canvasH, {
-      fill: 'none',
-      scaleX: vector.naturalWidth  / canvasW,
-      scaleY: vector.naturalHeight / canvasH,
-      offsetX: vb.x,
-      offsetY: vb.y,
-      simplifyEpsilonPx: 1,
-      minAreaPx: 4,
-      extraAttrs: `stroke="rgb(255,140,0)" stroke-width="${strokeW.toFixed(3)}" stroke-dasharray="${dashOn.toFixed(3)},${dashOff.toFixed(3)}"`,
-    });
+    const plugStockOutlineSvg = multiPolygonToSvgFragment(
+      plugStockMP, '',
+      `fill="none" stroke="rgb(255,140,0)" stroke-width="${strokeW.toFixed(3)}" stroke-dasharray="${dashOn.toFixed(3)},${dashOff.toFixed(3)}"`,
+    );
 
-    // Compute pocket perimeter once (it doesn't depend on bit rates) so
-    // the matrix builder can reuse it for cells using preset V-bit rates
-    // even when the user's current settings have no V-bit rates set.
-    const pocketBoundary = computeBoundary(pocketMask, canvasW, canvasH);
-    let pocketBoundaryPx = 0;
-    for (let k = 0; k < n; k++) if (pocketBoundary[k]) pocketBoundaryPx++;
-    const pocketPerimeterIn = pocketBoundaryPx / pixelsPerInch;
+    // Polygon-derived perimeter (in inches) for the v-bit perimeter pass.
+    const pocketPerimeterUnits = multiPolygonPerimeter(pocketMP);
+    const plugPerimeterUnits   = multiPolygonPerimeter(plugCarvedMP);
+    const pocketPerimeterIn    = pocketPerimeterUnits / designUnitsPerInch;
 
     // Machining time — pocket and plug are computed independently on their
     // own carved masks. Both perimeter passes use the pocket's perimeter
@@ -1187,33 +1167,37 @@ export async function runDfmAnalysis(
     let plugClearanceAreaSqIn = 0, plugVbitAreaSqIn = 0;
 
     if (haveMachiningRates && vbitRates) {
-      const tPocket = machiningTimeForMask(
-        pocketMask, pocketDist1,
-        canvasW, canvasH, pixelsPerInch,
-        inlayDepthInches,
-        settings.clearanceBitDiameterInches,
-        clearanceMRR,
-        vbitRates.mrr,
-        vbitRates.feed,
-        pocketPerimeterIn,
-      );
+      const userVbitFullDepthRadiusUnits = inlayDepthInches * Math.tan(halfAngleRad) * designUnitsPerInch;
+      const clearanceMrrByDiameter = new Map<number, number>([[settings.clearanceBitDiameterInches, clearanceMRR]]);
+      const tPocket = polygonMachiningTime({
+        carvedMP: pocketMP,
+        perimeterUnits: pocketPerimeterUnits,
+        designUnitsPerInch,
+        clearanceBitDiametersIn: [settings.clearanceBitDiameterInches],
+        clearanceMrrByDiameter,
+        vbitFullDepthRadiusUnits: userVbitFullDepthRadiusUnits,
+        vbitMrr: vbitRates.mrr,
+        vbitFeedInchesPerMin: vbitRates.feed,
+        effectiveDepthIn: inlayDepthInches,
+      });
       // Plug side: the carve goes inlayDepth - glueGap + surfaceGap deep
-      // (uniform). machiningTimeForMask just multiplies area × depth, so
+      // (uniform). polygonMachiningTime just multiplies area × depth, so
       // pass the effective depth here.
       const effectivePlugDepthInches = Math.max(
         0,
         inlayDepthInches - settings.plugGlueGapInches + settings.plugSurfaceGapInches,
       );
-      const tPlug = machiningTimeForMask(
-        plugCarvedMask, plugCarvedDist1,
-        canvasW, canvasH, pixelsPerInch,
-        effectivePlugDepthInches,
-        settings.clearanceBitDiameterInches,
-        clearanceMRR,
-        vbitRates.mrr,
-        vbitRates.feed,
-        pocketPerimeterIn,
-      );
+      const tPlug = polygonMachiningTime({
+        carvedMP: plugCarvedMP,
+        perimeterUnits: plugPerimeterUnits,
+        designUnitsPerInch,
+        clearanceBitDiametersIn: [settings.clearanceBitDiameterInches],
+        clearanceMrrByDiameter,
+        vbitFullDepthRadiusUnits: userVbitFullDepthRadiusUnits,
+        vbitMrr: vbitRates.mrr,
+        vbitFeedInchesPerMin: vbitRates.feed,
+        effectiveDepthIn: effectivePlugDepthInches,
+      });
       pocketMachineTimeMinutes = tPocket.totalTimeMin;
       plugMachineTimeMinutes   = tPlug.totalTimeMin;
       layerMachineTimeMinutes  = pocketMachineTimeMinutes + plugMachineTimeMinutes;
@@ -1227,11 +1211,10 @@ export async function runDfmAnalysis(
     }
 
     matrixLayers.push({
-      pocketMask,
-      pocketDist1,
-      plugCarvedMask,
-      plugDist1: plugCarvedDist1,
-      pocketPerimeterIn,
+      pocketMP,
+      plugCarvedMP,
+      pocketPerimeterUnits,
+      plugPerimeterUnits,
     });
 
     // Fillable enclosed holes — holes in this layer's pocket that are fully
@@ -1590,10 +1573,11 @@ ${plugStockOutlineSvg}
     woods[wIdx].perPresetAnalysis = perPresetByWood[wIdx];
   }
 
-  const machiningTimeTable = buildMachiningTimeMatrix({
+  const machiningTimeTable = buildMachiningTimeMatrixPolygon({
     layers: matrixLayers,
-    canvasW, canvasH, pixelsPerInch,
+    designUnitsPerInch,
     inlayDepthInches,
+    inlayDepthForVbit: inlayDepthInches,
     plugFit: (settings.plugGlueGapInches > 0 || settings.plugSurfaceGapInches > 0)
       ? {
           glueGapInches: settings.plugGlueGapInches,

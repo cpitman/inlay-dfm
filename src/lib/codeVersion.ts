@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.20';
+export const CODE_VERSION = '2026-05-08.1';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Phase 4 per-side analyzeMask polygon-native: polygonProblemStats + polygonThinWalls (row/column-scan polygon edges) drive per-side stats + overlay PNG; per-side depth map renders polygon offset levels; bitmap dist1 retained only for machiningTimeForMask';
+  'Machining time polygon-native: per-bit covered area = inwardArea + perimeter × R (Steiner minus the π R² corner-cap term); incremental subtraction across bits drives clearance + v-bit time. Plug stock = polygon convex hull + outward offset. Bitmap dist1 fully retired from per-layer pipeline.';
