@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.4';
+export const CODE_VERSION = '2026-05-08.5';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'preAnalyzeLayerOrder polygon-native: parses svgFragment to MultiPolygon, computes area via multiPolygonArea, tests pairwise overlap via Clipper intersection on inward-eroded copies. Drops the 60-ppi rasterize + erodeMask + bitmap AND.';
+  'runDfmAnalysisLite polygon-native: parses svgFragment, walks PolyTree for fully-covered holes (eroded-empty predicate). Drops per-layer rasterization, alignment detection (unused by optimizer), and the pocketMasks/canvas/pixelsPerInch result fields the optimizer never consumed.';

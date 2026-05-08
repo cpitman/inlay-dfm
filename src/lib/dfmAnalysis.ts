@@ -1771,35 +1771,26 @@ async function canvasToDataUrl(canvas: OffscreenCanvas): Promise<string> {
 // ---------------------------------------------------------------------------
 // LITE analysis path
 //
-// The guided optimizer needs only `fillableHoleCount` and
-// `alignmentIssues` per layer to enumerate fill / extend targets.
-// Running the full `runDfmAnalysis` (per-preset overlays + machining
-// matrix + depth maps + suggestion overlays) just to read those two
-// fields is wasteful — those alone account for ~36 PNG encodes per
-// design.
+// The guided optimizer needs only `fillableHoleCount` per layer to
+// enumerate fill targets for `applyFillAll`. Running the full
+// `runDfmAnalysis` to read that one field would be wasteful (per-
+// preset overlays + machining matrix + depth maps account for ~36
+// PNG encodes per design).
 //
-// `runDfmAnalysisLite` mirrors Phase 0/1/2 of the full pipeline plus a
-// minimal fillable-hole enumeration, and stops there. It returns the
-// per-layer pocket masks too so the optimizer can re-rasterize ONLY
-// the layers `applyFillAll` modified, then call `redetectAlignmentRisks`
-// on the patched mask set without re-rasterizing the entire design.
+// Polygon-native: parses each layer's `svgFragment` directly and
+// walks the PolyTree for fully-covered holes (same predicate as
+// Phase 4 of the full pipeline + as `fillEnclosedHoles`). No
+// rasterization, no alignment-risk detection (the optimizer doesn't
+// consume it), no per-pixel sweeps.
 // ---------------------------------------------------------------------------
 
 export interface LiteWoodAnalysis {
   colorHex: string;
-  alignmentIssues: AlignmentIssue[];
   fillableHoleCount: number;
 }
 
 export interface LiteAnalysisResult {
   woods: LiteWoodAnalysis[];
-  /** Per-color rasterized pocket masks at the lite canvas resolution.
-   *  Reused by the optimizer for the post-fill alignment redetect. */
-  pocketMasks: Map<string, Uint8Array>;
-  canvasW: number;
-  canvasH: number;
-  pixelsPerInch: number;
-  alignThresholdPx: number;
 }
 
 /**
@@ -1866,12 +1857,16 @@ export function redetectAlignmentRisks(
 }
 
 /**
- * Lightweight first pass of the guided pipeline. Identifies fill
- * targets (enclosed holes covered by later layers) and alignment
- * targets (boundary-to-boundary proximity to other layers) at lower
- * resolution than the final analysis. Skips per-preset analysis,
- * overlay PNGs, depth maps, and the machining matrix — those run
- * once at full resolution after fill + extend have committed.
+ * Lightweight first pass of the guided pipeline. Counts fill targets
+ * (= holes covered by later layers — the optimizer feeds these to
+ * `applyFillAll`). Polygon-native: parses each layer's svgFragment
+ * directly and walks the PolyTree for fully-covered holes. No
+ * rasterization, no per-pixel sweeps, no alignment detection — the
+ * full analysis pass picks up alignment from the production-resolution
+ * polygon pipeline once fill + extend have committed.
+ *
+ * `canvasWidth` is no longer used (the polygon path needs no raster
+ * resolution); kept in the signature for call-site stability.
  */
 export async function runDfmAnalysisLite(
   vector: VectorData,
@@ -1879,72 +1874,51 @@ export async function runDfmAnalysisLite(
   colorOrder: readonly string[],
   canvasWidth: number,
 ): Promise<LiteAnalysisResult> {
-  const aspect = vector.naturalHeight / vector.naturalWidth;
-  const canvasW = canvasWidth;
-  const canvasH = Math.max(1, Math.round(canvasWidth * aspect));
-  const pixelsPerInch = canvasW / settings.designWidthInches;
-  const alignThresholdPx = ALIGNMENT_THRESHOLD_INCHES * pixelsPerInch;
-  const n = canvasW * canvasH;
+  void canvasWidth;
+  const inchesPerUnit = settings.designWidthInches / vector.naturalWidth;
+  const designUnitsPerInch = 1 / inchesPerUnit;
+  const holeMarginUnits = HOLE_MARGIN_INCHES_FOR_FILLABLE * designUnitsPerInch;
 
-  // Phase 1: per-layer rasterization, mirroring runDfmAnalysis Phase 1.
-  // Each layer renders independently so we capture extended-for-
-  // registration regions even when later layers cover them.
-  const pocketMasks = new Map<string, Uint8Array>();
-  for (const colorHex of colorOrder) {
-    pocketMasks.set(colorHex, await rasterizeLayerMask(vector, colorHex, canvasW, canvasH));
-  }
+  // Parse each layer to a MultiPolygon in colorOrder.
+  const polygonsByOrder = colorOrder.map(colorHex => {
+    const layer = vector.layers.find(l => l.colorHex === colorHex);
+    return layer ? svgFragmentToMultiPolygon(layer.svgFragment) : [];
+  });
 
-  // Phase 2: alignment-risk detection (no dilation — we don't render).
-  const issuesByColor = redetectAlignmentRisks(
-    pocketMasks, colorOrder, canvasW, canvasH, alignThresholdPx,
-  );
-
-  // Fillable-hole enumeration: same predicate as Phase 4 of the full
-  // pipeline — a hole counts when every pixel of it is covered by the
-  // union of later layers, since filling it then changes nothing
-  // visible but saves V-bit perimeter time.
-  const orderedMasks = colorOrder.map(c => pocketMasks.get(c) ?? new Uint8Array(n));
-  const laterUnions: Uint8Array[] = colorOrder.map(() => new Uint8Array(n));
+  // laterPolygonUnions[i] = union of layers j > i. Same incremental
+  // sweep as Phase 4 of the full pipeline.
+  const laterPolygonUnions: MultiPolygon[] = colorOrder.map(() => []);
   for (let i = colorOrder.length - 2; i >= 0; i--) {
-    const next = orderedMasks[i + 1];
-    const acc = laterUnions[i];
-    const accNext = laterUnions[i + 1];
-    for (let k = 0; k < n; k++) if (next[k] || accNext[k]) acc[k] = 1;
+    laterPolygonUnions[i] = multiPolygonUnion(polygonsByOrder[i + 1], laterPolygonUnions[i + 1]);
   }
 
   const woods: LiteWoodAnalysis[] = colorOrder.map((colorHex, idx) => {
-    const mask = orderedMasks[idx];
     let fillableHoleCount = 0;
     if (idx < colorOrder.length - 1) {
-      const holes = findEnclosedHoles(mask, canvasW, canvasH);
-      const laterUnion = laterUnions[idx];
-      // Mirror `fillEnclosedHoles`'s 99.5% coverage threshold so the
-      // optimizer's `holeFillTargets` includes layers whose holes
-      // are mostly-covered (sub-pixel stragglers tolerated). A
-      // strict all-or-nothing here would flag layer 0 as having
-      // zero fillable holes and skip running `fillEnclosedHoles`
-      // on it entirely, even when 99.9%+ of every hole is covered.
-      for (const hole of holes) {
-        let coveredPx = 0;
-        for (const k of hole.pixels) {
-          if (laterUnion[k]) coveredPx++;
-        }
-        if (coveredPx / hole.pixels.length >= 0.995) fillableHoleCount++;
+      const target = polygonsByOrder[idx];
+      if (!multiPolygonIsEmpty(target)) {
+        // `allLayersUnion` = target ∪ laterUnion, mirroring
+        // `fillEnclosedHoles`. Same-layer islands sitting inside a
+        // hole count as covering it.
+        const allLayersUnion = multiPolygonUnion(target, laterPolygonUnions[idx]);
+        walkPolygonHoles(target, holeRing => {
+          const holeMP: MultiPolygon = [holeRing];
+          const uncovered = multiPolygonDifference(holeMP, allLayersUnion);
+          let fullyCovered = multiPolygonIsEmpty(uncovered);
+          if (!fullyCovered) {
+            const eroded = multiPolygonOffset(uncovered, -holeMarginUnits / 2, { joinType: 'round' });
+            fullyCovered = multiPolygonIsEmpty(eroded);
+          }
+          if (fullyCovered) {
+            fillableHoleCount++;
+            return true; // skip descending — full-fill absorbs nested geometry
+          }
+          return false;
+        });
       }
     }
-    return {
-      colorHex,
-      alignmentIssues: issuesByColor.get(colorHex) ?? [],
-      fillableHoleCount,
-    };
+    return { colorHex, fillableHoleCount };
   });
 
-  return {
-    woods,
-    pocketMasks,
-    canvasW,
-    canvasH,
-    pixelsPerInch,
-    alignThresholdPx,
-  };
+  return { woods };
 }
