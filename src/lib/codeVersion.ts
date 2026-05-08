@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.12';
+export const CODE_VERSION = '2026-05-08.13';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Post-migration scaffolding cleanup: drop dead overlayRebuildInputs mask + pocketAlign fields (struct stored bitmap channels never read post-migration), drop alignVisualPerInlay rasterization (only consumer was the dead pocketAlign), drop _rasterWidth params from fillEnclosedHoles + removeFullyOccludedRegions, drop unused canvasWidth from runDfmAnalysisLite + applyFillAll. Callers updated through expert/page.tsx + quoteOptimizer.ts.';
+  'Per-component small-corner tolerance in polygonProblemStats: components whose problem area is below 5% of their own carved area drop out of the problem region. Recovers v-bit-aware corner forgiveness lost when the bitmap monotonic-ascent rule was retired; isolated (= no-FD-seed) components still get flagged because their per-component problem ratio is 100%.';

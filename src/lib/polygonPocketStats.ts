@@ -23,6 +23,7 @@ import {
   multiPolygonIntersection,
   multiPolygonOffset,
   multiPolygonUnion,
+  multiPolygonUnionAll,
 } from './clipperOps';
 import {
   multiPolygonArea,
@@ -32,6 +33,24 @@ import {
 
 /** Pass threshold copied from `dfmAnalysis.ts` to keep the two implementations in lockstep. */
 export const POLYGON_POCKET_PASS_THRESHOLD_PERCENT = 0.1;
+
+/**
+ * Per-component "small-corner" tolerance. A component whose problem
+ * area is less than this fraction of its own carved area gets its
+ * problem markings cleared.
+ *
+ * Why: the disc-fits coverage model (`carved − morphologicalOpening`)
+ * over-flags inside corners that the v-bit's natural taper actually
+ * handles cleanly — the bit descends to less-than-full depth at the
+ * corner and the inlay still cuts. The bitmap predecessor used a
+ * monotonic-ascent BFS to work around this; a simpler per-component
+ * fraction filter captures the practical cases where small corner
+ * artifacts make up an insignificant slice of an otherwise-feasible
+ * component. Components fully isolated from full-depth seeds (= no
+ * bit-tip-fits region anywhere inside) have problem ratio = 100%
+ * and stay flagged.
+ */
+const COMPONENT_PROBLEM_TOLERANCE_FRACTION = 0.05;
 
 export interface PolygonProblemStats {
   /** Percent of carved area that's "problem" (= unreachable at full depth). */
@@ -125,6 +144,26 @@ export function polygonProblemStats(
     coverage = multiPolygonIntersection(dilated, carvedMP);
     problem = multiPolygonDifference(carvedMP, coverage);
   }
+
+  // Per-component small-corner cleanup. Components whose problem
+  // area is below `COMPONENT_PROBLEM_TOLERANCE_FRACTION` of their
+  // own carved area drop out of the problem region entirely.
+  if (!multiPolygonIsEmpty(problem)) {
+    const components = multiPolygonComponents(carvedMP);
+    const kept: MultiPolygon[] = [];
+    for (const c of components) {
+      const compMP: MultiPolygon = [c.outer, ...c.holes.map(h => h.ring)];
+      const compArea = multiPolygonArea(compMP);
+      if (compArea <= 0) continue;
+      const compProblem = multiPolygonIntersection(problem, compMP);
+      const compProblemArea = multiPolygonArea(compProblem);
+      if (compProblemArea / compArea >= COMPONENT_PROBLEM_TOLERANCE_FRACTION) {
+        kept.push(compProblem);
+      }
+    }
+    problem = kept.length === 0 ? [] : multiPolygonUnionAll(kept);
+  }
+
   const problemArea = multiPolygonArea(problem);
   const percent = (problemArea / carvedArea) * 100;
 

@@ -120,4 +120,60 @@ describe('polygonProblemStats', () => {
     expect(r.percent).toBe(0);
     expect(r.hasIsolatedComponent).toBe(false);
   });
+
+  it('clears small-corner problem area below the per-component 5% tolerance', () => {
+    // 100×100 square, R = 5. Disc-fits model leaves 4 sharp outer
+    // corners as "problem" — total ~21.5 sq units of 10000 = 0.215%.
+    // That exceeds the 0.1% strict pass threshold but is well below
+    // the 5% per-component tolerance, so the cleanup clears the
+    // problem region entirely.
+    const carved = square(0, 0, 100, 100);
+    const r = polygonProblemStats(carved, 5, { returnPolygon: true });
+    expect(r.percent).toBe(0);
+    expect(r.passed).toBe(true);
+    expect(r.problemPolygon).toEqual([]);
+  });
+
+  it('keeps problem area when it exceeds the per-component tolerance', () => {
+    // A 30×30 square carved with R = 8. Inward offset by 8 leaves a
+    // 14×14 seed; bit body sweep leaves a substantial corner band.
+    // Problem area is large enough relative to the 900 carved units
+    // to exceed the 5% tolerance, so cleanup keeps it.
+    const carved = square(0, 0, 30, 30);
+    const r = polygonProblemStats(carved, 8, { returnPolygon: true });
+    expect(r.percent).toBeGreaterThanOrEqual(5);
+    expect(r.problemPolygon).toBeDefined();
+    expect(r.problemPolygon!.length).toBeGreaterThan(0);
+  });
+
+  it('keeps a stranded component flagged regardless of size (100% problem within)', () => {
+    // Big component (passes) + small isolated component (no FD seeds).
+    // The isolated component's problem ratio is 100% within itself,
+    // way above 5%, so it stays flagged.
+    const carved: MultiPolygon = [
+      ...square(0, 0, 50, 50),    // big — easily covered at R=5
+      ...square(60, 0, 4, 4),     // small — too narrow for R=5
+    ];
+    const r = polygonProblemStats(carved, 5, { returnPolygon: true });
+    expect(r.hasIsolatedComponent).toBe(true);
+    expect(r.passed).toBe(false);
+    expect(r.problemPolygon).toBeDefined();
+    // The kept problem region is the small square (= 16 sq units).
+    // The big square's tiny corner artifacts get cleared.
+    const problemArea = r.problemPolygon!.length === 0
+      ? 0
+      : r.problemPolygon!.reduce((a, ring) => {
+          // Sum-of-ring-areas as a sanity proxy for total area.
+          let s = 0;
+          for (let i = 0; i < ring.length; i++) {
+            const j = (i + 1) % ring.length;
+            s += ring[i].x * ring[j].y - ring[j].x * ring[i].y;
+          }
+          return a + Math.abs(s) / 2;
+        }, 0);
+    // ~16 sq units (the small isolated square). Allow a bit of
+    // Clipper rounding slack.
+    expect(problemArea).toBeGreaterThan(15);
+    expect(problemArea).toBeLessThan(20);
+  });
 });
