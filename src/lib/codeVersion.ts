@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.6';
+export const CODE_VERSION = '2026-05-08.7';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Phase E dead-code cleanup: remove analyzeMask, problemStatsForAngle, applyOutsideFullDepthSeeds, monotonicAscentReachable, carvedHasComponentWithoutFullDepth, machiningTimeForMask, buildMachiningTimeMatrix, computePlugStockMask, computePlugCarvedMask, rasterizeConvexPolygon, morphologicalOpening (and their tests). All replaced by polygon equivalents in earlier phases.';
+  'plug-stock packing polygon-native: multiPolygonOffset + multiPolygonComponents + min-area OBB replaces dilateMask + findMaskComponents + per-pixel boundary hull. Last bitmap function in the plug-stock surface area is retired; plugStockPacking.ts deleted.';
