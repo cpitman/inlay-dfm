@@ -1,45 +1,32 @@
 import type { VectorData } from '@/types';
-import { parseViewBox, rasterizeLayerToBinaryMask } from './svgLayers';
-import { maskToSvgPath } from './maskToPath';
-
-// Higher than the analysis canvas (1200): export is a one-shot, and finer
-// detail makes for cleaner CAM toolpaths. Linear cost in pixel count.
-const EXPORT_RASTER_WIDTH = 2400;
+import { svgFragmentToMultiPolygon, multiPolygonToSvgFragment } from './polygonParser';
 
 /**
- * Build a clean export SVG: every layer's geometry is unioned into a single
- * traced polygon path. CAM tools expect contiguous, non-overlapping geometry
- * per cut — our in-app layers can contain multiple overlapping <path> elements
- * after fillEnclosedHoles appended new regions, and those overlaps confuse
- * CAM toolpath generators even though they render
- * identically in the browser.
+ * Build a clean export SVG: every layer's geometry is unioned into a
+ * single canonical MultiPolygon and emitted as one `<path>` per layer.
+ * CAM tools expect contiguous, non-overlapping geometry per cut — our
+ * in-app layers can contain multiple overlapping `<path>` elements
+ * after `fillEnclosedHoles` appended new regions, and those overlaps
+ * confuse CAM toolpath generators even though they render identically
+ * in the browser.
  *
- * The round-trip (Bezier → mask → marching squares + Douglas-Peucker → polygon)
- * shifts boundaries by ~1 px in places. That's fine for a CAM hand-off — CAM
- * tools have their own tolerance — and is the price of producing clean topology.
+ * Polygon-native: `svgFragmentToMultiPolygon` parses every shape in
+ * the layer (paths, polygons, rects, circles, ellipses), respects
+ * each path's fill-rule (nonzero vs evenodd), and self-unions the
+ * result via Clipper. The output is one MultiPolygon under even-odd
+ * with overlaps merged. `multiPolygonToSvgFragment` then emits a
+ * single `<path d="…" fill-rule="evenodd" fill="#…">` per layer.
+ *
+ * No raster step. Vertex coordinates come straight from the source
+ * Bezier flattening (chord error ≤ 0.05 design units), much tighter
+ * than the prior round-trip's ~1 px Douglas-Peucker tolerance.
  */
-export async function buildUnionedSvgString(vector: VectorData): Promise<string> {
-  const aspect = vector.naturalHeight / vector.naturalWidth;
-  const rasterW = EXPORT_RASTER_WIDTH;
-  const rasterH = Math.max(1, Math.round(rasterW * aspect));
-  const vb = parseViewBox(vector.viewBox);
-  const scaleX = vector.naturalWidth  / rasterW;
-  const scaleY = vector.naturalHeight / rasterH;
-
+export function buildUnionedSvgString(vector: VectorData): string {
   const fragments: string[] = [];
   for (const layer of vector.layers) {
-    const mask = await rasterizeLayerToBinaryMask(
-      layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight, rasterW, rasterH,
-    );
-    const path = maskToSvgPath(mask, rasterW, rasterH, {
-      fill: layer.colorHex,
-      scaleX,
-      scaleY,
-      offsetX: vb.x,
-      offsetY: vb.y,
-      simplifyEpsilonPx: 1,
-      minAreaPx: 4,
-    });
+    const mp = svgFragmentToMultiPolygon(layer.svgFragment);
+    if (mp.length === 0) continue;
+    const path = multiPolygonToSvgFragment(mp, layer.colorHex);
     if (path) fragments.push(path);
   }
 
@@ -49,8 +36,8 @@ ${fragments.join('\n')}
 }
 
 /** Trigger a browser download of the current design as an SVG file. */
-export async function downloadSvg(vector: VectorData, filenameHint?: string): Promise<void> {
-  const svgString = await buildUnionedSvgString(vector);
+export function downloadSvg(vector: VectorData, filenameHint?: string): void {
+  const svgString = buildUnionedSvgString(vector);
   const blob = new Blob([svgString], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

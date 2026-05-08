@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.9';
+export const CODE_VERSION = '2026-05-08.10';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Sweep test-only bitmap exports: delete alignmentRisk.ts, constrainedDistance.ts, morphology.ts (and their tests), redetectAlignmentRisks + rasterizeLayerMask in dfmAnalysis.ts, findMaskComponents in maskComponents.ts, erodeMask in maskOps.ts. Every dead chain whose only consumers were tests is gone.';
+  'SVG export polygon-native: buildUnionedSvgString uses svgFragmentToMultiPolygon + multiPolygonToSvgFragment directly (Clipper self-union merges per-layer overlaps). Drops the rasterize-then-marching-squares round-trip; deletes maskToPath.ts, rasterizeLayerToBinaryMask, renderSvgToCanvasTransparent, withInjectedStyle, MASK_ALPHA_THRESHOLD.';
