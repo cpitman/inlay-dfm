@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-08.8';
+export const CODE_VERSION = '2026-05-08.9';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'Drop dead Phase 1 per-layer rasterization + plugMaskForDfm + dead pocketMask/plugMask fields on overlayRebuildInputs. The polygon pipeline never read them; ~5-10 OffscreenCanvas allocations + EDT-equivalents per design analysis are gone.';
+  'Sweep test-only bitmap exports: delete alignmentRisk.ts, constrainedDistance.ts, morphology.ts (and their tests), redetectAlignmentRisks + rasterizeLayerMask in dfmAnalysis.ts, findMaskComponents in maskComponents.ts, erodeMask in maskOps.ts. Every dead chain whose only consumers were tests is gone.';

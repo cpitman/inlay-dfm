@@ -1,6 +1,5 @@
 import type { DFMSettings, GrainDirection, VectorData, AnalysisResult, SingleAnalysis, WoodAnalysis, AlignmentIssue, PerPresetAngleResult, PerPresetSingleSide, MachiningTimeMatrix } from '@/types';
-import { layerToStandaloneSvg, rasterizeLayerToBinaryMask, renderSvgToCanvas } from './svgLayers';
-import { detectAlignmentRisk } from './alignmentRisk';
+import { layerToStandaloneSvg, renderSvgToCanvas } from './svgLayers';
 import { CLEARANCE_BIT_MRR, CLEARANCE_BIT_OPTIONS, getVbitRates, VBIT_PRESET_ANGLES, VBIT_RATES } from './machiningRates';
 import { polygonMachiningTime, buildMachiningTimeMatrixPolygon } from './polygonMachiningTime';
 import { computePlugStockPolygon, computePlugStockUsageSqInPolygon } from './polygonPlugStock';
@@ -1296,69 +1295,6 @@ export interface LiteWoodAnalysis {
 
 export interface LiteAnalysisResult {
   woods: LiteWoodAnalysis[];
-}
-
-/**
- * Rasterize one layer's standalone SVG to a pocket mask at the given
- * canvas dimensions. Returns an empty mask if the layer isn't found
- * in `vector.layers`. Thin wrapper over the shared
- * `rasterizeLayerToBinaryMask` helper (transparent canvas + alpha
- * threshold) so adjacent layers' masks overlap consistently at
- * shared boundaries.
- */
-export async function rasterizeLayerMask(
-  vector: VectorData,
-  colorHex: string,
-  canvasW: number,
-  canvasH: number,
-): Promise<Uint8Array> {
-  const layer = vector.layers.find(l => l.colorHex === colorHex);
-  if (!layer) return new Uint8Array(canvasW * canvasH);
-  return rasterizeLayerToBinaryMask(
-    layer, vector.viewBox, vector.naturalWidth, vector.naturalHeight,
-    canvasW, canvasH,
-  );
-}
-
-/**
- * Re-run pairwise alignment-risk detection from a pre-rasterized mask
- * set. Pure function — no SVG rendering, no canvas allocation. Used
- * after fill modifies a layer to figure out which alignment issues
- * the modification eliminated, so extend doesn't fire on already-
- * resolved cases.
- *
- * Returns a map keyed by colorHex, whose value is the list of
- * alignment issues with later layers. Mirrors the orchestration in
- * Phase 2 of `runDfmAnalysis` but skips the dilation / clipping that
- * Phase 2 does for visual rendering (we don't render here).
- */
-export function redetectAlignmentRisks(
-  pocketMasksByColor: Map<string, Uint8Array>,
-  colorOrder: readonly string[],
-  canvasW: number,
-  canvasH: number,
-  alignThresholdPx: number,
-): Map<string, AlignmentIssue[]> {
-  const out = new Map<string, AlignmentIssue[]>();
-  for (const c of colorOrder) out.set(c, []);
-  for (let i = 0; i < colorOrder.length; i++) {
-    const a = pocketMasksByColor.get(colorOrder[i]);
-    if (!a) continue;
-    for (let j = i + 1; j < colorOrder.length; j++) {
-      const b = pocketMasksByColor.get(colorOrder[j]);
-      if (!b) continue;
-      const { affectedCount, totalBoundaryCount } = detectAlignmentRisk(
-        a, b, canvasW, canvasH, alignThresholdPx,
-      );
-      if (affectedCount > 0) {
-        out.get(colorOrder[i])!.push({
-          otherColorHex: colorOrder[j],
-          affectedPercent: totalBoundaryCount > 0 ? (affectedCount / totalBoundaryCount) * 100 : 0,
-        });
-      }
-    }
-  }
-  return out;
 }
 
 /**
