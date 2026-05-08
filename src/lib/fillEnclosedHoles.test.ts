@@ -33,6 +33,22 @@ const RED = '#ff0000';
 const BLUE = '#0000ff';
 
 describe('fillEnclosedHoles (polygon-native)', () => {
+  it('treats sub-bit-clearance uncovered as fully covered (numerical-artifact tolerance)', async () => {
+    // Hole is 50×50 at (25, 25). Later layer covers the hole at
+    // (25, 25)–(75, 75) but is shifted by 0.001 (= sub-precision)
+    // so multiPolygonDifference will leave a thin sliver.
+    // Without the tolerance check, the sliver gets offset by the
+    // hole-margin and triggers a phantom partial-fill. With the
+    // check, the eroded sliver is empty → full-fill.
+    const v = fixture([
+      { colorHex: RED,  svgFragment: squareWithHole(0, 0, 100, 100, { x: 25, y: 25, w: 50, h: 50 }) },
+      { colorHex: BLUE, svgFragment: squareWithHole(25.001, 25.001, 49.998, 49.998) },
+    ]);
+    const r = await fillEnclosedHoles(v, RED, /* designWidthInches */ 10);
+    expect(r.filledHoleCount).toBe(1);
+    expect(r.partiallyFilledHoleCount).toBe(0);
+  });
+
   it('fills a hole that is fully covered by a later layer', async () => {
     // Target (red): 100×100 square with a 20×20 hole at (40, 40).
     // Later (blue): 30×30 square at (35, 35) — encloses the hole.

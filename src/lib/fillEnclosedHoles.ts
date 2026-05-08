@@ -214,13 +214,33 @@ export async function fillEnclosedHoles(
     const uncoveredArea = multiPolygonArea(uncovered);
     const idx = holeIndex++;
 
-    if (multiPolygonIsEmpty(uncovered)) {
+    // Full-fill when `uncovered` is empty OR a sub-bit-clearance
+    // numerical sliver. Clipper's int-arithmetic boolean op may
+    // leave ≥3-vertex rings with effectively zero area along the
+    // boundary; growing those by `holeMarginUnits` would produce
+    // a phantom "danger zone" the partial-fill algorithm then
+    // tries to preserve, leaving the bit tracing nearly the
+    // original hole. The eroded-empty check rejects any uncovered
+    // region too narrow to fit a half-bit-clearance disk — = a
+    // gap the bit physically can't resolve, so treating it as
+    // covered is geometrically correct.
+    let fullyCovered = multiPolygonIsEmpty(uncovered);
+    if (!fullyCovered) {
+      const uncoveredEroded = multiPolygonOffset(
+        uncovered,
+        -holeMarginUnits / 2,
+        { joinType: 'round' },
+      );
+      fullyCovered = multiPolygonIsEmpty(uncoveredEroded);
+    }
+
+    if (fullyCovered) {
       fillRings.push(holeRing);
       filledHoleCount++;
       filledAreaSqUnits += holeArea;
       if (DEBUG_FILLS) {
         console.log(
-          `[fillHoles ${targetColorHex} h${idx}] FULL: holeArea=${holeArea.toFixed(2)} sq.u uncovered=0`,
+          `[fillHoles ${targetColorHex} h${idx}] FULL: holeArea=${holeArea.toFixed(2)} sq.u uncovered=${uncoveredArea.toFixed(4)}`,
         );
       }
       return true; // skip descending — full-fill absorbs nested geometry

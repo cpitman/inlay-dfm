@@ -15,8 +15,8 @@
  * was for. The description is informational; the version number is
  * what's load-bearing.
  */
-export const CODE_VERSION = '2026-05-07.17';
+export const CODE_VERSION = '2026-05-07.18';
 
 /** One-line description of the most recent change. Free-form. */
 export const CODE_VERSION_NOTE =
-  'fillEnclosedHoles: dev-mode per-hole decision logging (full / partial / massAdded). Use to diagnose why specific holes shifted between full-fill and partial-fill after the v.16 fill-rule fix.';
+  'fillEnclosedHoles: full-fill when uncovered erodes to empty under half bit-clearance — absorbs Clipper int-arithmetic numerical slivers that were getting amplified into phantom partial-fill danger zones';
